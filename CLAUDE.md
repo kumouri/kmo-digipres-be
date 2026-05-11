@@ -11,8 +11,7 @@ This is the **start** of the system. As of the initial commit, only the single-e
 ## Stack
 
 - **Spring Boot 3.5.6** on **Java 21** (toolchain pinned in `build.gradle`)
-- **Spring MVC** (servlet) at the moment, but the project is intended to go **reactive** end-to-end — `spring-boot-starter-data-mongodb-reactive` is on the classpath deliberately, and the controller/repository layers will migrate to WebFlux + `ReactiveMongoRepository` as the codebase grows (see "Reactive intent" below)
-- **MongoDB** via reactive starter; the lone existing `MongoRepository` (blocking) is a holdover from initial scaffolding and should be migrated
+- **Reactive end-to-end**: `spring-boot-starter-webflux` (Netty) on the web side, `spring-boot-starter-data-mongodb-reactive` with `ReactiveMongoRepository`, and reactive Resilience4j Spring Cloud Circuit Breaker on the classpath. All controllers return `Mono`/`Flux`; all repositories extend `ReactiveMongoRepository`; any blocking I/O (e.g. `Transport.send` in `EmailService`) is wrapped in `Mono.fromCallable(...).subscribeOn(Schedulers.boundedElastic())`. Do not introduce blocking patterns — see "Reactive conventions" below.
 - **Jakarta Mail** through a hand-rolled `Session` bean (`AngusConfig`) talking to ProtonMail SMTP — *not* `spring-boot-starter-mail`'s `JavaMailSender`
 - **Quartz** for scheduling (declared, not yet used)
 - **MapStruct 1.6.3** + **Lombok** as annotation processors. Order in `build.gradle` matters; don't reorder the `annotationProcessor` block without verifying MapStruct still generates implementations
@@ -58,7 +57,7 @@ Also note the **db name case mismatch**: `compose.yaml` sets `MONGO_INITDB_DATAB
 
 ## Architecture
 
-The codebase follows a layered Spring MVC structure under `com.kumouri.kmodigipresbe`:
+The codebase follows a layered Spring WebFlux structure under `com.kumouri.kmodigipresbe`:
 
 - `controller/` — REST entry points. `CommunicationController` is the only live one; `SchedulingController` is an empty stub.
 - `service/` — Business logic. `ContactService<T extends CommunicationRequest>` is the generic top-level interface; `EmailService` is its first implementation. The intent is one service per outbound channel (email, eventually SMS, calendar, etc.) all funneled through `initiateContact`.
@@ -68,24 +67,21 @@ The codebase follows a layered Spring MVC structure under `com.kumouri.kmodigipr
   - **DTOs** (`CommunicationDTO`, `SingleEmailCommunicationDTO`) — flat string-typed payloads coming in over HTTP
   - **Requests** (`CommunicationRequest`, `EmailCommunicationRequest`, `SingleEmailCommunicationRequest`) — internal types where `to`/`from` are already parsed `Contact` instances
   `RequestMapper` (MapStruct) is the boundary between them; a `default` method on the mapper turns email strings into `EmailContact` instances and is how `String → InternetAddress` parsing happens. Add new channel DTOs in pairs and extend `RequestMapper` accordingly.
-- `repository/` — Spring Data Mongo repositories. `MeetingRepository extends MongoRepository<Meeting, UUID>` today (blocking), but new repositories should extend `ReactiveMongoRepository` and `MeetingRepository` itself should be migrated when next touched. See "Reactive intent" below.
+- `repository/` — Reactive Spring Data Mongo repositories (`ReactiveMongoRepository<T, UUID>`). All new repositories should follow the same pattern.
 - `config/AngusConfig` — Provides the `jakarta.mail.Session` bean. **The ProtonMail SMTP password is currently hardcoded in source** (`AngusConfig.java:24`) — this needs to be externalized to `application.properties` / env vars / a secret store before any non-trivial work lands. Flag this in PR reviews; do not propagate the pattern.
 - `util/EmailUtil` — Static `String → InternetAddress` parser that wraps `AddressException` in `DigiPresBeException`.
 - `exceptions/DigiPresBeException` — App-wide `RuntimeException` carrying an `errorCode` and `httpStatusCode`. There is currently no `@ControllerAdvice` translating it to an HTTP response — exceptions will bubble out as 500s until one is added.
 
-### Reactive intent
+### Reactive conventions
 
-The owner intends this service to be reactive end-to-end (WebFlux + reactive Mongo + reactive Spring Cloud Circuit Breaker, which is already on the classpath). The current code does not reflect that yet:
-
-- `spring-boot-starter-web` (servlet) is on the classpath; `spring-boot-starter-webflux` is not. Switching the starter is a deliberate, breaking step — controllers will need to return `Mono`/`Flux` and the `@SpringBootApplication` will pick up Netty instead of Tomcat.
-- `MeetingRepository` extends the blocking `MongoRepository`.
-- `EmailService.sendSingleEmail` is fully blocking (it calls `Transport.send` directly inside the request thread, which is incompatible with a reactive controller and will need to be wrapped in `Mono.fromCallable(...).subscribeOn(Schedulers.boundedElastic())` once the controller goes reactive).
-
-When adding new code, default to reactive types and `ReactiveMongoRepository`. When touching existing blocking code, migrate it rather than extending the blocking pattern.
+- Controllers return `Mono`/`Flux`. `@RequestBody` parameters can be plain DTOs or `Mono<DTO>` — pick the plain form unless streaming or upstream-deferred validation is needed.
+- Repositories extend `ReactiveMongoRepository`.
+- **Any blocking I/O** (JDBC, `jakarta.mail.Transport.send`, blocking HTTP clients) must be wrapped in `Mono.fromCallable(...).subscribeOn(Schedulers.boundedElastic())`. `EmailService.sendSingleEmail` is the reference pattern. Never call blocking code directly on a Netty event-loop thread.
+- The base path comes from `spring.webflux.base-path=/api` in `application.properties`. The servlet-style `server.servlet.context-path` is silently ignored under WebFlux — do not use it.
 
 ### REST conventions
 
-Server runs on port **8080** with context path **`/api`**, so `CommunicationController`'s `/communication/singleEmail` resolves to `POST /api/communication/singleEmail`. The controller currently returns `boolean` directly — there's no envelope/response-object convention yet.
+Server runs on port **8080** with base path **`/api`** (via `spring.webflux.base-path`), so `CommunicationController`'s `/communication/singleEmail` resolves to `POST /api/communication/singleEmail`. The controller currently returns `Mono<Boolean>` directly — there's no envelope/response-object convention yet.
 
 ## Testing
 
