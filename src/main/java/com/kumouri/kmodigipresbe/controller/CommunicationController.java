@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Mono;
 
 @RequiredArgsConstructor
 @RestController
@@ -18,7 +19,7 @@ public class CommunicationController {
     private final RequestMapper requestMapper;
 
     @PostMapping("/singleEmail")
-    public boolean sendEmail(@RequestBody SingleEmailCommunicationDTO request) {
+    public Mono<Boolean> sendEmail(@RequestBody SingleEmailCommunicationDTO request) {
         SingleEmailCommunicationRequest singleEmailCommunicationRequest = requestMapper.toSingleEmailCommunicationRequest(request);
         return emailService.sendSingleEmail(singleEmailCommunicationRequest);
     }
