@@ -2,6 +2,7 @@ package com.kumouri.kmodigipresbe.module.homeservices.integration.quickbooks;
 
 import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -23,6 +24,7 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/public/integrations/quickbooks")
+@ConditionalOnProperty(prefix = "kmosf.integrations.quickbooks", name = "enabled")
 @RequiredArgsConstructor
 public class QuickBooksWebhookController {
 

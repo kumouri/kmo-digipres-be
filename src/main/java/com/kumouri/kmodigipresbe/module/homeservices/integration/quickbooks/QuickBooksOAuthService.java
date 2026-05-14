@@ -9,7 +9,6 @@ import com.kumouri.kmodigipresbe.tenancy.TenantContext;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
-import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.reactive.function.BodyInserters;
@@ -55,7 +54,6 @@ import java.util.UUID;
  * {@code 2812} (state signature invalid).
  */
 @Slf4j
-@Service
 public class QuickBooksOAuthService {
 
     public static final String PROVIDER = "quickbooks";

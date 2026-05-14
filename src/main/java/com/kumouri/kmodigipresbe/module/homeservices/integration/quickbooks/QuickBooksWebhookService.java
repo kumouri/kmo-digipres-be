@@ -13,7 +13,6 @@ import com.kumouri.kmodigipresbe.tenancy.TenantContext;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -39,7 +38,6 @@ import java.util.UUID;
  * {@code 2813} (payload malformed).
  */
 @Slf4j
-@Service
 @RequiredArgsConstructor
 public class QuickBooksWebhookService {
 

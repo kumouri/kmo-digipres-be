@@ -146,10 +146,15 @@ class QuickBooksInvoiceSyncTest {
                 wireMock.verify(postRequestedFor(
                         urlPathEqualTo("/v3/company/" + realmId + "/invoice"))));
 
-        ArgumentCaptor<Invoice> savedCap = ArgumentCaptor.forClass(Invoice.class);
-        verify(invoices, atLeastOnce()).save(savedCap.capture());
-        Invoice saved = savedCap.getValue();
-        assertThat(saved.getExternalRefs()).containsEntry("quickbooks", "qbo-inv-42");
+        // Wait for the stamp step (which calls invoices.save) to complete.
+        // The chain continues past the WireMock POST onto extractQboInvoiceId
+        // and then stamp; allow up to 5s for this to land.
+        Awaitility.await().atMost(5, TimeUnit.SECONDS).untilAsserted(() -> {
+            ArgumentCaptor<Invoice> savedCap = ArgumentCaptor.forClass(Invoice.class);
+            verify(invoices, atLeastOnce()).save(savedCap.capture());
+            assertThat(savedCap.getValue().getExternalRefs())
+                    .containsEntry("quickbooks", "qbo-inv-42");
+        });
     }
 
     @Test

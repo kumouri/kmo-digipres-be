@@ -20,7 +20,6 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
-import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.Disposable;
@@ -67,7 +66,6 @@ import java.util.UUID;
  * failed), {@code 2802} (invoice push failed).
  */
 @Slf4j
-@Component
 public class QuickBooksInvoiceSync {
 
     private static final String CB_NAME = "quickbooks-invoice";
@@ -175,7 +173,11 @@ public class QuickBooksInvoiceSync {
         Map<String, Object> body = toQboInvoicePayload(inv);
         CircuitBreaker breaker = breakers.circuitBreaker(CB_NAME);
         WebClient client = webClientBuilder.baseUrl(props.getApiBaseUrl()).build();
-        return client.post()
+        // Cache the response body before the retry/breaker operators see the
+        // chain — avoids "client response body has been released" when retry
+        // ends up re-subscribing to a stream whose source body is already gone.
+        // Each retry attempt is a fresh Mono.defer.
+        Mono<String> attempt = Mono.defer(() -> client.post()
                 .uri("/v3/company/{realmId}/invoice", realmId)
                 .header("Authorization", "Bearer " + accessToken)
                 .header("Accept", "application/json")
@@ -184,12 +186,15 @@ public class QuickBooksInvoiceSync {
                 .retrieve()
                 .bodyToMono(String.class)
                 .timeout(Duration.ofSeconds(10))
+                .cache());
+        return attempt
+                .flatMap(this::extractQboInvoiceId)
                 .transformDeferred(CircuitBreakerOperator.of(breaker))
                 .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
                         .maxBackoff(Duration.ofSeconds(4))
                         .filter(t -> !(t instanceof io.github.resilience4j.circuitbreaker.CallNotPermittedException)
-                                && !(t instanceof WebClientResponseException.Unauthorized)))
-                .flatMap(this::extractQboInvoiceId)
+                                && !(t instanceof WebClientResponseException.Unauthorized)
+                                && !(t instanceof DigiPresBeException)))
                 .onErrorMap(err -> {
                     if (err instanceof DigiPresBeException) return err;
                     return new DigiPresBeException(

@@ -5,6 +5,7 @@ import com.kumouri.kmodigipresbe.integration.IntegrationConnection;
 import com.kumouri.kmodigipresbe.tenancy.RoleGuard;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -32,6 +33,7 @@ import java.util.Map;
  * carries no JWT.
  */
 @RestController
+@ConditionalOnProperty(prefix = "kmosf.integrations.quickbooks", name = "enabled")
 @RequiredArgsConstructor
 public class QuickBooksOAuthController {
 
