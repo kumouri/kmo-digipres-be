@@ -11,6 +11,7 @@ import org.springframework.data.annotation.Version;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
@@ -44,6 +45,16 @@ public class Tenant {
     // of these (lowercased). Ignored for INVITE_ONLY and OPEN.
     @Builder.Default
     private Set<String> allowedSignupDomains = Set.of();
+
+    /**
+     * Per-tenant monthly AI spending cap in USD. Phase 9f default is
+     * {@link BigDecimal#ZERO} — AI is opt-in only; tenants explicitly raise this
+     * to enable AI features. {@code AiUsageRecorder} checks the current month's
+     * spend against this cap before each AI call and rejects with
+     * {@code errorCode=1200, status=429} when the cap is exhausted.
+     */
+    @Builder.Default
+    private BigDecimal aiBudgetUsd = BigDecimal.ZERO;
 
     @Version
     private Long version;
