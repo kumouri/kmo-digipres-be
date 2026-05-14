@@ -7,12 +7,16 @@ import com.kumouri.kmodigipresbe.repository.SequenceEnrollmentRepository;
 import com.kumouri.kmodigipresbe.repository.SequenceRepository;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.mongodb.core.ReactiveMongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -21,6 +25,7 @@ public class SequenceCrudService {
 
     private final SequenceRepository sequences;
     private final SequenceEnrollmentRepository enrollments;
+    private final ReactiveMongoTemplate mongo;
 
     public Flux<Sequence> findAll() {
         return sequences.findAll();
@@ -62,14 +67,46 @@ public class SequenceCrudService {
                 })
                 .flatMap(tenantId -> enrollments
                         .findByTenantIdAndSequenceIdAndContactId(tenantId, sequenceId, contactId)
-                        .switchIfEmpty(Mono.defer(() -> enrollments.save(SequenceEnrollment.builder()
-                                .sequenceId(sequenceId)
-                                .contactId(contactId)
-                                .enrolledAt(Instant.now())
-                                .currentStepIndex(0)
-                                .status(SequenceEnrollment.Status.ACTIVE)
-                                .completedSteps(new ArrayList<>())
-                                .build()))));
+                        .switchIfEmpty(Mono.defer(() -> loadContactEmail(contactId)
+                                .defaultIfEmpty("")
+                                .flatMap(email -> enrollments.save(SequenceEnrollment.builder()
+                                        .sequenceId(sequenceId)
+                                        .contactId(contactId)
+                                        .contactEmail(email.isBlank() ? null : email)
+                                        .enrolledAt(Instant.now())
+                                        .currentStepIndex(0)
+                                        .status(SequenceEnrollment.Status.ACTIVE)
+                                        .completedSteps(new ArrayList<>())
+                                        .build())))));
+    }
+
+    /**
+     * Snapshot the contact's first email address at enroll time. We read raw BSON
+     * because EmailContact's embedded {@code jakarta.mail.internet.InternetAddress}
+     * doesn't round-trip cleanly through the POJO codec.
+     */
+    private Mono<String> loadContactEmail(UUID contactId) {
+        Query q = new Query(Criteria.where("_id").is(contactId));
+        q.fields().include("emails");
+        return mongo.findOne(q, org.bson.Document.class, "contacts")
+                .mapNotNull(SequenceCrudService::extractFirstEmailAddress);
+    }
+
+    @SuppressWarnings("unchecked")
+    static String extractFirstEmailAddress(org.bson.Document doc) {
+        if (doc == null) return null;
+        Object rawEmails = doc.get("emails");
+        if (!(rawEmails instanceof List<?> emails) || emails.isEmpty()) return null;
+        Object first = emails.get(0);
+        if (!(first instanceof org.bson.Document entry)) return null;
+        String flat = entry.getString("address");
+        if (flat != null && !flat.isBlank()) return flat;
+        Object nested = entry.get("email");
+        if (nested instanceof org.bson.Document emailDoc) {
+            String address = emailDoc.getString("address");
+            if (address != null && !address.isBlank()) return address;
+        }
+        return null;
     }
 
     public Mono<Void> unenroll(UUID sequenceId, UUID contactId) {

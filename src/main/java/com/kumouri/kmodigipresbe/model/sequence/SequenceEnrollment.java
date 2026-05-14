@@ -61,6 +61,15 @@ public class SequenceEnrollment implements Auditable {
     /** Postmark MessageID of the most recent EMAIL_SEND step's send. */
     private String lastMessageId;
 
+    /**
+     * Denormalised at enroll time so the engine's EMAIL_SEND doesn't have to
+     * round-trip the Contact's {@code emails} list (the embedded
+     * {@code jakarta.mail.internet.InternetAddress} doesn't deserialise cleanly
+     * through Spring Data Mongo's POJO codec in every test fixture). Re-enroll a
+     * contact whose primary email address changes.
+     */
+    private String contactEmail;
+
     @Version
     private Long version;
 

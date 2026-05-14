@@ -123,6 +123,7 @@ class SequenceEngineIT {
                 .block();
         SequenceEnrollment e = enrollments.save(SequenceEnrollment.builder()
                         .sequenceId(seq.getId()).contactId(c.getId())
+                        .contactEmail(c.getEmails().get(0).asString())
                         .enrolledAt(Instant.now()).currentStepIndex(0)
                         .status(SequenceEnrollment.Status.ACTIVE)
                         .completedSteps(new ArrayList<>())
@@ -165,6 +166,7 @@ class SequenceEngineIT {
                 .block();
         SequenceEnrollment e = enrollments.save(SequenceEnrollment.builder()
                         .sequenceId(seq.getId()).contactId(c.getId())
+                        .contactEmail(c.getEmails().get(0).asString())
                         .enrolledAt(Instant.now()).currentStepIndex(0)
                         .status(SequenceEnrollment.Status.ACTIVE)
                         .completedSteps(new ArrayList<>())
@@ -222,6 +224,7 @@ class SequenceEngineIT {
                 .block();
         SequenceEnrollment e = enrollments.save(SequenceEnrollment.builder()
                         .sequenceId(seq.getId()).contactId(c.getId())
+                        .contactEmail(c.getEmails().get(0).asString())
                         .enrolledAt(Instant.now()).currentStepIndex(0)
                         .status(SequenceEnrollment.Status.ACTIVE)
                         .completedSteps(new ArrayList<>())
@@ -273,6 +276,7 @@ class SequenceEngineIT {
                 .block();
         enrollments.save(SequenceEnrollment.builder()
                         .sequenceId(seq.getId()).contactId(c.getId())
+                        .contactEmail(c.getEmails().get(0).asString())
                         .enrolledAt(Instant.now()).currentStepIndex(0)
                         .status(SequenceEnrollment.Status.ACTIVE)
                         .completedSteps(new ArrayList<>())

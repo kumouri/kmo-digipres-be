@@ -19,6 +19,8 @@ import org.springframework.data.mongodb.core.ReactiveMongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.scheduling.annotation.Scheduled;
+// Phase 9d: SequenceEngine reads enrollment.contactEmail (denormalised at enroll
+// time by SequenceCrudService) rather than re-loading the Contact entity.
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
@@ -152,26 +154,24 @@ public class SequenceEngine {
     }
 
     private Mono<Void> handleEmailSend(SequenceStep step, SequenceEnrollment enrollment) {
-        return loadRecipient(enrollment.getContactId())
-                .flatMap(toAddress -> {
-                    TransactionalSendRequest req = new TransactionalSendRequest(
-                            List.of(toAddress),
-                            step.getEmailFrom() != null ? step.getEmailFrom() : defaultFrom,
-                            step.getEmailSubject(),
-                            step.getEmailHtmlBody(),
-                            step.getEmailTextBody(),
-                            step.getEmailTag(),
-                            Map.of("kmosf_contact_id", enrollment.getContactId().toString()));
-                    return transactionalEmail.send(req)
-                            .doOnNext(res -> enrollment.setLastMessageId(res.messageId()))
-                            .then(markStepCompleteAndAdvance(enrollment, step.getStepIndex()));
-                })
-                .switchIfEmpty(Mono.defer(() -> {
-                    log.warn("Enrollment {} contact {} has no email — exiting sequence",
-                            enrollment.getId(), enrollment.getContactId());
-                    enrollment.setStatus(SequenceEnrollment.Status.EXITED);
-                    return enrollments.save(enrollment).then();
-                }));
+        String toAddress = enrollment.getContactEmail();
+        if (toAddress == null || toAddress.isBlank()) {
+            log.warn("Enrollment {} contact {} has no contactEmail — exiting sequence",
+                    enrollment.getId(), enrollment.getContactId());
+            enrollment.setStatus(SequenceEnrollment.Status.EXITED);
+            return enrollments.save(enrollment).then();
+        }
+        TransactionalSendRequest req = new TransactionalSendRequest(
+                List.of(toAddress),
+                step.getEmailFrom() != null ? step.getEmailFrom() : defaultFrom,
+                step.getEmailSubject(),
+                step.getEmailHtmlBody(),
+                step.getEmailTextBody(),
+                step.getEmailTag(),
+                Map.of("kmosf_contact_id", enrollment.getContactId().toString()));
+        return transactionalEmail.send(req)
+                .doOnNext(res -> enrollment.setLastMessageId(res.messageId()))
+                .then(markStepCompleteAndAdvance(enrollment, step.getStepIndex()));
     }
 
     private Mono<Void> handleWait(SequenceStep step, SequenceEnrollment enrollment) {
@@ -242,38 +242,6 @@ public class SequenceEngine {
         return enrollments.save(enrollment).then();
     }
 
-    private Mono<String> loadRecipient(UUID contactId) {
-        // Read the raw BSON document — EmailContact embeds
-        // {@code jakarta.mail.internet.InternetAddress}, which Spring Data Mongo's POJO
-        // codec doesn't always reconstruct cleanly. Pull the address straight out.
-        Query q = new Query(Criteria.where("_id").is(contactId));
-        q.fields().include("emails");
-        return mongo.findOne(q, org.bson.Document.class, "contacts")
-                .doOnNext(d -> log.debug("loadRecipient {} -> {}", contactId, d == null ? "null" : d.toJson()))
-                .mapNotNull(SequenceEngine::extractFirstEmailAddress);
-    }
-
-    @SuppressWarnings("unchecked")
-    private static String extractFirstEmailAddress(org.bson.Document doc) {
-        if (doc == null) return null;
-        Object rawEmails = doc.get("emails");
-        if (!(rawEmails instanceof java.util.List<?> emails) || emails.isEmpty()) return null;
-        Object first = emails.get(0);
-        if (!(first instanceof org.bson.Document entry)) return null;
-        // Two storage shapes seen in the wild for EmailContact (a record wrapping
-        // InternetAddress): either {address, personal} flat — newer codec — or
-        // {email: {address, personal}} nested under the record component name.
-        // Probe both before giving up.
-        String flat = entry.getString("address");
-        if (flat != null && !flat.isBlank()) return flat;
-        Object nested = entry.get("email");
-        if (nested instanceof org.bson.Document emailDoc) {
-            String address = emailDoc.getString("address");
-            if (address != null && !address.isBlank()) return address;
-        }
-        log.warn("loadRecipient: unexpected emails[0] shape: {}", entry.toJson());
-        return null;
-    }
 
     private static Duration parseDuration(String iso) {
         if (iso == null || iso.isBlank()) return Duration.ZERO;
