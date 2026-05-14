@@ -1,9 +1,10 @@
 package com.kumouri.kmodigipresbe.module.fieldservice.service;
 
+import com.kumouri.kmodigipresbe.config.FileStorageProperties;
 import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
-import com.kumouri.kmodigipresbe.module.fieldservice.config.FieldServiceProperties;
 import com.kumouri.kmodigipresbe.module.fieldservice.model.Capture;
 import com.kumouri.kmodigipresbe.module.fieldservice.repository.CaptureRepository;
+import com.kumouri.kmodigipresbe.service.storage.FileStorageService;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Flux;
@@ -18,14 +19,14 @@ public class CaptureService {
 
     private final CaptureRepository captures;
     private final FileStorageService storage;
-    private final FieldServiceProperties props;
+    private final FileStorageProperties props;
 
     public Mono<FileStorageService.Presigned> presignUpload(UUID workOrderId,
                                                             String contentType,
                                                             String suffix) {
         return TenantContextHolder.required().map(ctx -> storage.presignUpload(
                 ctx.tenantId(),
-                workOrderId,
+                "work-orders/" + workOrderId,
                 contentType,
                 suffix,
                 Duration.ofSeconds(props.uploadTtlSeconds())));

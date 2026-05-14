@@ -1,9 +1,8 @@
-package com.kumouri.kmodigipresbe.module.fieldservice.service;
+package com.kumouri.kmodigipresbe.service.storage;
 
+import com.kumouri.kmodigipresbe.config.FileStorageProperties;
 import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
-import com.kumouri.kmodigipresbe.module.fieldservice.config.FieldServiceProperties;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
@@ -18,25 +17,19 @@ import java.time.Duration;
 import java.util.UUID;
 
 /**
- * S3-compatible presigner. Works against AWS S3, Cloudflare R2, MinIO etc. — just
- * point {@code kmosf.files.endpoint} at the right URL (leave blank for AWS).
+ * S3 SDK v2 presigner-backed impl. Same code path for AWS S3, Cloudflare R2,
+ * MinIO — set {@code kmosf.files.endpoint} for the non-AWS targets.
  *
- * <p>Object keys live under {@code tenants/<tenantId>/work-orders/<workOrderId>/<random>.<suffix>}
- * — tenant-prefixed so a misconfigured bucket policy still keeps tenants apart
- * at the object-key level. Presign TTL is configurable via
- * {@code kmosf.files.upload-ttl-seconds}, default 10 minutes.
- *
- * <p>Presigning itself is a synchronous hash + signature operation, not network
- * IO. Safe to call from a reactive handler without {@code subscribeOn}.
+ * <p>Presigning is a synchronous hash + signature (no network IO), safe to call
+ * directly from a reactive handler.
  */
-@Slf4j
 @RequiredArgsConstructor
 public class S3FileStorageService implements FileStorageService {
 
     private final S3Presigner presigner;
-    private final FieldServiceProperties props;
+    private final FileStorageProperties props;
 
-    public static S3FileStorageService create(FieldServiceProperties props) {
+    public static S3FileStorageService create(FileStorageProperties props) {
         S3Presigner.Builder builder = S3Presigner.builder()
                 .region(Region.of(props.region()));
         if (props.endpoint() != null && !props.endpoint().isBlank()) {
@@ -50,14 +43,13 @@ public class S3FileStorageService implements FileStorageService {
     }
 
     @Override
-    public Presigned presignUpload(UUID tenantId, UUID workOrderId, String contentType,
+    public Presigned presignUpload(UUID tenantId, String partition, String contentType,
                                    String suffix, Duration ttl) {
-        if (props.bucket() == null || props.bucket().isBlank()) {
-            throw new DigiPresBeException(
-                    "kmosf.files.bucket is not configured", 1310, 503);
-        }
-        String key = String.format("tenants/%s/work-orders/%s/%s%s",
-                tenantId, workOrderId, UUID.randomUUID(),
+        requireBucket();
+        String key = String.format("tenants/%s/%s/%s%s",
+                tenantId,
+                partition == null ? "misc" : partition,
+                UUID.randomUUID(),
                 suffix == null || suffix.isBlank() ? "" : "." + suffix);
         PutObjectRequest put = PutObjectRequest.builder()
                 .bucket(props.bucket())
@@ -74,10 +66,7 @@ public class S3FileStorageService implements FileStorageService {
 
     @Override
     public String presignDownload(UUID tenantId, String storageRef, Duration ttl) {
-        if (props.bucket() == null || props.bucket().isBlank()) {
-            throw new DigiPresBeException(
-                    "kmosf.files.bucket is not configured", 1310, 503);
-        }
+        requireBucket();
         String prefix = "tenants/" + tenantId + "/";
         if (!storageRef.startsWith(prefix)) {
             throw new DigiPresBeException(
@@ -92,5 +81,12 @@ public class S3FileStorageService implements FileStorageService {
                 .getObjectRequest(get)
                 .build();
         return presigner.presignGetObject(req).url().toString();
+    }
+
+    private void requireBucket() {
+        if (props.bucket() == null || props.bucket().isBlank()) {
+            throw new DigiPresBeException(
+                    "kmosf.files.bucket is not configured", 1310, 503);
+        }
     }
 }
