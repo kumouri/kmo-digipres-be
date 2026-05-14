@@ -1,6 +1,5 @@
-package com.kumouri.kmodigipresbe.model.meeting;
+package com.kumouri.kmodigipresbe.model.tenant;
 
-import com.kumouri.kmodigipresbe.tenancy.TenantScoped;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -9,37 +8,32 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.annotation.Version;
-import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.util.Set;
 import java.util.UUID;
 
-@Document("meetings")
-@CompoundIndex(name = "tenant_start_idx", def = "{ 'tenantId': 1, 'start': 1 }")
+@Document("tenants")
 @Data
 @Builder(toBuilder = true)
 @NoArgsConstructor
 @AllArgsConstructor
-public class Meeting implements TenantScoped {
+public class Tenant {
     @Id
     private UUID id;
 
-    @Indexed
-    private UUID tenantId;
+    @Indexed(unique = true)
+    private String slug;
 
-    private String name;
-    private String description;
-    private String location;
-    private LocalDateTime start;
-    private LocalDateTime end;
-    private boolean allDay;
+    private String displayName;
 
-    private UUID organizerContactId;
-    private Set<UUID> attendeeContactIds;
+    @Builder.Default
+    private Set<String> enabledModules = Set.of();
+
+    @Builder.Default
+    private TenantStatus status = TenantStatus.ACTIVE;
 
     @Version
     private Long version;
@@ -49,4 +43,6 @@ public class Meeting implements TenantScoped {
 
     @LastModifiedDate
     private Instant updatedAt;
+
+    public enum TenantStatus { ACTIVE, SUSPENDED, ARCHIVED }
 }

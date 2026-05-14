@@ -1,4 +1,4 @@
-package com.kumouri.kmodigipresbe.model.meeting;
+package com.kumouri.kmodigipresbe.model.user;
 
 import com.kumouri.kmodigipresbe.tenancy.TenantScoped;
 import lombok.AllArgsConstructor;
@@ -14,32 +14,34 @@ import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.util.Set;
 import java.util.UUID;
 
-@Document("meetings")
-@CompoundIndex(name = "tenant_start_idx", def = "{ 'tenantId': 1, 'start': 1 }")
+@Document("users")
+@CompoundIndex(name = "tenant_email_idx", def = "{ 'tenantId': 1, 'email': 1 }", unique = true)
 @Data
 @Builder(toBuilder = true)
 @NoArgsConstructor
 @AllArgsConstructor
-public class Meeting implements TenantScoped {
+public class User implements TenantScoped {
+
     @Id
     private UUID id;
 
-    @Indexed
     private UUID tenantId;
 
-    private String name;
-    private String description;
-    private String location;
-    private LocalDateTime start;
-    private LocalDateTime end;
-    private boolean allDay;
+    @Indexed(unique = true)
+    private String email;
 
-    private UUID organizerContactId;
-    private Set<UUID> attendeeContactIds;
+    private String passwordHash;
+
+    private String displayName;
+
+    @Builder.Default
+    private Set<String> roles = Set.of("STAFF");
+
+    @Builder.Default
+    private UserStatus status = UserStatus.ACTIVE;
 
     @Version
     private Long version;
@@ -49,4 +51,6 @@ public class Meeting implements TenantScoped {
 
     @LastModifiedDate
     private Instant updatedAt;
+
+    public enum UserStatus { ACTIVE, DISABLED }
 }
