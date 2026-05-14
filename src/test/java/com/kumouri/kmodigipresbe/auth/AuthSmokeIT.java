@@ -30,6 +30,12 @@ class AuthSmokeIT {
 
     @BeforeEach
     void seed() {
+        // Reuse a single Mongo container across all *IT classes, so wipe the
+        // collections we touch before each test to avoid colliding on the
+        // unique email index when the next test re-inserts smoke@example.test.
+        users.deleteAll().block();
+        tenants.deleteAll().block();
+
         UUID tid = UUID.randomUUID();
         tenants.save(Tenant.builder()
                 .id(tid).slug("smoke-" + tid).displayName("Smoke")

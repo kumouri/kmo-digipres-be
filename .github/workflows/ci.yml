@@ -27,15 +27,8 @@ jobs:
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v4
 
-      # Compile + unit tests only. The customFieldValidator/OAuth bean-init
-      # blockers are fixed in this PR, but two further pre-existing *IT
-      # failures surfaced once context init succeeded — Spring Data Mongo
-      # can't autogenerate UUID @Id (TenantIsolationIT, CustomFieldValidationIT)
-      # and AuthSmokeIT lacks @BeforeEach cleanup (dup-key on smoke@example.test).
-      # Those need their own followup. Re-enable by dropping the --tests filter
-      # once both are fixed.
-      - name: ./gradlew compile + unit tests
-        run: ./gradlew compileJava compileTestJava test --tests '*Test' --no-daemon --stacktrace
+      - name: ./gradlew build
+        run: ./gradlew build --no-daemon --stacktrace
         env:
           TESTCONTAINERS_RYUK_DISABLED: 'true'
 
