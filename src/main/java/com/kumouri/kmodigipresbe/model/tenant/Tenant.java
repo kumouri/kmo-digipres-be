@@ -35,6 +35,16 @@ public class Tenant {
     @Builder.Default
     private TenantStatus status = TenantStatus.ACTIVE;
 
+    // Client-portal sign-up policy. INVITE_ONLY is the safe default — a brand-new
+    // OAuth sign-in is rejected unless there is a matching PortalInvitation.
+    @Builder.Default
+    private ClientSignupPolicy clientSignupPolicy = ClientSignupPolicy.INVITE_ONLY;
+
+    // When clientSignupPolicy = OPEN_DOMAIN, the email's domain must match one
+    // of these (lowercased). Ignored for INVITE_ONLY and OPEN.
+    @Builder.Default
+    private Set<String> allowedSignupDomains = Set.of();
+
     @Version
     private Long version;
 
@@ -45,4 +55,6 @@ public class Tenant {
     private Instant updatedAt;
 
     public enum TenantStatus { ACTIVE, SUSPENDED, ARCHIVED }
+
+    public enum ClientSignupPolicy { INVITE_ONLY, OPEN_DOMAIN, OPEN }
 }

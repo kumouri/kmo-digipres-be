@@ -37,8 +37,12 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-mail'
     implementation 'org.springframework.boot:spring-boot-starter-quartz'
     implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
     implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
+    // WebAuthn / passkey support. Used directly rather than Spring Security's reactive
+    // WebAuthn configurer, which is too new to rely on in 6.5.x — controller-level path.
+    implementation 'com.webauthn4j:webauthn4j-core:0.31.5.RELEASE'
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
     implementation 'io.micrometer:micrometer-tracing-bridge-brave'
 //    implementation 'org.apache.kafka:kafka-streams'
@@ -76,6 +80,7 @@ dependencies {
     testImplementation 'org.testcontainers:kafka'
     testImplementation 'org.testcontainers:mongodb'
     testImplementation 'com.tngtech.archunit:archunit-junit5:1.3.0'
+    testImplementation 'org.wiremock:wiremock-standalone:3.9.2'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
