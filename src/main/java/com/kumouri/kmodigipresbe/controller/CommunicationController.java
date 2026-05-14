@@ -4,13 +4,16 @@ import com.kumouri.kmodigipresbe.model.activity.Activity;
 import com.kumouri.kmodigipresbe.model.activity.ActivityDirection;
 import com.kumouri.kmodigipresbe.model.activity.ActivityType;
 import com.kumouri.kmodigipresbe.model.activity.SubjectType;
+import com.kumouri.kmodigipresbe.model.request.SendTemplateRequest;
 import com.kumouri.kmodigipresbe.model.request.SingleEmailCommunicationDTO;
 import com.kumouri.kmodigipresbe.model.request.SingleEmailCommunicationRequest;
 import com.kumouri.kmodigipresbe.repository.ContactRepository;
 import com.kumouri.kmodigipresbe.service.ActivityCrudService;
 import com.kumouri.kmodigipresbe.service.EmailService;
+import com.kumouri.kmodigipresbe.service.template.TemplatedEmailService;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
 import com.kumouri.kmodigipresbe.util.RequestMapper;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -31,6 +34,7 @@ public class CommunicationController {
     private final RequestMapper requestMapper;
     private final ContactRepository contacts;
     private final ActivityCrudService activities;
+    private final TemplatedEmailService templatedEmail;
 
     @PostMapping("/singleEmail")
     public Mono<Boolean> sendEmail(@RequestBody SingleEmailCommunicationDTO request) {
@@ -40,6 +44,11 @@ public class CommunicationController {
                     if (!Boolean.TRUE.equals(sent)) return Mono.just(false);
                     return logToTimeline(parsed).thenReturn(true);
                 });
+    }
+
+    @PostMapping("/sendTemplate")
+    public Mono<Boolean> sendTemplate(@Valid @RequestBody SendTemplateRequest request) {
+        return templatedEmail.send(request);
     }
 
     private Mono<Activity> logToTimeline(SingleEmailCommunicationRequest req) {
