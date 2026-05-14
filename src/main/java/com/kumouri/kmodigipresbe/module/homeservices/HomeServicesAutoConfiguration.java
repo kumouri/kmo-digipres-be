@@ -1,11 +1,16 @@
 package com.kumouri.kmodigipresbe.module.homeservices;
 
+import com.kumouri.kmodigipresbe.audit.AuditEventWriter;
+import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
 import com.kumouri.kmodigipresbe.extension.ModuleAutoConfigurationSupport;
 import com.kumouri.kmodigipresbe.extension.ModuleDefinition;
 import com.kumouri.kmodigipresbe.module.fieldservice.FieldServiceAutoConfiguration;
 import com.kumouri.kmodigipresbe.module.fieldservice.service.WorkOrderService;
+import com.kumouri.kmodigipresbe.module.homeservices.repository.EquipmentRepository;
 import com.kumouri.kmodigipresbe.module.homeservices.repository.MaintenanceVisitRepository;
 import com.kumouri.kmodigipresbe.module.homeservices.repository.ServiceAgreementRepository;
+import com.kumouri.kmodigipresbe.module.homeservices.service.DispatchBoardService;
+import com.kumouri.kmodigipresbe.module.homeservices.service.EquipmentService;
 import com.kumouri.kmodigipresbe.module.homeservices.service.MaintenanceVisitService;
 import com.kumouri.kmodigipresbe.module.homeservices.service.ServiceAgreementSchedulerService;
 import com.kumouri.kmodigipresbe.module.homeservices.service.ServiceAgreementService;
@@ -14,6 +19,7 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
+import org.springframework.data.mongodb.core.ReactiveMongoOperations;
 
 import java.time.Clock;
 import java.util.List;
@@ -37,12 +43,13 @@ import java.util.List;
  *
  * <p>Per-PR build-out within Phase 10:
  * <ul>
- *   <li>10a: entities, repositories, stub controllers with module gating.</li>
- *   <li><strong>10b (this PR):</strong> {@code ServiceAgreementSchedulerService}
+ *   <li>10a (shipped): entities, repositories, stub controllers with module gating.</li>
+ *   <li><strong>10b (this PR):</strong> {@link ServiceAgreementSchedulerService}
  *       + agreement/visit services + real controllers. Materialization of
  *       {@code MaintenanceVisit}s from the agreement's RFC 5545 RRULE (90-day
  *       window); dispatch into {@code WorkOrder}.</li>
- *   <li>10c: {@code EquipmentService} (CRUD + warranty scan) + {@code DispatchBoardService}.</li>
+ *   <li>10c (shipped): {@link EquipmentService} (CRUD + warranty scan emitting
+ *       {@code EQUIPMENT_WARRANTY_EXPIRING}) and {@link DispatchBoardService}.</li>
  *   <li>10d: QuickBooks Online OAuth + invoice sync.</li>
  *   <li>10e: on-the-way SMS automation + public service-request widget.</li>
  * </ul>
@@ -91,5 +98,18 @@ public class HomeServicesAutoConfiguration {
             MaintenanceVisitRepository visits,
             WorkOrderService workOrders) {
         return new MaintenanceVisitService(visits, workOrders);
+    }
+
+    @Bean
+    public EquipmentService equipmentService(EquipmentRepository equipment,
+                                             ReactiveMongoOperations mongo,
+                                             AuditEventWriter auditor,
+                                             DomainEventPublisher events) {
+        return new EquipmentService(equipment, mongo, auditor, events);
+    }
+
+    @Bean
+    public DispatchBoardService dispatchBoardService(ReactiveMongoOperations mongo) {
+        return new DispatchBoardService(mongo);
     }
 }
