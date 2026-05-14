@@ -49,6 +49,7 @@ public class ContactCrudService {
             if (patch.getPhones() != null) existing.setPhones(patch.getPhones());
             if (patch.getAddresses() != null) existing.setAddresses(patch.getAddresses());
             if (patch.getTags() != null) existing.setTags(patch.getTags());
+            if (patch.getSubscriptionTopics() != null) existing.setSubscriptionTopics(patch.getSubscriptionTopics());
             if (patch.getOwnerId() != null) existing.setOwnerId(patch.getOwnerId());
             if (patch.getCustomFields() != null) existing.setCustomFields(patch.getCustomFields());
             return contacts.save(existing);

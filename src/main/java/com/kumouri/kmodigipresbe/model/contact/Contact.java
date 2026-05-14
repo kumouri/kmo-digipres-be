@@ -54,6 +54,13 @@ public class Contact implements Auditable, CustomFieldHost {
     @Builder.Default
     private Set<String> tags = Set.of();
 
+    // Newsletter / list-membership topics this Contact has opted into. Distinct from
+    // tags (which staff use for arbitrary CRM segmentation) — these are caller-
+    // declared subscriptions originating from public lead-capture surfaces. Default
+    // empty; merged additively by the newsletter subscribe endpoint.
+    @Builder.Default
+    private Set<String> subscriptionTopics = Set.of();
+
     private UUID ownerId;
 
     @Builder.Default
