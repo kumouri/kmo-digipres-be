@@ -37,6 +37,15 @@ public final class DomainEventType {
     // {equipmentId, jobSiteId, warrantyExpiresAt, manufacturer, model, serial}.
     public static final String EQUIPMENT_WARRANTY_EXPIRING = "equipment.warrantyExpiring";
 
+    // Phase 10e — fired by WorkOrderService.update() when a work order transitions
+    // INTO EN_ROUTE (not on save-with-no-change, not when previous was already
+    // EN_ROUTE). The seeded "on-the-way-sms-default" WorkflowRule subscribes and
+    // dispatches an SMS via the SEND_SMS action. Payload includes:
+    // {workOrderId, jobSiteId, technicianUserId, contactPhoneE164} — contactPhoneE164
+    // is resolved by joining JobSite -> contactId -> Contact.phones; null when the
+    // contact has no E.164 number, in which case the dispatcher skips the send.
+    public static final String WORK_ORDER_EN_ROUTE = "workOrder.enRoute";
+
     private DomainEventType() {
     }
 }

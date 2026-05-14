@@ -1,5 +1,6 @@
 package com.kumouri.kmodigipresbe.module.fieldservice;
 
+import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
 import com.kumouri.kmodigipresbe.config.FileStorageProperties;
 import com.kumouri.kmodigipresbe.extension.ModuleAutoConfigurationSupport;
 import com.kumouri.kmodigipresbe.extension.ModuleDefinition;
@@ -11,6 +12,7 @@ import com.kumouri.kmodigipresbe.module.fieldservice.service.JobSiteService;
 import com.kumouri.kmodigipresbe.module.fieldservice.service.RecurrenceExpansionService;
 import com.kumouri.kmodigipresbe.module.fieldservice.service.WorkOrderService;
 import com.kumouri.kmodigipresbe.repository.ActivityRepository;
+import com.kumouri.kmodigipresbe.repository.ContactRepository;
 import com.kumouri.kmodigipresbe.service.scheduling.RecurringSchedule;
 import com.kumouri.kmodigipresbe.service.storage.FileStorageService;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -54,8 +56,11 @@ public class FieldServiceAutoConfiguration {
     @Bean
     public WorkOrderService workOrderService(WorkOrderRepository workOrders,
                                              ActivityRepository activities,
-                                             RecurrenceExpansionService recurrence) {
-        return new WorkOrderService(workOrders, activities, recurrence);
+                                             RecurrenceExpansionService recurrence,
+                                             JobSiteRepository jobSites,
+                                             ContactRepository contacts,
+                                             DomainEventPublisher events) {
+        return new WorkOrderService(workOrders, activities, recurrence, jobSites, contacts, events);
     }
 
     @Bean

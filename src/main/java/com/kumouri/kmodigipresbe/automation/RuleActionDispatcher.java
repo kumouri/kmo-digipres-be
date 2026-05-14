@@ -2,12 +2,16 @@ package com.kumouri.kmodigipresbe.automation;
 
 import com.kumouri.kmodigipresbe.automation.webhook.WebhookDeliveryService;
 import com.kumouri.kmodigipresbe.automation.webhook.WebhookSubscriptionRepository;
+import com.kumouri.kmodigipresbe.integration.twilio.TwilioSmsService;
 import com.kumouri.kmodigipresbe.model.activity.Activity;
 import com.kumouri.kmodigipresbe.model.activity.ActivityDirection;
 import com.kumouri.kmodigipresbe.model.activity.ActivityType;
 import com.kumouri.kmodigipresbe.model.activity.SubjectType;
+import com.kumouri.kmodigipresbe.model.contact.PhoneContact;
 import com.kumouri.kmodigipresbe.model.request.SendTemplateRequest;
+import com.kumouri.kmodigipresbe.model.request.SmsCommunicationRequest;
 import com.kumouri.kmodigipresbe.repository.ActivityRepository;
+import com.kumouri.kmodigipresbe.service.template.SmsTemplateRegistry;
 import com.kumouri.kmodigipresbe.service.template.TemplatedEmailService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -35,12 +39,15 @@ public class RuleActionDispatcher {
     private final ActivityRepository activities;
     private final WebhookSubscriptionRepository subscriptions;
     private final WebhookDeliveryService webhooks;
+    private final TwilioSmsService twilioSms;
+    private final SmsTemplateRegistry smsTemplates;
 
     public Mono<Void> dispatch(RuleAction action, DomainEvent event) {
         return switch (action.getType()) {
             case SEND_EMAIL_TEMPLATE -> sendEmailTemplate(action, event);
             case CREATE_TASK -> createTask(action, event);
             case OUTBOUND_WEBHOOK -> outboundWebhook(action, event);
+            case SEND_SMS -> sendSms(action, event);
         };
     }
 
@@ -101,6 +108,60 @@ public class RuleActionDispatcher {
         }
         return subscriptions.findById(subId)
                 .flatMap(sub -> webhooks.deliver(sub, event));
+    }
+
+    /**
+     * Phase 10e — SMS dispatch. Pulls the recipient phone from
+     * {@code event.payload().get(params.toPhoneField)} and the body from the
+     * {@link SmsTemplateRegistry}. Missing/blank/non-E.164 phone or missing
+     * template name is logged and skipped (no error, no throw) — mirrors
+     * {@link #sendEmailTemplate}'s skip-on-missing behavior so a rule with a
+     * not-yet-resolvable recipient doesn't take down the rest of the rule's
+     * action list.
+     *
+     * <p>v1 caveat: the registry returns the literal template name when no
+     * matching template is registered, so any Mustache placeholders (e.g.
+     * {@code {{contactFirstName}}}) ship as-is. Full template rendering is a
+     * follow-up (see {@link SmsTemplateRegistry}).
+     */
+    private Mono<Void> sendSms(RuleAction action, DomainEvent event) {
+        String templateName = stringParam(action, "templateName");
+        String toPhoneField = stringParam(action, "toPhoneField");
+        if (templateName == null || toPhoneField == null) {
+            log.debug("Skipping SEND_SMS: missing templateName or toPhoneField");
+            return Mono.empty();
+        }
+        Object phoneRaw = event.payload() == null
+                ? null
+                : event.payload().get(toPhoneField);
+        if (phoneRaw == null) {
+            log.debug("Skipping SEND_SMS: payload has no '{}' field", toPhoneField);
+            return Mono.empty();
+        }
+        String phone = phoneRaw.toString();
+        if (!isLikelyE164(phone)) {
+            log.warn("Skipping SEND_SMS: '{}' is not E.164", phone);
+            return Mono.empty();
+        }
+        String body = smsTemplates.resolve(templateName);
+        SmsCommunicationRequest req = SmsCommunicationRequest.builder()
+                .to(new PhoneContact(phone))
+                .body(body)
+                .build();
+        return twilioSms.sendSms(req).then();
+    }
+
+    /**
+     * Loose E.164 check: leading '+' followed by 8+ digits. Twilio enforces
+     * stricter validation server-side; this is just a sanity gate to skip
+     * obviously malformed values before issuing a billable API call.
+     */
+    private static boolean isLikelyE164(String s) {
+        if (s == null || s.length() < 9 || s.charAt(0) != '+') return false;
+        for (int i = 1; i < s.length(); i++) {
+            if (!Character.isDigit(s.charAt(i))) return false;
+        }
+        return true;
     }
 
     private Map<String, Object> eventVariables(DomainEvent event) {

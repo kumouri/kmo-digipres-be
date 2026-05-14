@@ -16,6 +16,12 @@ import java.util.Map;
  *       (delay relative to event time, default 0).</li>
  *   <li>{@code OUTBOUND_WEBHOOK} — {@code params.subscriptionId} pointing at a
  *       {@code WebhookSubscription} document.</li>
+ *   <li>{@code SEND_SMS} (Phase 10e) — {@code params.templateName} (registry key in
+ *       {@code SmsTemplateRegistry}; falls back to the literal string as the body when
+ *       no matching template is registered), {@code params.toPhoneField} (a payload
+ *       field whose value is the recipient phone in E.164 format, e.g. {@code "+15555550100"}).
+ *       Missing or non-E.164 recipient values are skipped (no throw, matches the
+ *       {@code SEND_EMAIL_TEMPLATE} skip-on-missing behavior).</li>
  * </ul>
  */
 @Data
@@ -28,5 +34,5 @@ public class RuleAction {
     @Builder.Default
     private Map<String, Object> params = Map.of();
 
-    public enum ActionType { SEND_EMAIL_TEMPLATE, CREATE_TASK, OUTBOUND_WEBHOOK }
+    public enum ActionType { SEND_EMAIL_TEMPLATE, CREATE_TASK, OUTBOUND_WEBHOOK, SEND_SMS }
 }
