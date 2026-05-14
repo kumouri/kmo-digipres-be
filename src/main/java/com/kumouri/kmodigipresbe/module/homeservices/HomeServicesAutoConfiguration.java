@@ -5,14 +5,23 @@ import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
 import com.kumouri.kmodigipresbe.extension.ModuleAutoConfigurationSupport;
 import com.kumouri.kmodigipresbe.extension.ModuleDefinition;
 import com.kumouri.kmodigipresbe.module.fieldservice.FieldServiceAutoConfiguration;
+import com.kumouri.kmodigipresbe.module.fieldservice.service.WorkOrderService;
 import com.kumouri.kmodigipresbe.module.homeservices.repository.EquipmentRepository;
+import com.kumouri.kmodigipresbe.module.homeservices.repository.MaintenanceVisitRepository;
+import com.kumouri.kmodigipresbe.module.homeservices.repository.ServiceAgreementRepository;
 import com.kumouri.kmodigipresbe.module.homeservices.service.DispatchBoardService;
 import com.kumouri.kmodigipresbe.module.homeservices.service.EquipmentService;
+import com.kumouri.kmodigipresbe.module.homeservices.service.MaintenanceVisitService;
+import com.kumouri.kmodigipresbe.module.homeservices.service.ServiceAgreementSchedulerService;
+import com.kumouri.kmodigipresbe.module.homeservices.service.ServiceAgreementService;
+import com.kumouri.kmodigipresbe.service.scheduling.RecurringSchedule;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.data.mongodb.core.ReactiveMongoOperations;
 
+import java.time.Clock;
 import java.util.List;
 
 /**
@@ -30,23 +39,22 @@ import java.util.List;
  * module — enabling home-services for a tenant without enabling field-service will
  * leave maintenance visits unable to dispatch into WorkOrders. The {@link ModuleDefinition}
  * record currently has no formal {@code dependsOn} field, so the dependency is
- * documented here and enforced at tenant-onboarding time by the operator (or in a
- * future iteration, a tenant-onboarding validator).
+ * documented here and enforced at tenant-onboarding time by the operator.
  *
  * <p>Per-PR build-out within Phase 10:
  * <ul>
- *   <li>10a (shipped): entities, repositories, stub controllers with module gating
- *       wired but empty handler bodies.</li>
- *   <li>10b: {@code ServiceAgreementSchedulerService} + real services for agreements
- *       and visits.</li>
- *   <li><strong>10c (this PR):</strong> {@link EquipmentService} (CRUD + warranty
- *       scan emitting {@code EQUIPMENT_WARRANTY_EXPIRING}) and
- *       {@link DispatchBoardService}; controllers wired through.</li>
+ *   <li>10a (shipped): entities, repositories, stub controllers with module gating.</li>
+ *   <li><strong>10b (this PR):</strong> {@link ServiceAgreementSchedulerService}
+ *       + agreement/visit services + real controllers. Materialization of
+ *       {@code MaintenanceVisit}s from the agreement's RFC 5545 RRULE (90-day
+ *       window); dispatch into {@code WorkOrder}.</li>
+ *   <li>10c (shipped): {@link EquipmentService} (CRUD + warranty scan emitting
+ *       {@code EQUIPMENT_WARRANTY_EXPIRING}) and {@link DispatchBoardService}.</li>
  *   <li>10d: QuickBooks Online OAuth + invoice sync.</li>
  *   <li>10e: on-the-way SMS automation + public service-request widget.</li>
  * </ul>
  */
-@AutoConfiguration
+@AutoConfiguration(after = FieldServiceAutoConfiguration.class)
 @ConditionalOnProperty(prefix = "kmosf.modules.home-services", name = "enabled")
 public class HomeServicesAutoConfiguration {
 
@@ -55,8 +63,41 @@ public class HomeServicesAutoConfiguration {
     @Bean
     public ModuleDefinition homeServicesModuleDefinition() {
         return ModuleAutoConfigurationSupport.module(
-                MODULE_KEY, "Home Services", "0.1.0",
+                MODULE_KEY, "Home Services", "0.2.0",
                 List.of("EQUIPMENT", "SERVICE_AGREEMENT", "MAINTENANCE_VISIT"));
+    }
+
+    @Bean
+    public ServiceAgreementSchedulerService serviceAgreementSchedulerService(
+            ServiceAgreementRepository agreements,
+            MaintenanceVisitRepository visits,
+            RecurringSchedule recurringSchedule,
+            org.springframework.beans.factory.ObjectProvider<Clock> clockProvider) {
+        return new ServiceAgreementSchedulerService(
+                agreements, visits, recurringSchedule,
+                clockProvider.getIfAvailable(Clock::systemUTC));
+    }
+
+    @Bean
+    public ServiceAgreementService serviceAgreementService(
+            ServiceAgreementRepository agreements,
+            ServiceAgreementSchedulerService scheduler) {
+        return new ServiceAgreementService(agreements, scheduler);
+    }
+
+    /**
+     * Gated on {@link WorkOrderService} so the home-services module can boot
+     * even when the field-service module is disabled — every endpoint except
+     * {@code POST /maintenance-visits/{id}/dispatch} stays functional. The
+     * controller is conditioned on this bean so its handlers disappear too
+     * when field-service is off.
+     */
+    @Bean
+    @ConditionalOnBean(WorkOrderService.class)
+    public MaintenanceVisitService maintenanceVisitService(
+            MaintenanceVisitRepository visits,
+            WorkOrderService workOrders) {
+        return new MaintenanceVisitService(visits, workOrders);
     }
 
     @Bean
