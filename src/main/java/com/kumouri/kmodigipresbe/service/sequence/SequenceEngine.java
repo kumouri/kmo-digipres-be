@@ -140,14 +140,19 @@ public class SequenceEngine {
     private Mono<Void> processStep(Sequence seq, SequenceEnrollment enrollment) {
         List<SequenceStep> steps = seq.getSteps() == null ? List.of() : seq.getSteps();
         int idx = enrollment.getCurrentStepIndex();
+        log.info("processStep enrollment={} idx={} stepCount={} completedSteps={}",
+                enrollment.getId(), idx, steps.size(), enrollment.getCompletedSteps());
         if (idx >= steps.size()) {
+            log.info("processStep enrollment={} idx beyond stepCount — completing", enrollment.getId());
             return complete(enrollment);
         }
         SequenceStep step = steps.get(idx);
         if (enrollment.getCompletedSteps() != null
                 && enrollment.getCompletedSteps().contains(step.getStepIndex())) {
+            log.info("processStep enrollment={} step already completed — advancing", enrollment.getId());
             return advance(enrollment, idx + 1);
         }
+        log.info("processStep enrollment={} dispatching {} step", enrollment.getId(), step.getType());
         return switch (step.getType()) {
             case EMAIL_SEND -> handleEmailSend(step, enrollment);
             case WAIT -> handleWait(step, enrollment);
@@ -227,7 +232,10 @@ public class SequenceEngine {
 
     private Mono<Void> complete(SequenceEnrollment enrollment) {
         enrollment.setStatus(SequenceEnrollment.Status.COMPLETED);
-        return enrollments.save(enrollment).then();
+        return enrollments.save(enrollment)
+                .doOnNext(saved -> log.info("completed enrollment={} status={}", saved.getId(), saved.getStatus()))
+                .doOnError(err -> log.warn("complete enrollment={} save failed: {}", enrollment.getId(), err.toString()))
+                .then();
     }
 
     private Mono<Void> markStepCompleteAndAdvance(SequenceEnrollment enrollment, int stepIndex) {
