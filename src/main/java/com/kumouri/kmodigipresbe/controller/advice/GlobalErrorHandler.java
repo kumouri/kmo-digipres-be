@@ -41,7 +41,9 @@ import java.util.UUID;
  *   <li>{@code 1500-1599} — <em>Phase 13 reserved</em>: mobile sync conflicts</li>
  *   <li>{@code 1600-1699} — <em>Phase 9b</em>: public widget rejections (1600 generic;
  *       1601 malformed; 1602 signature invalid; 1603 expired)</li>
- *   <li>{@code 1700-1799} — <em>Phase 9c reserved</em>: transactional email failures</li>
+ *   <li>{@code 1700-1799} — <em>Phase 9c</em>: transactional email + Postmark webhook
+ *       (1700 send failure, 1701 no token, 1702 not connected, 1703 secret missing,
+ *       1704 auth invalid, 1705 body not JSON, 1706 path tenant invalid)</li>
  *   <li>{@code 1800-1899} — <em>Phase 9a</em>: audit/compliance (RoleGuard 1800,
  *       audit query param validation 1801). The original plan §8 listed 1400-1499 for
  *       audit/compliance, but {@code DealCrudService} ships 1400/1401 since Phase 1 —
