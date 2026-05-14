@@ -1,5 +1,8 @@
 package com.kumouri.kmodigipresbe.service.billing;
 
+import com.kumouri.kmodigipresbe.automation.DomainEvent;
+import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
+import com.kumouri.kmodigipresbe.automation.DomainEventType;
 import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
 import com.kumouri.kmodigipresbe.model.billing.Invoice;
 import com.kumouri.kmodigipresbe.model.billing.Payment;
@@ -18,6 +21,8 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -27,6 +32,7 @@ public class InvoiceService {
     private final InvoiceRepository invoices;
     private final PaymentRepository payments;
     private final QuoteRepository quotes;
+    private final DomainEventPublisher events;
 
     public Flux<Invoice> findAll() {
         return invoices.findAll();
@@ -71,16 +77,39 @@ public class InvoiceService {
                             .status(Invoice.Status.SENT)
                             .statusChangedAt(Instant.now())
                             .build();
-                    return invoices.save(inv);
+                    return invoices.save(inv)
+                            .doOnNext(saved -> maybePublishFinalized(
+                                    saved, Invoice.Status.DRAFT, saved.getStatus()));
                 });
     }
 
     public Mono<Invoice> setStatus(UUID id, Invoice.Status target) {
         return findById(id).flatMap(inv -> {
+            Invoice.Status previous = inv.getStatus();
             inv.setStatus(target);
             inv.setStatusChangedAt(Instant.now());
-            return invoices.save(inv);
+            return invoices.save(inv)
+                    .doOnNext(saved -> maybePublishFinalized(saved, previous, target));
         });
+    }
+
+    /**
+     * Phase 10d — when an Invoice transitions out of {@code DRAFT} into {@code SENT}
+     * (the conceptual "finalize" step), broadcast a {@link DomainEventType#INVOICE_FINALIZED}
+     * so downstream integrations (QuickBooks invoice sync, custom workflow rules)
+     * can react. Idempotent: re-saving with the same status does nothing; only the
+     * actual DRAFT→SENT edge fires the event.
+     */
+    private void maybePublishFinalized(Invoice saved, Invoice.Status previous, Invoice.Status target) {
+        if (target != Invoice.Status.SENT) return;
+        if (previous == Invoice.Status.SENT) return;
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("invoiceId", saved.getId() == null ? null : saved.getId().toString());
+        payload.put("totalAmount", saved.getTotal());
+        payload.put("contactId", saved.getContactId() == null ? null : saved.getContactId().toString());
+        payload.put("currency", saved.getCurrency());
+        events.publish(DomainEvent.of(
+                DomainEventType.INVOICE_FINALIZED, saved.getTenantId(), saved.getId(), payload));
     }
 
     public Mono<Void> delete(UUID id) {

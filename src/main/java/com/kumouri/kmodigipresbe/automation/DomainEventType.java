@@ -37,6 +37,12 @@ public final class DomainEventType {
     // {equipmentId, jobSiteId, warrantyExpiresAt, manufacturer, model, serial}.
     public static final String EQUIPMENT_WARRANTY_EXPIRING = "equipment.warrantyExpiring";
 
+    // Phase 10d — emitted by InvoiceService.finalize when a DRAFT Invoice
+    // transitions to SENT. QuickBooksInvoiceSync subscribes and pushes the
+    // invoice into QBO; downstream automations can also key off this event.
+    // Payload: {invoiceId, totalAmount, contactId, currency}.
+    public static final String INVOICE_FINALIZED = "invoice.finalized";
+
     // Phase 10e — fired by WorkOrderService.update() when a work order transitions
     // INTO EN_ROUTE (not on save-with-no-change, not when previous was already
     // EN_ROUTE). The seeded "on-the-way-sms-default" WorkflowRule subscribes and
