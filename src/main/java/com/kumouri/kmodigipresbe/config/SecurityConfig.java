@@ -60,6 +60,7 @@ public class SecurityConfig {
                         .pathMatchers(HttpMethod.POST, "/auth/login").permitAll()
                         .pathMatchers("/auth/health", "/actuator/health/**").permitAll()
                         .pathMatchers(HttpMethod.POST, "/tenants").permitAll()
+                        .pathMatchers("/public/**").permitAll()
                         .anyExchange().authenticated())
                 .oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt.jwtDecoder(jwtDecoder)))
                 .build();
