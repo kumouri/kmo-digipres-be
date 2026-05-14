@@ -17,6 +17,15 @@ public final class DomainEventType {
     public static final String ACTIVITY_LOGGED = "activity.logged";
     public static final String EMAIL_RECEIVED = "email.received";
 
+    // Phase 9c — outbound transactional email engagement events emitted by the
+    // Postmark webhook controller. Sequence engine (9d) and contact-timeline UI
+    // subscribe.
+    public static final String EMAIL_DELIVERED = "email.delivered";
+    public static final String EMAIL_OPENED = "email.opened";
+    public static final String EMAIL_CLICKED = "email.clicked";
+    public static final String EMAIL_BOUNCED = "email.bounced";
+    public static final String EMAIL_SPAM = "email.spam";
+
     private DomainEventType() {
     }
 }
