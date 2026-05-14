@@ -13,7 +13,12 @@ public class TestcontainersConfiguration {
     @Bean
     @ServiceConnection
     KafkaContainer kafkaContainer() {
-        return new KafkaContainer(DockerImageName.parse("apache/kafka-native:latest"));
+        // Use the JVM-based Apache Kafka image, not the native-image variant.
+        // apache/kafka-native:latest segfaults intermittently during early VM init
+        // (com.oracle.svm.core.posix.headers.Pwd.getpwuid) on ubuntu-latest GitHub
+        // runners — same crash, two runs in a row. The JVM image starts a few seconds
+        // slower but doesn't crash.
+        return new KafkaContainer(DockerImageName.parse("apache/kafka:latest"));
     }
 
     @Bean

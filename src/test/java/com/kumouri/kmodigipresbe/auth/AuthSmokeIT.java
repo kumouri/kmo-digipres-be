@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.mongodb.core.ReactiveMongoTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
@@ -27,9 +28,19 @@ class AuthSmokeIT {
     @Autowired TenantRepository tenants;
     @Autowired UserRepository users;
     @Autowired PasswordEncoder encoder;
+    @Autowired ReactiveMongoTemplate mongo;
 
     @BeforeEach
     void seed() {
+        // Reuse a single Mongo container across all *IT classes, so wipe the
+        // collections we touch before each test to avoid colliding on the
+        // unique email index when the next test re-inserts smoke@example.test.
+        // Go via ReactiveMongoTemplate, not the tenant-scoped repositories —
+        // User is TenantScoped, so users.deleteAll() would demand a tenant
+        // context the test hasn't established yet.
+        mongo.remove(new org.springframework.data.mongodb.core.query.Query(), User.class).block();
+        mongo.remove(new org.springframework.data.mongodb.core.query.Query(), Tenant.class).block();
+
         UUID tid = UUID.randomUUID();
         tenants.save(Tenant.builder()
                 .id(tid).slug("smoke-" + tid).displayName("Smoke")
