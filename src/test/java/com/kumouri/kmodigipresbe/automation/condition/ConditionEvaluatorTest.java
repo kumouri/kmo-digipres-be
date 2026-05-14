@@ -1,5 +1,6 @@
-package com.kumouri.kmodigipresbe.automation;
+package com.kumouri.kmodigipresbe.automation.condition;
 
+import com.kumouri.kmodigipresbe.automation.RuleCondition;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

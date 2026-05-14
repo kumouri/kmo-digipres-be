@@ -1,4 +1,7 @@
-package com.kumouri.kmodigipresbe.automation;
+package com.kumouri.kmodigipresbe.automation.condition;
+
+import com.kumouri.kmodigipresbe.automation.DomainEvent;
+import com.kumouri.kmodigipresbe.automation.RuleCondition;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -8,6 +11,11 @@ import java.util.Objects;
 /**
  * Stateless evaluation of {@link RuleCondition} lists against a {@link DomainEvent}'s
  * payload. AND across conditions; OR is expressed by writing multiple rules.
+ *
+ * <p>Phase 9d promoted this out of the {@code automation} package into a shared
+ * {@code automation.condition} sub-package so Phase 9e reporting v2 and the
+ * Phase 9d sequence engine can reuse the same predicate without circular
+ * dependencies on the rule engine itself.
  */
 public final class ConditionEvaluator {
 
