@@ -90,12 +90,12 @@ public class OnTheWaySmsAutomation implements ApplicationListener<ApplicationRea
         return rules.findAllByTenantIdAndTriggerAndActive(
                         tenantId, DomainEventType.WORK_ORDER_EN_ROUTE, true)
                 .filter(r -> DEFAULT_RULE_NAME.equals(r.getName()))
-                .next()
-                .flatMap(existing -> {
-                    log.debug("on-the-way-sms-default already present for tenant {}", tenantId);
-                    return Mono.<WorkflowRule>empty();
-                })
-                .switchIfEmpty(Mono.defer(() -> {
+                .hasElements()
+                .flatMap(exists -> {
+                    if (exists) {
+                        log.debug("on-the-way-sms-default already present for tenant {}", tenantId);
+                        return Mono.<WorkflowRule>empty();
+                    }
                     WorkflowRule rule = WorkflowRule.builder()
                             .name(DEFAULT_RULE_NAME)
                             .description("Phase 10e default: send an SMS when a WorkOrder "
@@ -112,7 +112,7 @@ public class OnTheWaySmsAutomation implements ApplicationListener<ApplicationRea
                             .build();
                     log.info("Seeding on-the-way-sms-default rule for tenant {}", tenantId);
                     return rules.save(rule);
-                }))
+                })
                 .contextWrite(TenantContextHolder.write(ctx))
                 .then();
     }
