@@ -4,6 +4,7 @@ import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.bson.Document;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.mongodb.core.mapping.event.ReactiveBeforeSaveCallback;
 import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Component;
@@ -24,12 +25,19 @@ import java.util.UUID;
  * <p>Definitions for a tenant + entity type are fetched on every save. For Phase 2
  * this is intentionally uncached — correctness over latency. A cache (TTL + invalidation
  * on FieldDefinition writes) is a Phase 6+ optimization.
+ *
+ * <p>The repository is injected via {@link ObjectProvider} to break a circular bean
+ * dependency: as a {@link ReactiveBeforeSaveCallback}, this component is auto-wired into
+ * the {@code mappingMongoConverter} chain during context startup, but
+ * {@link FieldDefinitionRepository} transitively depends on {@code reactiveMongoTemplate},
+ * which depends on {@code mappingMongoConverter}. Lazy resolution defers the repository
+ * lookup until first save, by which point both beans exist.
  */
 @Component
 @RequiredArgsConstructor
 public class CustomFieldValidator implements ReactiveBeforeSaveCallback<CustomFieldHost> {
 
-    private final FieldDefinitionRepository definitions;
+    private final ObjectProvider<FieldDefinitionRepository> definitions;
 
     @Override
     @NonNull
@@ -46,7 +54,7 @@ public class CustomFieldValidator implements ReactiveBeforeSaveCallback<CustomFi
         Map<String, Object> values = host.getCustomFields() == null
                 ? Map.of()
                 : host.getCustomFields();
-        return definitions.findAllByTenantIdAndEntityType(tenantId, host.getEntityType())
+        return definitions.getObject().findAllByTenantIdAndEntityType(tenantId, host.getEntityType())
                 .collectList()
                 .flatMap(defs -> {
                     for (FieldDefinition def : defs) {

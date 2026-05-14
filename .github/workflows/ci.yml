@@ -27,13 +27,8 @@ jobs:
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v4
 
-      # Runs compile + unit tests only. The *IT integration tests are
-      # currently red on master due to a pre-existing circular bean
-      # dependency (reactiveMongoTemplate <-> customFieldValidator via
-      # mappingMongoConverter) that needs a separate fix. Re-enable by
-      # dropping the --tests filter once the cycle is broken.
-      - name: ./gradlew compile + unit tests
-        run: ./gradlew compileJava compileTestJava test --tests '*Test' --no-daemon --stacktrace
+      - name: ./gradlew build
+        run: ./gradlew build --no-daemon --stacktrace
         env:
           TESTCONTAINERS_RYUK_DISABLED: 'true'
 
