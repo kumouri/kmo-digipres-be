@@ -1,5 +1,6 @@
 package com.kumouri.kmodigipresbe.model.activity;
 
+import com.kumouri.kmodigipresbe.extension.CustomFieldHost;
 import com.kumouri.kmodigipresbe.tenancy.TenantScoped;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -25,7 +26,7 @@ import java.util.UUID;
 @Builder(toBuilder = true)
 @NoArgsConstructor
 @AllArgsConstructor
-public class Activity implements TenantScoped {
+public class Activity implements TenantScoped, CustomFieldHost {
 
     @Id
     private UUID id;
