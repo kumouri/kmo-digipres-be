@@ -19,6 +19,7 @@ import reactor.core.publisher.Mono;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -66,6 +67,24 @@ public class ReportRunner {
         }
         List<AggregationOperation> ops = new ArrayList<>();
         ops.add(Aggregation.match(match));
+
+        // Coerce numeric aggregation fields to double before $group. Spring Data
+        // MongoDB stores BigDecimal as a String by default (e.g. Deal.value = "5000"),
+        // and Mongo's $sum / $avg / $min / $max ignore non-numeric inputs and return
+        // 0. The $addFields + $convert stage converts each field referenced by a
+        // numeric aggregation to a double (or 0 when missing / unparseable).
+        Set<String> numericFields = numericFieldsFor(report.getAggregations());
+        if (!numericFields.isEmpty()) {
+            Document setStage = new Document();
+            for (String f : numericFields) {
+                setStage.put(f, new Document("$convert", new Document()
+                        .append("input", "$" + f)
+                        .append("to", "double")
+                        .append("onError", 0)
+                        .append("onNull", 0)));
+            }
+            ops.add(ctx -> new Document("$addFields", setStage));
+        }
 
         GroupOperation group = buildGroup(report.getGroupBy(), report.getAggregations());
         ops.add(group);
@@ -138,5 +157,22 @@ public class ReportRunner {
 
     private static <T> List<T> nullSafe(List<T> in) {
         return in == null ? List.of() : in;
+    }
+
+    private static Set<String> numericFieldsFor(List<AggregationSpec> aggs) {
+        if (aggs == null) return Set.of();
+        Set<String> out = new java.util.LinkedHashSet<>();
+        for (AggregationSpec spec : aggs) {
+            if (spec == null || spec.getField() == null || spec.getField().isBlank()) continue;
+            AggregationOp op = spec.getOp();
+            if (op == null) continue;
+            switch (op) {
+                case SUM, AVG, MIN, MAX -> out.add(spec.getField());
+                case COUNT -> { /* not a numeric agg */ }
+            }
+        }
+        // {@code _id} is the record id (BSON Binary); never coerce.
+        out.remove("_id");
+        return out;
     }
 }
