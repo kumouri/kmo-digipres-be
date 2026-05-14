@@ -64,6 +64,17 @@ class ReportRunnerIT {
     }
 
     @Test
+    void seededDealsHaveValuesInMongo_diagnostic() {
+        List<org.bson.Document> docs = mongo.findAll(org.bson.Document.class, "deals")
+                .collectList().block();
+        assertThat(docs).isNotNull();
+        for (org.bson.Document d : docs) {
+            System.out.println("RAW deal: " + d.toJson());
+        }
+        assertThat(docs).hasSize(5);
+    }
+
+    @Test
     void countAndSumByStage_returnsExpectedGroups() {
         SavedReport report = SavedReport.builder()
                 .name("Deals by stage")
