@@ -3,6 +3,7 @@ package com.kumouri.kmodigipresbe.module.homeservices.controller;
 import com.kumouri.kmodigipresbe.extension.TenantModuleRegistry;
 import com.kumouri.kmodigipresbe.module.homeservices.HomeServicesAutoConfiguration;
 import com.kumouri.kmodigipresbe.module.homeservices.model.ServiceAgreement;
+import com.kumouri.kmodigipresbe.module.homeservices.service.ServiceAgreementService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
@@ -20,43 +21,55 @@ import reactor.core.publisher.Mono;
 
 import java.util.UUID;
 
-/**
- * 10a stub: handlers return empty results. 10b wires {@code ServiceAgreementService}
- * with full CRUD + {@code /regenerate-visits} / {@code /activate} / {@code /pause}.
- */
 @RestController
 @RequestMapping("/home-services/service-agreements")
 @ConditionalOnProperty(prefix = "kmosf.modules.home-services", name = "enabled")
 @RequiredArgsConstructor
 public class ServiceAgreementController {
 
+    private final ServiceAgreementService service;
     private final TenantModuleRegistry modules;
 
     @GetMapping
     public Flux<ServiceAgreement> list() {
-        return guard().thenMany(Flux.empty());
+        return guard().thenMany(service.findAll());
     }
 
     @GetMapping("/{id}")
     public Mono<ServiceAgreement> get(@PathVariable UUID id) {
-        return guard().then(Mono.empty());
+        return guard().then(service.findById(id));
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public Mono<ServiceAgreement> create(@RequestBody ServiceAgreement body) {
-        return guard().then(Mono.empty());
+        return guard().then(service.create(body));
     }
 
     @PutMapping("/{id}")
     public Mono<ServiceAgreement> update(@PathVariable UUID id, @RequestBody ServiceAgreement body) {
-        return guard().then(Mono.empty());
+        return guard().then(service.update(id, body));
     }
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public Mono<Void> delete(@PathVariable UUID id) {
-        return guard().then(Mono.empty());
+        return guard().then(service.delete(id));
+    }
+
+    @PostMapping("/{id}/activate")
+    public Mono<ServiceAgreement> activate(@PathVariable UUID id) {
+        return guard().then(service.activate(id));
+    }
+
+    @PostMapping("/{id}/pause")
+    public Mono<ServiceAgreement> pause(@PathVariable UUID id) {
+        return guard().then(service.pause(id));
+    }
+
+    @PostMapping("/{id}/regenerate-visits")
+    public Mono<ServiceAgreement> regenerateVisits(@PathVariable UUID id) {
+        return guard().then(service.regenerateVisits(id));
     }
 
     private Mono<Void> guard() {
