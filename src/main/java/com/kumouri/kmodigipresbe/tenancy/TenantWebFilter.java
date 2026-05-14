@@ -10,6 +10,8 @@ import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
 
+import java.util.Optional;
+
 /**
  * Resolves the tenant from the authenticated JWT and writes a {@link TenantContext}
  * into the Reactor context for downstream filters and handlers.
@@ -31,11 +33,19 @@ public class TenantWebFilter implements WebFilter {
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
+        // Carry the resolved tenant as Optional through the pipeline so we can dispatch
+        // on its presence once. Naively chaining .switchIfEmpty(chain.filter(exchange))
+        // here is wrong: chain.filter() returns Mono<Void>, which always completes
+        // "empty" (onComplete with no onNext), so .switchIfEmpty would fire *after* the
+        // first chain.filter() succeeds — running the chain twice and crashing the second
+        // pass on the already-committed response.
         return ReactiveSecurityContextHolder.getContext()
-                .map(secCtx -> secCtx.getAuthentication())
-                .flatMap(tenantResolver::resolve)
-                .flatMap(tenant -> chain.filter(exchange)
-                        .contextWrite(TenantContextHolder.write(tenant)))
-                .switchIfEmpty(chain.filter(exchange));
+                .flatMap(secCtx -> tenantResolver.resolve(secCtx.getAuthentication()))
+                .map(Optional::of)
+                .defaultIfEmpty(Optional.empty())
+                .flatMap(maybeTenant -> maybeTenant
+                        .map(tenant -> chain.filter(exchange)
+                                .contextWrite(TenantContextHolder.write(tenant)))
+                        .orElseGet(() -> chain.filter(exchange)));
     }
 }
