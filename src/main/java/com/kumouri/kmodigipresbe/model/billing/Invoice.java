@@ -1,8 +1,8 @@
 package com.kumouri.kmodigipresbe.model.billing;
 
+import com.kumouri.kmodigipresbe.audit.Auditable;
 import com.kumouri.kmodigipresbe.extension.CustomFieldHost;
 import com.kumouri.kmodigipresbe.model.quote.LineItem;
-import com.kumouri.kmodigipresbe.tenancy.TenantScoped;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -34,7 +34,7 @@ import java.util.UUID;
 @Builder(toBuilder = true)
 @NoArgsConstructor
 @AllArgsConstructor
-public class Invoice implements TenantScoped, CustomFieldHost {
+public class Invoice implements Auditable, CustomFieldHost {
 
     @Id
     private UUID id;

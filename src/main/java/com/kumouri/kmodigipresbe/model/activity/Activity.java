@@ -1,7 +1,7 @@
 package com.kumouri.kmodigipresbe.model.activity;
 
+import com.kumouri.kmodigipresbe.audit.Auditable;
 import com.kumouri.kmodigipresbe.extension.CustomFieldHost;
-import com.kumouri.kmodigipresbe.tenancy.TenantScoped;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -26,7 +26,7 @@ import java.util.UUID;
 @Builder(toBuilder = true)
 @NoArgsConstructor
 @AllArgsConstructor
-public class Activity implements TenantScoped, CustomFieldHost {
+public class Activity implements Auditable, CustomFieldHost {
 
     @Id
     private UUID id;

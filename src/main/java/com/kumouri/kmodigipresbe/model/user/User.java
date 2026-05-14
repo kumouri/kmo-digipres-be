@@ -1,6 +1,6 @@
 package com.kumouri.kmodigipresbe.model.user;
 
-import com.kumouri.kmodigipresbe.tenancy.TenantScoped;
+import com.kumouri.kmodigipresbe.audit.Auditable;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -31,7 +31,7 @@ import java.util.UUID;
 @Builder(toBuilder = true)
 @NoArgsConstructor
 @AllArgsConstructor
-public class User implements TenantScoped {
+public class User implements Auditable {
 
     @Id
     private UUID id;
