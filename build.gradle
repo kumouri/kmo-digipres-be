@@ -50,6 +50,11 @@ dependencies {
 //    implementation 'org.springframework.security:spring-security-messaging'
 //    implementation 'org.springframework.session:spring-session-data-mongodb'
     implementation 'org.mapstruct:mapstruct:1.6.3'
+    // Field-service module (Phase 3) — opt-in via kmosf.modules.field-service.enabled
+    implementation 'org.mnode.ical4j:ical4j:4.0.4'
+    implementation platform('software.amazon.awssdk:bom:2.29.20')
+    implementation 'software.amazon.awssdk:s3'
+    implementation 'software.amazon.awssdk:auth'
     compileOnly 'org.projectlombok:lombok'
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
 //    developmentOnly 'org.springframework.boot:spring-boot-docker-compose'
