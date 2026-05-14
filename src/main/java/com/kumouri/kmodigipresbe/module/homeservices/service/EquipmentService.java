@@ -115,12 +115,12 @@ public class EquipmentService {
 
     /**
      * Cron-driven warranty scan. Default fires at 09:00 server time daily; the
-     * cron + initial-delay can both be overridden via properties for tests and
-     * for tenants that want a different window.
+     * cron can be overridden via {@code kmosf.home-services.warranty-scan-cron}
+     * for tenants that want a different window. (Spring's {@code @Scheduled}
+     * does not allow {@code initialDelay} with a cron trigger — the previous
+     * fire computation handles the equivalent automatically.)
      */
-    @Scheduled(
-            cron = "${kmosf.home-services.warranty-scan-cron:0 0 9 * * *}",
-            initialDelayString = "${kmosf.home-services.warranty-scan-initial-delay-ms:60000}")
+    @Scheduled(cron = "${kmosf.home-services.warranty-scan-cron:0 0 9 * * *}")
     public void tick() {
         scanWarranties()
                 .onErrorContinue((err, evt) ->
