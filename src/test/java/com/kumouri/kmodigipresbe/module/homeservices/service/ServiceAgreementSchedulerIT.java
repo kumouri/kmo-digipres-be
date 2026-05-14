@@ -61,7 +61,10 @@ class ServiceAgreementSchedulerIT {
                         .contactId(UUID.randomUUID())
                         .jobSiteId(UUID.randomUUID())
                         .agreementType("weekly-bait-station")
-                        .startDate(LocalDate.now())
+                        // Seed must be strictly after now so all 4 weekly occurrences
+                        // fall in [now, now+90d) — RRULE expansion treats DTSTART as
+                        // the first occurrence and filters past-the-window matches.
+                        .startDate(LocalDate.now().plusDays(1))
                         .recurrenceRule("FREQ=WEEKLY;COUNT=4")
                         .status(ServiceAgreementStatus.ACTIVE)
                         .build())
@@ -100,7 +103,10 @@ class ServiceAgreementSchedulerIT {
                         .contactId(UUID.randomUUID())
                         .jobSiteId(UUID.randomUUID())
                         .agreementType("paused-hvac")
-                        .startDate(LocalDate.now())
+                        // Seed must be strictly after now so all 4 weekly occurrences
+                        // fall in [now, now+90d) — RRULE expansion treats DTSTART as
+                        // the first occurrence and filters past-the-window matches.
+                        .startDate(LocalDate.now().plusDays(1))
                         .recurrenceRule("FREQ=WEEKLY;COUNT=4")
                         .status(ServiceAgreementStatus.PAUSED)
                         .build())
@@ -135,7 +141,10 @@ class ServiceAgreementSchedulerIT {
                         .contactId(UUID.randomUUID())
                         .jobSiteId(UUID.randomUUID())
                         .agreementType("weekly-bait-station")
-                        .startDate(LocalDate.now())
+                        // Seed must be strictly after now so all 4 weekly occurrences
+                        // fall in [now, now+90d) — RRULE expansion treats DTSTART as
+                        // the first occurrence and filters past-the-window matches.
+                        .startDate(LocalDate.now().plusDays(1))
                         .recurrenceRule("FREQ=WEEKLY;COUNT=4")
                         .status(ServiceAgreementStatus.ACTIVE)
                         .build())
