@@ -50,11 +50,17 @@ import java.util.UUID;
  *       audit codes were shifted to 1800-1899 to avoid renumbering merged code.</li>
  *   <li>{@code 1900-1999} — Phase 6 automation (WorkflowRule 1900, WebhookSubscription
  *       1910). The plan's original AI slot would have collided here too.</li>
- *   <li>{@code 2700-2799} — <em>Phase 10 reserved</em>: home-services (10c
- *       equipment 2730 not-found; 10e widget 2700 type-mismatch, 2701 token
- *       rejected, 2702 service-request DTO invalid, 2710 SMS dispatch failed).
- *       Non-admin delete on equipment falls through to the shared
- *       {@code RoleGuard} 1800 (Phase 9a audit/compliance range).</li>
+ *   <li>{@code 2700-2799} — <em>Phase 10</em>: home-services. 10c equipment
+ *       {@code 2730} not-found (admin delete falls through to the shared
+ *       {@code RoleGuard} 1800 in the Phase 9a audit/compliance range). 10e
+ *       SMS automation + service-request widget: {@code 2700} widget-type
+ *       mismatch (token's {@code widgetType} claim is not "service-request");
+ *       {@code 2701} widget token rejected (specific home-services token
+ *       failures distinct from the generic 1600-range token rejections);
+ *       {@code 2702} service-request DTO invalid (handled via bean-validation's
+ *       WebExchangeBindException today, reserved for custom cross-field
+ *       checks); {@code 2710} SMS dispatch failed (passthrough from Twilio
+ *       when the {@code SEND_SMS} dispatcher cannot reach Twilio at all).</li>
  *   <li>{@code 2800-2899} — <em>Phase 10 reserved</em>: QuickBooks Online (10d
  *       2800 no connection, 2801 token refresh failed, 2802 invoice push failed,
  *       2810 webhook missing signature, 2811 webhook missing connection, 2812
