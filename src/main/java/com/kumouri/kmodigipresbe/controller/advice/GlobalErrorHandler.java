@@ -50,10 +50,11 @@ import java.util.UUID;
  *       audit codes were shifted to 1800-1899 to avoid renumbering merged code.</li>
  *   <li>{@code 1900-1999} — Phase 6 automation (WorkflowRule 1900, WebhookSubscription
  *       1910). The plan's original AI slot would have collided here too.</li>
- *   <li>{@code 2700-2799} — <em>Phase 10 reserved</em>: home-services (10e widget
- *       2700 type-mismatch, 2701 token rejected, 2702 service-request DTO invalid,
- *       2710 SMS dispatch failed). Specific codes filled in by the consuming
- *       sub-PRs.</li>
+ *   <li>{@code 2700-2799} — <em>Phase 10 reserved</em>: home-services (10c
+ *       equipment 2730 not-found; 10e widget 2700 type-mismatch, 2701 token
+ *       rejected, 2702 service-request DTO invalid, 2710 SMS dispatch failed).
+ *       Non-admin delete on equipment falls through to the shared
+ *       {@code RoleGuard} 1800 (Phase 9a audit/compliance range).</li>
  *   <li>{@code 2800-2899} — <em>Phase 10 reserved</em>: QuickBooks Online (10d
  *       2800 no connection, 2801 token refresh failed, 2802 invoice push failed,
  *       2810 webhook missing signature, 2811 webhook missing connection, 2812
