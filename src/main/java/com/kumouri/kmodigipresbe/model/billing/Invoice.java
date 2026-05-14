@@ -72,6 +72,14 @@ public class Invoice implements Auditable, CustomFieldHost {
     @Builder.Default
     private Map<String, Object> customFields = Map.of();
 
+    /**
+     * External system identifiers — keyed by provider ({@code "quickbooks"},
+     * {@code "stripe"}, ...) and carrying the external system's invoice id.
+     * Used as the idempotency anchor for downstream sync (Phase 10d QBO).
+     */
+    @Builder.Default
+    private Map<String, String> externalRefs = Map.of();
+
     @Version
     private Long version;
 

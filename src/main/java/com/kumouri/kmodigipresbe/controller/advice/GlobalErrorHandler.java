@@ -61,10 +61,17 @@ import java.util.UUID;
  *       WebExchangeBindException today, reserved for custom cross-field
  *       checks); {@code 2710} SMS dispatch failed (passthrough from Twilio
  *       when the {@code SEND_SMS} dispatcher cannot reach Twilio at all).</li>
- *   <li>{@code 2800-2899} — <em>Phase 10 reserved</em>: QuickBooks Online (10d
- *       2800 no connection, 2801 token refresh failed, 2802 invoice push failed,
- *       2810 webhook missing signature, 2811 webhook missing connection, 2812
- *       webhook signature invalid, 2813 webhook payload malformed).</li>
+ *   <li>{@code 2800-2899} — <em>Phase 10d</em>: QuickBooks Online. {@code 2800}
+ *       no connection / missing realmId or accessToken on connection; {@code 2801}
+ *       token exchange or refresh failed; {@code 2802} invoice push failed
+ *       (mapped from any non-2xx response or downstream throwable);
+ *       {@code 2810} OAuth state missing / expired / malformed (covers the
+ *       callback's bad-state path and the webhook controller's malformed-path
+ *       cases); {@code 2811} webhook fired for a tenant with no QBO connection;
+ *       {@code 2812} webhook signature (HMAC of body) did not match the tenant's
+ *       stored {@code webhookVerifierToken}, also reused for invalid OAuth
+ *       {@code state} signatures; {@code 2813} webhook payload malformed
+ *       (non-JSON or missing required fields).</li>
  * </ul>
  */
 @Slf4j
