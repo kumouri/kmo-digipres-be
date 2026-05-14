@@ -2,7 +2,6 @@ package com.kumouri.kmodigipresbe.service.sequence;
 
 import com.kumouri.kmodigipresbe.automation.condition.ConditionEvaluator;
 import com.kumouri.kmodigipresbe.model.communication.EmailEngagement;
-import com.kumouri.kmodigipresbe.model.contact.Contact;
 import com.kumouri.kmodigipresbe.model.sequence.Sequence;
 import com.kumouri.kmodigipresbe.model.sequence.SequenceEnrollment;
 import com.kumouri.kmodigipresbe.model.sequence.SequenceStep;
@@ -244,12 +243,26 @@ public class SequenceEngine {
     }
 
     private Mono<String> loadRecipient(UUID contactId) {
-        return mongo.findById(contactId, Contact.class)
-                .flatMap(c -> {
-                    if (c.getEmails() == null || c.getEmails().isEmpty()) return Mono.empty();
-                    String addr = c.getEmails().get(0).asString();
-                    return (addr == null || addr.isBlank()) ? Mono.empty() : Mono.just(addr);
-                });
+        // Read the raw BSON document instead of deserialising Contact — EmailContact
+        // embeds {@code jakarta.mail.internet.InternetAddress}, which Spring Data Mongo's
+        // POJO codec doesn't always reconstruct cleanly. We only need the first email
+        // address; pull it straight out of the stored doc.
+        Query q = new Query(Criteria.where("_id").is(contactId));
+        q.fields().include("emails");
+        return mongo.findOne(q, org.bson.Document.class, "contacts")
+                .mapNotNull(SequenceEngine::extractFirstEmailAddress);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String extractFirstEmailAddress(org.bson.Document doc) {
+        Object rawEmails = doc.get("emails");
+        if (!(rawEmails instanceof java.util.List<?> emails) || emails.isEmpty()) return null;
+        Object first = emails.get(0);
+        if (!(first instanceof org.bson.Document entry)) return null;
+        Object emailField = entry.get("email");
+        if (!(emailField instanceof org.bson.Document emailDoc)) return null;
+        String address = emailDoc.getString("address");
+        return (address == null || address.isBlank()) ? null : address;
     }
 
     private static Duration parseDuration(String iso) {
