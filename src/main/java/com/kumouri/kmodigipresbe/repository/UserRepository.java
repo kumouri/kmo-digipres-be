@@ -24,4 +24,12 @@ public interface UserRepository extends TenantScopedReactiveMongoRepository<User
      * tenant B).
      */
     Mono<User> findByTenantIdAndEmail(UUID tenantId, String email);
+
+    /**
+     * Phase 9g @mention resolution: given a handle parsed out of an activity note
+     * (e.g. {@code @alice}), find a user whose email begins with {@code alice@}.
+     * Returns at most one user; if multiple match, the first by mongo order is
+     * returned and the others are ignored.
+     */
+    Mono<User> findFirstByTenantIdAndEmailStartingWith(UUID tenantId, String prefix);
 }

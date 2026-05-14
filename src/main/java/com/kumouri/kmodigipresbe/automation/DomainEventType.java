@@ -26,6 +26,11 @@ public final class DomainEventType {
     public static final String EMAIL_BOUNCED = "email.bounced";
     public static final String EMAIL_SPAM = "email.spam";
 
+    // Phase 9g — fired by MentionResolver after parsing @username from an
+    // activity's summary/body and resolving to a User. MentionNotificationListener
+    // subscribes to fan out a notification email.
+    public static final String MENTION_CREATED = "mention.created";
+
     private DomainEventType() {
     }
 }
