@@ -29,6 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @TestPropertySource(properties = {
         "kmosf.modules.home-services.enabled=true",
         "kmosf.modules.field-service.enabled=true",
+        "kmosf.files.region=us-east-1",
         // Disable the auto-tick so we control when materialization runs.
         "kmosf.home-services.scheduler.initial-delay-ms=86400000"
 })
@@ -51,13 +52,17 @@ class ServiceAgreementSchedulerIT {
     }
 
     @Test
-    void quarterlyAgreement_materializesFourVisits_andRerunIsIdempotent() {
+    void weeklyAgreement_materializesFourVisits_andRerunIsIdempotent() {
+        // FREQ=WEEKLY;COUNT=4 starting today produces 4 occurrences within
+        // the scheduler's 90-day window. Quarterly RRULEs only fit one
+        // occurrence per window — they materialize across multiple ticks
+        // over the year as the window slides forward.
         ServiceAgreement seeded = agreements.save(ServiceAgreement.builder()
                         .contactId(UUID.randomUUID())
                         .jobSiteId(UUID.randomUUID())
-                        .agreementType("quarterly-hvac")
-                        .startDate(LocalDate.now().minusDays(30))
-                        .recurrenceRule("FREQ=MONTHLY;INTERVAL=3;COUNT=4")
+                        .agreementType("weekly-bait-station")
+                        .startDate(LocalDate.now())
+                        .recurrenceRule("FREQ=WEEKLY;COUNT=4")
                         .status(ServiceAgreementStatus.ACTIVE)
                         .build())
                 .contextWrite(TenantContextHolder.write(ctx))
@@ -95,8 +100,8 @@ class ServiceAgreementSchedulerIT {
                         .contactId(UUID.randomUUID())
                         .jobSiteId(UUID.randomUUID())
                         .agreementType("paused-hvac")
-                        .startDate(LocalDate.now().minusDays(30))
-                        .recurrenceRule("FREQ=MONTHLY;INTERVAL=3;COUNT=4")
+                        .startDate(LocalDate.now())
+                        .recurrenceRule("FREQ=WEEKLY;COUNT=4")
                         .status(ServiceAgreementStatus.PAUSED)
                         .build())
                 .contextWrite(TenantContextHolder.write(ctx))
@@ -124,13 +129,14 @@ class ServiceAgreementSchedulerIT {
                         .build())
                 .contextWrite(TenantContextHolder.write(ctx))
                 .block();
-        // Good-RRULE agreement, same tenant.
+        // Good-RRULE agreement, same tenant — weekly so all 4 occurrences
+        // fit inside the 90-day scheduler window.
         ServiceAgreement good = agreements.save(ServiceAgreement.builder()
                         .contactId(UUID.randomUUID())
                         .jobSiteId(UUID.randomUUID())
-                        .agreementType("quarterly-hvac")
-                        .startDate(LocalDate.now().minusDays(30))
-                        .recurrenceRule("FREQ=MONTHLY;INTERVAL=3;COUNT=4")
+                        .agreementType("weekly-bait-station")
+                        .startDate(LocalDate.now())
+                        .recurrenceRule("FREQ=WEEKLY;COUNT=4")
                         .status(ServiceAgreementStatus.ACTIVE)
                         .build())
                 .contextWrite(TenantContextHolder.write(ctx))

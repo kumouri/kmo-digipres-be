@@ -11,6 +11,7 @@ import com.kumouri.kmodigipresbe.module.homeservices.service.ServiceAgreementSch
 import com.kumouri.kmodigipresbe.module.homeservices.service.ServiceAgreementService;
 import com.kumouri.kmodigipresbe.service.scheduling.RecurringSchedule;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 
@@ -46,7 +47,7 @@ import java.util.List;
  *   <li>10e: on-the-way SMS automation + public service-request widget.</li>
  * </ul>
  */
-@AutoConfiguration
+@AutoConfiguration(after = FieldServiceAutoConfiguration.class)
 @ConditionalOnProperty(prefix = "kmosf.modules.home-services", name = "enabled")
 public class HomeServicesAutoConfiguration {
 
@@ -77,7 +78,15 @@ public class HomeServicesAutoConfiguration {
         return new ServiceAgreementService(agreements, scheduler);
     }
 
+    /**
+     * Gated on {@link WorkOrderService} so the home-services module can boot
+     * even when the field-service module is disabled — every endpoint except
+     * {@code POST /maintenance-visits/{id}/dispatch} stays functional. The
+     * controller is conditioned on this bean so its handlers disappear too
+     * when field-service is off.
+     */
     @Bean
+    @ConditionalOnBean(WorkOrderService.class)
     public MaintenanceVisitService maintenanceVisitService(
             MaintenanceVisitRepository visits,
             WorkOrderService workOrders) {

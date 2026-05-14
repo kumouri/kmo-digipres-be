@@ -13,7 +13,6 @@ import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
 
 import java.time.Clock;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.UUID;
@@ -98,11 +97,4 @@ class ServiceAgreementSchedulerInvalidRruleTest {
         verify(visits, never()).save(any(MaintenanceVisit.class));
     }
 
-    @Test
-    @SuppressWarnings("unused")
-    void clockMustBeProvided_constructorSig() {
-        // Compile-time check that the constructor accepts a Clock — guards against
-        // accidental refactors that drop the testable clock dependency.
-        Instant ignored = Clock.systemUTC().instant();
-    }
 }

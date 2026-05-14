@@ -5,6 +5,7 @@ import com.kumouri.kmodigipresbe.module.homeservices.HomeServicesAutoConfigurati
 import com.kumouri.kmodigipresbe.module.homeservices.model.MaintenanceVisit;
 import com.kumouri.kmodigipresbe.module.homeservices.service.MaintenanceVisitService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -24,6 +25,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/home-services/maintenance-visits")
 @ConditionalOnProperty(prefix = "kmosf.modules.home-services", name = "enabled")
+@ConditionalOnBean(MaintenanceVisitService.class)
 @RequiredArgsConstructor
 public class MaintenanceVisitController {
 
