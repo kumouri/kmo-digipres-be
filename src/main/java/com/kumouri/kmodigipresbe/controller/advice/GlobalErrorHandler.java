@@ -22,6 +22,29 @@ import reactor.core.publisher.Mono;
 import java.net.URI;
 import java.util.UUID;
 
+/**
+ * Translates exceptions to RFC 7807 {@link ProblemDetail} responses. Ordered
+ * {@code -2} so it beats the default Spring resource handler.
+ *
+ * <h2>Error code allocation</h2>
+ * Each subsystem owns a numeric range so the {@code errorCode} stays mnemonic. Ranges
+ * are assigned as they're first used; the table below reflects what's in use plus
+ * Phase 9 reservations.
+ * <ul>
+ *   <li>{@code 1001-1099} — Tenancy (no tenant context, foreign tenantId, JWT issues)</li>
+ *   <li>{@code 1100-1199} — Core entity not-found, custom field validation, module gating</li>
+ *   <li>{@code 1300-1399} — <em>Phase 9f reserved</em>: AI budget violations</li>
+ *   <li>{@code 1400-1499} — Deal validation (1400 not-found, 1401 lostReason required)</li>
+ *   <li>{@code 1500-1599} — <em>Phase 13 reserved</em>: mobile sync conflicts</li>
+ *   <li>{@code 1600-1699} — <em>Phase 9b reserved</em>: public widget rejections</li>
+ *   <li>{@code 1700-1799} — <em>Phase 9c reserved</em>: transactional email failures</li>
+ *   <li>{@code 1800-1899} — <em>Phase 9a reserved</em>: audit/compliance (RoleGuard 1800,
+ *       audit query param validation 1801). Note: the original Phase 9 plan §8 listed
+ *       1400-1499 for audit/compliance, but {@code DealCrudService} ships 1400/1401
+ *       since Phase 1 — audit codes were shifted to 1800-1899 to avoid renumbering
+ *       merged code.</li>
+ * </ul>
+ */
 @Slf4j
 @Component
 @Order(-2)

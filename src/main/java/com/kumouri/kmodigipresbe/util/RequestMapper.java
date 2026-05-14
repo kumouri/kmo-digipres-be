@@ -1,5 +1,7 @@
 package com.kumouri.kmodigipresbe.util;
 
+import com.kumouri.kmodigipresbe.audit.AuditEvent;
+import com.kumouri.kmodigipresbe.audit.AuditEventDTO;
 import com.kumouri.kmodigipresbe.model.activity.Activity;
 import com.kumouri.kmodigipresbe.model.contact.Company;
 import com.kumouri.kmodigipresbe.model.contact.Contact;
@@ -97,4 +99,7 @@ public interface RequestMapper {
     Activity toActivity(ActivityDTO dto);
 
     ActivityDTO toActivityDTO(Activity activity);
+
+    // AuditEvent -> AuditEventDTO (read-only — no inbound DTO)
+    AuditEventDTO toAuditEventDTO(AuditEvent event);
 }

@@ -1,5 +1,6 @@
 package com.kumouri.kmodigipresbe.service;
 
+import com.kumouri.kmodigipresbe.audit.AuditEventWriter;
 import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
 import com.kumouri.kmodigipresbe.model.activity.Activity;
 import com.kumouri.kmodigipresbe.model.activity.SubjectType;
@@ -20,6 +21,7 @@ public class ContactCrudService {
 
     private final ContactRepository contacts;
     private final ActivityRepository activities;
+    private final AuditEventWriter auditor;
 
     public Flux<Contact> findAll() {
         return contacts.findAll();
@@ -54,7 +56,15 @@ public class ContactCrudService {
     }
 
     public Mono<Void> delete(UUID id) {
-        return contacts.deleteById(id);
+        // Audit the delete BEFORE issuing it: Spring Data MongoDB has no reactive
+        // delete callback, so DELETE events must be emitted explicitly. Loading the
+        // entity first gives the audit a coherent {tenantId, entityType, entityId};
+        // doing so under tenant context also ensures we never audit a cross-tenant
+        // delete (the find returns empty and the chain short-circuits before the
+        // actual deleteById fires).
+        return findById(id)
+                .flatMap(existing -> auditor.auditDelete(existing)
+                        .then(contacts.deleteById(id)));
     }
 
     public Flux<Activity> timeline(UUID contactId) {

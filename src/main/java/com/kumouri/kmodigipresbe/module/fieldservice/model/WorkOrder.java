@@ -1,7 +1,7 @@
 package com.kumouri.kmodigipresbe.module.fieldservice.model;
 
+import com.kumouri.kmodigipresbe.audit.Auditable;
 import com.kumouri.kmodigipresbe.extension.CustomFieldHost;
-import com.kumouri.kmodigipresbe.tenancy.TenantScoped;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -29,7 +29,7 @@ import java.util.UUID;
 @Builder(toBuilder = true)
 @NoArgsConstructor
 @AllArgsConstructor
-public class WorkOrder implements TenantScoped, CustomFieldHost {
+public class WorkOrder implements Auditable, CustomFieldHost {
 
     @Id
     private UUID id;
