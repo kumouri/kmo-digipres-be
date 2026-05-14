@@ -1,5 +1,8 @@
 package com.kumouri.kmodigipresbe.service;
 
+import com.kumouri.kmodigipresbe.automation.DomainEvent;
+import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
+import com.kumouri.kmodigipresbe.automation.DomainEventType;
 import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
 import com.kumouri.kmodigipresbe.model.deal.Deal;
 import com.kumouri.kmodigipresbe.model.deal.PipelineStage;
@@ -10,6 +13,8 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -17,6 +22,7 @@ import java.util.UUID;
 public class DealCrudService {
 
     private final DealRepository deals;
+    private final DomainEventPublisher events;
 
     public Flux<Deal> findAll() {
         return deals.findAll();
@@ -34,7 +40,12 @@ public class DealCrudService {
             toCreate.setStage(PipelineStage.NEW);
         }
         toCreate.setStageChangedAt(Instant.now());
-        return deals.save(toCreate);
+        return deals.save(toCreate).doOnSuccess(saved ->
+                events.publish(DomainEvent.of(
+                        DomainEventType.DEAL_CREATED,
+                        saved.getTenantId(),
+                        saved.getId(),
+                        flatten(saved))));
     }
 
     public Mono<Deal> update(UUID id, Deal patch) {
@@ -48,7 +59,12 @@ public class DealCrudService {
             if (patch.getOwnerId() != null) existing.setOwnerId(patch.getOwnerId());
             if (patch.getCustomFields() != null) existing.setCustomFields(patch.getCustomFields());
             return deals.save(existing);
-        });
+        }).doOnSuccess(saved ->
+                events.publish(DomainEvent.of(
+                        DomainEventType.DEAL_UPDATED,
+                        saved.getTenantId(),
+                        saved.getId(),
+                        flatten(saved))));
     }
 
     public Mono<Deal> moveStage(UUID id, PipelineStage target, String lostReason) {
@@ -57,14 +73,37 @@ public class DealCrudService {
                 return Mono.error(new DigiPresBeException(
                         "lostReason is required when moving to LOST", 1401, 400));
             }
+            PipelineStage from = existing.getStage();
             existing.setStage(target);
             existing.setStageChangedAt(Instant.now());
             existing.setLostReason(target == PipelineStage.LOST ? lostReason : null);
-            return deals.save(existing);
+            return deals.save(existing).doOnSuccess(saved -> {
+                Map<String, Object> p = flatten(saved);
+                p.put("fromStage", from == null ? null : from.name());
+                p.put("toStage", target.name());
+                events.publish(DomainEvent.of(
+                        DomainEventType.DEAL_STAGE_CHANGED,
+                        saved.getTenantId(),
+                        saved.getId(),
+                        p));
+            });
         });
     }
 
     public Mono<Void> delete(UUID id) {
         return deals.deleteById(id);
+    }
+
+    private static Map<String, Object> flatten(Deal d) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("dealId", d.getId() == null ? null : d.getId().toString());
+        m.put("title", d.getTitle());
+        m.put("stage", d.getStage() == null ? null : d.getStage().name());
+        m.put("value", d.getValue());
+        m.put("currency", d.getCurrency());
+        m.put("primaryContactId", d.getPrimaryContactId() == null ? null : d.getPrimaryContactId().toString());
+        m.put("companyId", d.getCompanyId() == null ? null : d.getCompanyId().toString());
+        m.put("ownerId", d.getOwnerId() == null ? null : d.getOwnerId().toString());
+        return m;
     }
 }
