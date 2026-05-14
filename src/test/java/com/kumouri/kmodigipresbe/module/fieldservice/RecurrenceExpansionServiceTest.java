@@ -2,6 +2,7 @@ package com.kumouri.kmodigipresbe.module.fieldservice;
 
 import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
 import com.kumouri.kmodigipresbe.module.fieldservice.service.RecurrenceExpansionService;
+import com.kumouri.kmodigipresbe.service.scheduling.Rfc5545RecurringSchedule;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -13,7 +14,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RecurrenceExpansionServiceTest {
 
-    private final RecurrenceExpansionService svc = new RecurrenceExpansionService();
+    // Phase 9b promoted the RRULE engine into core; the facade just delegates.
+    private final RecurrenceExpansionService svc =
+            new RecurrenceExpansionService(new Rfc5545RecurringSchedule());
 
     @Test
     void weeklyRecurrence_expandsCorrectlyAcrossQuarter() {

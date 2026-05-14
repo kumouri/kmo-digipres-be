@@ -11,6 +11,7 @@ import com.kumouri.kmodigipresbe.module.fieldservice.service.JobSiteService;
 import com.kumouri.kmodigipresbe.module.fieldservice.service.RecurrenceExpansionService;
 import com.kumouri.kmodigipresbe.module.fieldservice.service.WorkOrderService;
 import com.kumouri.kmodigipresbe.repository.ActivityRepository;
+import com.kumouri.kmodigipresbe.service.scheduling.RecurringSchedule;
 import com.kumouri.kmodigipresbe.service.storage.FileStorageService;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -41,8 +42,8 @@ public class FieldServiceAutoConfiguration {
     }
 
     @Bean
-    public RecurrenceExpansionService recurrenceExpansionService() {
-        return new RecurrenceExpansionService();
+    public RecurrenceExpansionService recurrenceExpansionService(RecurringSchedule schedule) {
+        return new RecurrenceExpansionService(schedule);
     }
 
     @Bean

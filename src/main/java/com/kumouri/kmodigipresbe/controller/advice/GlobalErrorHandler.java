@@ -33,16 +33,21 @@ import java.util.UUID;
  * <ul>
  *   <li>{@code 1001-1099} — Tenancy (no tenant context, foreign tenantId, JWT issues)</li>
  *   <li>{@code 1100-1199} — Core entity not-found, custom field validation, module gating</li>
- *   <li>{@code 1300-1399} — <em>Phase 9f reserved</em>: AI budget violations</li>
+ *   <li>{@code 1200-1299} — <em>Phase 9f reserved</em>: AI budget violations + AI service
+ *       failures. Re-allocated from the plan §8 slot of 1300-1399 because Phase 3's
+ *       {@code Rfc5545RecurringSchedule} ships {@code 1300} for "Invalid RRULE".</li>
+ *   <li>{@code 1300} — Invalid RRULE (Phase 3, now in {@code Rfc5545RecurringSchedule})</li>
  *   <li>{@code 1400-1499} — Deal validation (1400 not-found, 1401 lostReason required)</li>
  *   <li>{@code 1500-1599} — <em>Phase 13 reserved</em>: mobile sync conflicts</li>
- *   <li>{@code 1600-1699} — <em>Phase 9b reserved</em>: public widget rejections</li>
+ *   <li>{@code 1600-1699} — <em>Phase 9b</em>: public widget rejections (1600 generic;
+ *       1601 malformed; 1602 signature invalid; 1603 expired)</li>
  *   <li>{@code 1700-1799} — <em>Phase 9c reserved</em>: transactional email failures</li>
- *   <li>{@code 1800-1899} — <em>Phase 9a reserved</em>: audit/compliance (RoleGuard 1800,
- *       audit query param validation 1801). Note: the original Phase 9 plan §8 listed
- *       1400-1499 for audit/compliance, but {@code DealCrudService} ships 1400/1401
- *       since Phase 1 — audit codes were shifted to 1800-1899 to avoid renumbering
- *       merged code.</li>
+ *   <li>{@code 1800-1899} — <em>Phase 9a</em>: audit/compliance (RoleGuard 1800,
+ *       audit query param validation 1801). The original plan §8 listed 1400-1499 for
+ *       audit/compliance, but {@code DealCrudService} ships 1400/1401 since Phase 1 —
+ *       audit codes were shifted to 1800-1899 to avoid renumbering merged code.</li>
+ *   <li>{@code 1900-1999} — Phase 6 automation (WorkflowRule 1900, WebhookSubscription
+ *       1910). The plan's original AI slot would have collided here too.</li>
  * </ul>
  */
 @Slf4j

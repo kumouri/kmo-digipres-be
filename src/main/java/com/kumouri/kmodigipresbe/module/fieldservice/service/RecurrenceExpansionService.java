@@ -1,48 +1,32 @@
 package com.kumouri.kmodigipresbe.module.fieldservice.service;
 
-import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
-import net.fortuna.ical4j.model.Recur;
+import com.kumouri.kmodigipresbe.service.scheduling.RecurringSchedule;
 
 import java.time.Instant;
-import java.time.ZoneOffset;
-import java.time.ZonedDateTime;
 import java.util.List;
 
 /**
- * Expands an RFC 5545 RRULE string into concrete occurrence instants inside a window.
+ * Field-service module's recurrence service. Phase 9 (sub-PR 9b) promoted the
+ * underlying RRULE engine into core as {@link RecurringSchedule}; this class is
+ * now a thin facade so existing callers ({@code WorkOrderService} and its tests)
+ * keep working without modification.
  *
- * <p>Phase 3 keeps this in-memory and stateless. Backfilling materialized child
- * work orders for an entire year of weekly visits is fine here (≤ ~60 expansions
- * per call); larger windows would want pagination or chunking, but the
- * field-service use cases (NMM monthly visits, weekly safety checks) fit inside
- * this contract comfortably.
+ * <p>Behavior is unchanged — same windows, same error code (1300 for invalid
+ * RRULE), same handling of the optional {@code RRULE:} prefix. The
+ * {@code RecurringSchedulePromotionTest} asserts identical expansions.
  */
 public class RecurrenceExpansionService {
 
+    private final RecurringSchedule delegate;
+
+    public RecurrenceExpansionService(RecurringSchedule delegate) {
+        this.delegate = delegate;
+    }
+
     /**
-     * @param rrule  RFC 5545 RRULE string, e.g. {@code "FREQ=MONTHLY;BYMONTHDAY=15"}.
-     *               The {@code RRULE:} prefix is optional and stripped.
-     * @param seed   the first occurrence (DTSTART semantics) — used as the anchor
-     *               for BYMONTHDAY / BYDAY / etc.
-     * @param from   inclusive window start.
-     * @param to     exclusive window end.
-     * @return       the occurrences whose start time falls in {@code [from, to)},
-     *               in chronological order.
+     * @see RecurringSchedule#expand(String, Instant, Instant, Instant)
      */
     public List<Instant> expand(String rrule, Instant seed, Instant from, Instant to) {
-        if (rrule == null || rrule.isBlank()) return List.of();
-        String body = rrule.startsWith("RRULE:") ? rrule.substring("RRULE:".length()) : rrule;
-        try {
-            Recur<ZonedDateTime> recur = new Recur<>(body);
-            ZonedDateTime seedZ = seed.atZone(ZoneOffset.UTC);
-            ZonedDateTime fromZ = from.atZone(ZoneOffset.UTC);
-            ZonedDateTime toZ = to.atZone(ZoneOffset.UTC);
-            return recur.getDates(seedZ, fromZ, toZ).stream()
-                    .map(ZonedDateTime::toInstant)
-                    .toList();
-        } catch (RuntimeException ex) {
-            throw new DigiPresBeException(
-                    "Invalid RRULE: " + ex.getMessage(), 1300, 400);
-        }
+        return delegate.expand(rrule, seed, from, to);
     }
 }
