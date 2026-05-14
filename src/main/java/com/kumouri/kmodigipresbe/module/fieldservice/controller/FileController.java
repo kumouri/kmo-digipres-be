@@ -3,7 +3,7 @@ package com.kumouri.kmodigipresbe.module.fieldservice.controller;
 import com.kumouri.kmodigipresbe.extension.TenantModuleRegistry;
 import com.kumouri.kmodigipresbe.module.fieldservice.FieldServiceAutoConfiguration;
 import com.kumouri.kmodigipresbe.module.fieldservice.service.CaptureService;
-import com.kumouri.kmodigipresbe.module.fieldservice.service.FileStorageService;
+import com.kumouri.kmodigipresbe.service.storage.FileStorageService;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;

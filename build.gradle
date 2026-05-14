@@ -62,6 +62,8 @@ dependencies {
     // Phase 4 — calendar/imports/templates/reports
     implementation 'com.samskivert:jmustache:1.16'
     implementation 'org.apache.commons:commons-csv:1.11.0'
+    // Phase 7 — quote/invoice PDF generation (OpenPDF: iText fork, MPL/LGPL)
+    implementation 'com.github.librepdf:openpdf:2.0.3'
     compileOnly 'org.projectlombok:lombok'
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
 //    developmentOnly 'org.springframework.boot:spring-boot-docker-compose'
