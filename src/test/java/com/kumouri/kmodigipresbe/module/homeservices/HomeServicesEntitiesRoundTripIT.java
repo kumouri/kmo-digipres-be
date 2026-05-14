@@ -22,7 +22,6 @@ import org.springframework.data.mongodb.core.ReactiveMongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.test.context.TestPropertySource;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -113,7 +112,9 @@ class HomeServicesEntitiesRoundTripIT {
 
     @Test
     void maintenanceVisit_roundTrip() {
-        Instant start = Instant.now().plus(Duration.ofDays(7));
+        // Use a fixed zero-nanos Instant: Mongo stores Instants at millisecond
+        // precision, so any sub-millisecond component is lost on round-trip.
+        Instant start = Instant.parse("2026-05-21T09:00:00Z");
         MaintenanceVisit saved = visits.save(MaintenanceVisit.builder()
                         .serviceAgreementId(UUID.randomUUID())
                         .jobSiteId(UUID.randomUUID())
