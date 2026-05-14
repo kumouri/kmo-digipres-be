@@ -1,6 +1,7 @@
-package com.kumouri.kmodigipresbe.model.deal;
+package com.kumouri.kmodigipresbe.module.fieldservice.model;
 
 import com.kumouri.kmodigipresbe.extension.CustomFieldHost;
+import com.kumouri.kmodigipresbe.model.contact.PostalAddress;
 import com.kumouri.kmodigipresbe.tenancy.TenantScoped;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -11,50 +12,40 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.annotation.Version;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.GeoSpatialIndexType;
+import org.springframework.data.mongodb.core.index.GeoSpatialIndexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
-import java.math.BigDecimal;
 import java.time.Instant;
-import java.time.LocalDate;
 import java.util.Map;
 import java.util.UUID;
 
-@Document("deals")
-@CompoundIndex(name = "tenant_stage_idx", def = "{ 'tenantId': 1, 'stage': 1 }")
-@CompoundIndex(name = "tenant_owner_idx", def = "{ 'tenantId': 1, 'ownerId': 1 }")
+@Document("job_sites")
+@CompoundIndex(name = "tenant_contact_idx", def = "{ 'tenantId': 1, 'contactId': 1 }")
 @Data
 @Builder(toBuilder = true)
 @NoArgsConstructor
 @AllArgsConstructor
-public class Deal implements TenantScoped, CustomFieldHost {
+public class JobSite implements TenantScoped, CustomFieldHost {
 
     @Id
     private UUID id;
 
     private UUID tenantId;
 
-    private String title;
-
-    @Builder.Default
-    private PipelineStage stage = PipelineStage.NEW;
-
-    private BigDecimal value;
-
-    @Builder.Default
-    private String currency = "USD";
-
-    private LocalDate expectedCloseDate;
-
-    private UUID primaryContactId;
+    private UUID contactId;
     private UUID companyId;
-    private UUID ownerId;
+
+    private PostalAddress address;
 
     /**
-     * Required when {@code stage == LOST}; null otherwise.
+     * GeoJSON point. Indexed with {@code 2dsphere} so {@code $near} queries work.
      */
-    private String lostReason;
+    @GeoSpatialIndexed(name = "job_site_geo_idx", type = GeoSpatialIndexType.GEO_2DSPHERE)
+    private LatLng location;
 
-    private Instant stageChangedAt;
+    private String label;
+    private String accessNotes;
 
     @Builder.Default
     private Map<String, Object> customFields = Map.of();
@@ -67,4 +58,9 @@ public class Deal implements TenantScoped, CustomFieldHost {
 
     @LastModifiedDate
     private Instant updatedAt;
+
+    @Override
+    public String getEntityType() {
+        return "JOB_SITE";
+    }
 }
