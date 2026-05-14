@@ -20,24 +20,39 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /**
- * Rate-limits unauthenticated {@code POST /public/{tenantSlug}/contacts} requests
- * to {@value #MAX_REQUESTS} per {@value #WINDOW_SECONDS} seconds, keyed by source
- * IP + tenant slug. Other {@code /public/**} endpoints (notably
- * {@code /public/booking}, {@code /public/widget/**}) are deliberately not affected
- * — the path matcher only triggers on the contacts route.
+ * Rate-limits unauthenticated public lead-capture POSTs to {@value #MAX_REQUESTS}
+ * per {@value #WINDOW_SECONDS} seconds, keyed by source IP + tenant slug.
+ * Currently covers:
+ * <ul>
+ *   <li>{@code POST /public/{tenantSlug}/contacts}</li>
+ *   <li>{@code POST /public/{tenantSlug}/newsletter/subscribe}</li>
+ * </ul>
+ * Both endpoints share the same bucket per (IP, slug) on purpose: they are the same
+ * abuse profile (anonymous form-fill against a tenant's contact list), and an
+ * attacker should not be able to double their effective quota by alternating.
+ * Other {@code /public/**} endpoints (notably {@code /public/booking},
+ * {@code /public/widget/**}) are deliberately not affected — the path matcher only
+ * triggers on lead-capture routes.
  *
  * <p>Bucket storage is an in-process {@link ConcurrentHashMap}, which is fine for
  * a single-instance dev/prod-of-one deployment. TODO: replace with a Redis-backed
  * token bucket (or Bucket4j-with-redis) once we run multiple instances; the in-memory
  * map silently lets each replica grant a fresh quota per IP+tenant.
+ *
+ * <p>Class name retained for git history continuity even though the filter now
+ * covers more than just contacts.
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 100)
 public class PublicContactRateLimitFilter implements WebFilter {
 
-    /** Path pattern: /public/{tenantSlug}/contacts — strict, so booking + widget aren't caught. */
+    /**
+     * Path pattern: {@code /public/{tenantSlug}/contacts} and
+     * {@code /public/{tenantSlug}/newsletter/subscribe} — strict, so booking + widget
+     * aren't caught.
+     */
     private static final Pattern PATH_PATTERN =
-            Pattern.compile("^/public/[^/]+/contacts/?$");
+            Pattern.compile("^/public/[^/]+/(contacts|newsletter/subscribe)/?$");
 
     static final int MAX_REQUESTS = 10;
     static final int WINDOW_SECONDS = 60;
