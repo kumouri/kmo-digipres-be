@@ -12,12 +12,17 @@ public interface ContactRepository extends TenantScopedReactiveMongoRepository<C
     Flux<Contact> findAllByTenantIdAndCompanyId(UUID tenantId, UUID companyId);
 
     /**
-     * Look up contacts by tenant + an email channel address. The nested path is
-     * {@code emails.email.address} because {@code EmailContact.email} is a
-     * {@code jakarta.mail.internet.InternetAddress} which Mongo serializes as a sub-doc
-     * with an {@code address} field. We use an explicit {@code @Query} rather than a
-     * derived method name to avoid Spring Data's camelCase parser guessing wrong.
+     * Look up contacts by tenant + an email channel address. The path is
+     * {@code emails.email} (a flat String) since
+     * {@code InternetAddressConverters} registers a writing converter that
+     * persists {@code jakarta.mail.internet.InternetAddress} as its address
+     * string. Pre-converter data used the nested {@code emails.email.address}
+     * shape; the {@code $or} keeps both reachable until a one-time backfill
+     * rewrites old docs.
+     *
+     * <p>An explicit {@code @Query} is used rather than a derived method name
+     * to avoid Spring Data's camelCase parser guessing wrong.
      */
-    @Query("{ 'tenantId': ?0, 'emails.email.address': ?1 }")
+    @Query("{ 'tenantId': ?0, $or: [ { 'emails.email': ?1 }, { 'emails.email.address': ?1 } ] }")
     Flux<Contact> findByTenantAndEmailAddress(UUID tenantId, String emailAddress);
 }
