@@ -19,6 +19,7 @@ import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtTimestampValidator;
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoderFactory;
+import reactor.core.publisher.Mono;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -60,6 +61,11 @@ public class OAuthClientRegistrationConfig {
         }
         if (registrations.isEmpty()) {
             log.info("No OAuth providers configured; portal will offer magic-link + passkey only.");
+            // InMemoryReactiveClientRegistrationRepository's constructor rejects an empty
+            // list (Assert.notEmpty), so return a no-op repository directly. This is what
+            // makes the "boot cleanly when no OAuth credentials are configured" promise in
+            // this class's javadoc actually hold.
+            return registrationId -> Mono.empty();
         }
         return new InMemoryReactiveClientRegistrationRepository(registrations);
     }
