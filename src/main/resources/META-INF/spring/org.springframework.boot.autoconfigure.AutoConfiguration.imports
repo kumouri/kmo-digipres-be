@@ -1,1 +1,2 @@
 com.kumouri.kmodigipresbe.module.fieldservice.FieldServiceAutoConfiguration
+com.kumouri.kmodigipresbe.module.homeservices.HomeServicesAutoConfiguration
