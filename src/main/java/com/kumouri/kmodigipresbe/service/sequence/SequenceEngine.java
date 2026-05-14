@@ -243,26 +243,36 @@ public class SequenceEngine {
     }
 
     private Mono<String> loadRecipient(UUID contactId) {
-        // Read the raw BSON document instead of deserialising Contact — EmailContact
-        // embeds {@code jakarta.mail.internet.InternetAddress}, which Spring Data Mongo's
-        // POJO codec doesn't always reconstruct cleanly. We only need the first email
-        // address; pull it straight out of the stored doc.
+        // Read the raw BSON document — EmailContact embeds
+        // {@code jakarta.mail.internet.InternetAddress}, which Spring Data Mongo's POJO
+        // codec doesn't always reconstruct cleanly. Pull the address straight out.
         Query q = new Query(Criteria.where("_id").is(contactId));
         q.fields().include("emails");
         return mongo.findOne(q, org.bson.Document.class, "contacts")
+                .doOnNext(d -> log.debug("loadRecipient {} -> {}", contactId, d == null ? "null" : d.toJson()))
                 .mapNotNull(SequenceEngine::extractFirstEmailAddress);
     }
 
     @SuppressWarnings("unchecked")
     private static String extractFirstEmailAddress(org.bson.Document doc) {
+        if (doc == null) return null;
         Object rawEmails = doc.get("emails");
         if (!(rawEmails instanceof java.util.List<?> emails) || emails.isEmpty()) return null;
         Object first = emails.get(0);
         if (!(first instanceof org.bson.Document entry)) return null;
-        Object emailField = entry.get("email");
-        if (!(emailField instanceof org.bson.Document emailDoc)) return null;
-        String address = emailDoc.getString("address");
-        return (address == null || address.isBlank()) ? null : address;
+        // Two storage shapes seen in the wild for EmailContact (a record wrapping
+        // InternetAddress): either {address, personal} flat — newer codec — or
+        // {email: {address, personal}} nested under the record component name.
+        // Probe both before giving up.
+        String flat = entry.getString("address");
+        if (flat != null && !flat.isBlank()) return flat;
+        Object nested = entry.get("email");
+        if (nested instanceof org.bson.Document emailDoc) {
+            String address = emailDoc.getString("address");
+            if (address != null && !address.isBlank()) return address;
+        }
+        log.warn("loadRecipient: unexpected emails[0] shape: {}", entry.toJson());
+        return null;
     }
 
     private static Duration parseDuration(String iso) {
