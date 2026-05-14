@@ -122,6 +122,9 @@ public class SequenceEngine {
                 .then();
     }
 
+    /** Maximum steps to process per tick to guard against pathological sequences. */
+    public static final int MAX_STEPS_PER_TICK = 16;
+
     Mono<Void> processEnrollment(SequenceEnrollment enrollment) {
         TenantContext ctx = new TenantContext(
                 enrollment.getTenantId(), null, Set.of(SYSTEM_ROLE));
@@ -132,9 +135,28 @@ public class SequenceEngine {
                     enrollment.setStatus(SequenceEnrollment.Status.EXITED);
                     return enrollments.save(enrollment).then(Mono.empty());
                 }))
-                .flatMap(seq -> processStep(seq, enrollment))
+                .flatMap(seq -> processChain(seq, enrollment, MAX_STEPS_PER_TICK))
                 .then()
                 .contextWrite(TenantContextHolder.write(ctx));
+    }
+
+    /**
+     * Loop within a single tick: keep advancing through steps until the enrollment
+     * either terminates or hits a WAIT whose nextFireAt is in the future. EMAIL_SEND,
+     * BRANCH, and EXIT all advance immediately, so a 3-step "send → branch → exit"
+     * sequence runs to completion in one tick once its engagement signal exists.
+     */
+    private Mono<Void> processChain(Sequence seq, SequenceEnrollment enrollment, int remainingHops) {
+        if (remainingHops <= 0) {
+            log.warn("Enrollment {} hit MAX_STEPS_PER_TICK={} — pausing until next tick",
+                    enrollment.getId(), MAX_STEPS_PER_TICK);
+            return Mono.empty();
+        }
+        if (enrollment.getStatus() != SequenceEnrollment.Status.ACTIVE) return Mono.empty();
+        Instant gate = enrollment.getNextFireAt();
+        if (gate != null && gate.isAfter(now())) return Mono.empty();
+        return processStep(seq, enrollment)
+                .then(Mono.defer(() -> processChain(seq, enrollment, remainingHops - 1)));
     }
 
     private Mono<Void> processStep(Sequence seq, SequenceEnrollment enrollment) {

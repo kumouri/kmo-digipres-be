@@ -202,6 +202,9 @@ class SequenceEngineIT {
                         .build())
                 .contextWrite(TenantContextHolder.write(ctx))
                 .block();
+        // A WAIT step sits between EMAIL_SEND and BRANCH so tick 1 stops after the
+        // send — giving the test a chance to seed the OPEN engagement against the
+        // now-known lastMessageId before BRANCH evaluates.
         Sequence seq = sequences.save(Sequence.builder()
                         .name("BranchTest").status(Sequence.Status.ACTIVE)
                         .steps(List.of(
@@ -210,15 +213,18 @@ class SequenceEngineIT {
                                         .emailSubject("test").emailHtmlBody("<p>x</p>")
                                         .emailFrom("sales@example.test").build(),
                                 SequenceStep.builder()
-                                        .stepIndex(1).type(SequenceStepType.BRANCH)
+                                        .stepIndex(1).type(SequenceStepType.WAIT)
+                                        .waitDuration("PT1H").build(),
+                                SequenceStep.builder()
+                                        .stepIndex(2).type(SequenceStepType.BRANCH)
                                         .branchCondition(List.of(RuleCondition.builder()
                                                 .field("event").op(RuleCondition.Op.EQUALS)
                                                 .value("OPEN").build()))
-                                        .branchTrueNextStep(2).branchFalseNextStep(3).build(),
+                                        .branchTrueNextStep(3).branchFalseNextStep(4).build(),
                                 SequenceStep.builder()
-                                        .stepIndex(2).type(SequenceStepType.EXIT).build(),
+                                        .stepIndex(3).type(SequenceStepType.EXIT).build(),
                                 SequenceStep.builder()
-                                        .stepIndex(3).type(SequenceStepType.EXIT).build()))
+                                        .stepIndex(4).type(SequenceStepType.EXIT).build()))
                         .build())
                 .contextWrite(TenantContextHolder.write(ctx))
                 .block();
@@ -232,11 +238,12 @@ class SequenceEngineIT {
                 .contextWrite(TenantContextHolder.write(ctx))
                 .block();
 
-        // Tick 1: EMAIL_SEND fires, lastMessageId stored.
+        // Tick 1: EMAIL_SEND fires, then WAIT sets nextFireAt — engine stops.
         engine.runDueOnce().block();
         SequenceEnrollment afterSend = enrollments.findById(e.getId())
                 .contextWrite(TenantContextHolder.write(ctx)).block();
         assertThat(afterSend.getCurrentStepIndex()).isEqualTo(1);
+        assertThat(afterSend.getNextFireAt()).isNotNull();
 
         // Seed an OPEN engagement matching the lastMessageId.
         engagements.save(EmailEngagement.builder()
@@ -248,13 +255,16 @@ class SequenceEngineIT {
                 .contextWrite(TenantContextHolder.write(ctx))
                 .block();
 
-        // Tick 2: BRANCH evaluates → true → advances to step 2 → EXIT → COMPLETED.
-        engine.runDueOnce().block();
+        // Backdate the WAIT gate so the next tick advances past it.
+        afterSend.setNextFireAt(Instant.parse("2026-05-14T19:59:00Z"));
+        enrollments.save(afterSend).contextWrite(TenantContextHolder.write(ctx)).block();
+
+        // Tick 2: WAIT advances, BRANCH evaluates → true → step 3 → EXIT → COMPLETED.
         engine.runDueOnce().block();
         SequenceEnrollment afterBranch = enrollments.findById(e.getId())
                 .contextWrite(TenantContextHolder.write(ctx)).block();
         assertThat(afterBranch.getStatus()).isEqualTo(SequenceEnrollment.Status.COMPLETED);
-        assertThat(afterBranch.getCompletedSteps()).contains(0, 1);
+        assertThat(afterBranch.getCompletedSteps()).contains(0, 1, 2);
     }
 
     @Test
