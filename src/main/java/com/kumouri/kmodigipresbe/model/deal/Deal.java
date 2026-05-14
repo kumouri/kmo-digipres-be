@@ -1,4 +1,4 @@
-package com.kumouri.kmodigipresbe.model.contact;
+package com.kumouri.kmodigipresbe.model.deal;
 
 import com.kumouri.kmodigipresbe.tenancy.TenantScoped;
 import lombok.AllArgsConstructor;
@@ -12,48 +12,48 @@ import org.springframework.data.annotation.Version;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.mapping.Document;
 
+import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.List;
+import java.time.LocalDate;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
-@Document("contacts")
+@Document("deals")
+@CompoundIndex(name = "tenant_stage_idx", def = "{ 'tenantId': 1, 'stage': 1 }")
 @CompoundIndex(name = "tenant_owner_idx", def = "{ 'tenantId': 1, 'ownerId': 1 }")
-@CompoundIndex(name = "tenant_companyId_idx", def = "{ 'tenantId': 1, 'companyId': 1 }")
 @Data
 @Builder(toBuilder = true)
 @NoArgsConstructor
 @AllArgsConstructor
-public class Contact implements TenantScoped {
+public class Deal implements TenantScoped {
 
     @Id
     private UUID id;
 
     private UUID tenantId;
 
+    private String title;
+
     @Builder.Default
-    private ContactType type = ContactType.PERSON;
+    private PipelineStage stage = PipelineStage.NEW;
 
-    private String firstName;
-    private String lastName;
-    private String displayName;
+    private BigDecimal value;
 
+    @Builder.Default
+    private String currency = "USD";
+
+    private LocalDate expectedCloseDate;
+
+    private UUID primaryContactId;
     private UUID companyId;
-
-    @Builder.Default
-    private List<EmailContact> emails = List.of();
-
-    @Builder.Default
-    private List<PhoneNumber> phones = List.of();
-
-    @Builder.Default
-    private List<PostalAddress> addresses = List.of();
-
-    @Builder.Default
-    private Set<String> tags = Set.of();
-
     private UUID ownerId;
+
+    /**
+     * Required when {@code stage == LOST}; null otherwise.
+     */
+    private String lostReason;
+
+    private Instant stageChangedAt;
 
     @Builder.Default
     private Map<String, Object> customFields = Map.of();

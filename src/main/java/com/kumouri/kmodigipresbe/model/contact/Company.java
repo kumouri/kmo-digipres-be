@@ -1,4 +1,4 @@
-package com.kumouri.kmodigipresbe.model.meeting;
+package com.kumouri.kmodigipresbe.model.contact;
 
 import com.kumouri.kmodigipresbe.tenancy.TenantScoped;
 import lombok.AllArgsConstructor;
@@ -10,36 +10,41 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.annotation.Version;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
-import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-@Document("meetings")
-@CompoundIndex(name = "tenant_start_idx", def = "{ 'tenantId': 1, 'start': 1 }")
+@Document("companies")
+@CompoundIndex(name = "tenant_name_idx", def = "{ 'tenantId': 1, 'name': 1 }")
 @Data
 @Builder(toBuilder = true)
 @NoArgsConstructor
 @AllArgsConstructor
-public class Meeting implements TenantScoped {
+public class Company implements TenantScoped {
+
     @Id
     private UUID id;
 
-    @Indexed
     private UUID tenantId;
 
     private String name;
-    private String description;
-    private String location;
-    private LocalDateTime start;
-    private LocalDateTime end;
-    private boolean allDay;
+    private String website;
+    private String industry;
 
-    private UUID organizerContactId;
-    private Set<UUID> attendeeContactIds;
+    @Builder.Default
+    private List<PostalAddress> addresses = List.of();
+
+    @Builder.Default
+    private Set<String> tags = Set.of();
+
+    private UUID ownerId;
+
+    @Builder.Default
+    private Map<String, Object> customFields = Map.of();
 
     @Version
     private Long version;
