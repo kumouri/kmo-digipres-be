@@ -108,11 +108,14 @@ public class SequenceEngine {
     public Mono<Void> runDueOnce() {
         Instant now = now();
         Query q = new Query(new Criteria().andOperator(
-                Criteria.where("status").is(SequenceEnrollment.Status.ACTIVE.name()),
+                Criteria.where("status").is(SequenceEnrollment.Status.ACTIVE),
                 new Criteria().orOperator(
                         Criteria.where("nextFireAt").is(null),
                         Criteria.where("nextFireAt").lte(now))));
         return mongo.find(q, SequenceEnrollment.class)
+                .doOnNext(e -> log.info("tick: due enrollment {} step={} status={} nextFireAt={} email={}",
+                        e.getId(), e.getCurrentStepIndex(), e.getStatus(),
+                        e.getNextFireAt(), e.getContactEmail()))
                 .flatMap(this::processEnrollment)
                 .onErrorContinue((err, evt) ->
                         log.warn("Sequence enrollment {} failed: {}", evt, err.toString()))
