@@ -1,11 +1,17 @@
 package com.kumouri.kmodigipresbe.module.homeservices;
 
+import com.kumouri.kmodigipresbe.audit.AuditEventWriter;
+import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
 import com.kumouri.kmodigipresbe.extension.ModuleAutoConfigurationSupport;
 import com.kumouri.kmodigipresbe.extension.ModuleDefinition;
 import com.kumouri.kmodigipresbe.module.fieldservice.FieldServiceAutoConfiguration;
+import com.kumouri.kmodigipresbe.module.homeservices.repository.EquipmentRepository;
+import com.kumouri.kmodigipresbe.module.homeservices.service.DispatchBoardService;
+import com.kumouri.kmodigipresbe.module.homeservices.service.EquipmentService;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
+import org.springframework.data.mongodb.core.ReactiveMongoOperations;
 
 import java.util.List;
 
@@ -29,17 +35,16 @@ import java.util.List;
  *
  * <p>Per-PR build-out within Phase 10:
  * <ul>
- *   <li><strong>10a (this PR):</strong> entities, repositories, stub controllers
- *       with module gating wired but empty handler bodies.</li>
+ *   <li>10a (shipped): entities, repositories, stub controllers with module gating
+ *       wired but empty handler bodies.</li>
  *   <li>10b: {@code ServiceAgreementSchedulerService} + real services for agreements
  *       and visits.</li>
- *   <li>10c: {@code EquipmentService} (CRUD + warranty scan) + {@code DispatchBoardService}.</li>
+ *   <li><strong>10c (this PR):</strong> {@link EquipmentService} (CRUD + warranty
+ *       scan emitting {@code EQUIPMENT_WARRANTY_EXPIRING}) and
+ *       {@link DispatchBoardService}; controllers wired through.</li>
  *   <li>10d: QuickBooks Online OAuth + invoice sync.</li>
  *   <li>10e: on-the-way SMS automation + public service-request widget.</li>
  * </ul>
- *
- * <p>Service-bean registrations land in the consuming sub-PRs; this class currently
- * only contributes the {@link ModuleDefinition}.
  */
 @AutoConfiguration
 @ConditionalOnProperty(prefix = "kmosf.modules.home-services", name = "enabled")
@@ -52,5 +57,18 @@ public class HomeServicesAutoConfiguration {
         return ModuleAutoConfigurationSupport.module(
                 MODULE_KEY, "Home Services", "0.1.0",
                 List.of("EQUIPMENT", "SERVICE_AGREEMENT", "MAINTENANCE_VISIT"));
+    }
+
+    @Bean
+    public EquipmentService equipmentService(EquipmentRepository equipment,
+                                             ReactiveMongoOperations mongo,
+                                             AuditEventWriter auditor,
+                                             DomainEventPublisher events) {
+        return new EquipmentService(equipment, mongo, auditor, events);
+    }
+
+    @Bean
+    public DispatchBoardService dispatchBoardService(ReactiveMongoOperations mongo) {
+        return new DispatchBoardService(mongo);
     }
 }

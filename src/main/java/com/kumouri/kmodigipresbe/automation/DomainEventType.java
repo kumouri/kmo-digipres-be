@@ -31,6 +31,12 @@ public final class DomainEventType {
     // subscribes to fan out a notification email.
     public static final String MENTION_CREATED = "mention.created";
 
+    // Phase 10c — fired by the home-services EquipmentService warranty scan when
+    // a piece of equipment's warranty is set to expire inside the next 30 days.
+    // Sequence engine / outbound rules subscribe to send a renewal nudge. Payload:
+    // {equipmentId, jobSiteId, warrantyExpiresAt, manufacturer, model, serial}.
+    public static final String EQUIPMENT_WARRANTY_EXPIRING = "equipment.warrantyExpiring";
+
     private DomainEventType() {
     }
 }

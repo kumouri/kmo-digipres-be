@@ -3,6 +3,8 @@ package com.kumouri.kmodigipresbe.module.homeservices.controller;
 import com.kumouri.kmodigipresbe.extension.TenantModuleRegistry;
 import com.kumouri.kmodigipresbe.module.homeservices.HomeServicesAutoConfiguration;
 import com.kumouri.kmodigipresbe.module.homeservices.model.Equipment;
+import com.kumouri.kmodigipresbe.module.homeservices.service.EquipmentService;
+import com.kumouri.kmodigipresbe.tenancy.RoleGuard;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
@@ -21,8 +23,10 @@ import reactor.core.publisher.Mono;
 import java.util.UUID;
 
 /**
- * 10a stub: handlers return empty results. 10c (Equipment + Dispatch board) wires
- * the real {@code EquipmentService} and fills in the warranty scan + JobSite lookup.
+ * Equipment CRUD + JobSite-scoped lookup. DELETE is admin-only and explicitly
+ * audited (Spring Data MongoDB has no reactive delete callback). List is
+ * unpaginated for now per {@code CLAUDE.md} — revisit when any tenant crosses
+ * ~500 rows.
  */
 @RestController
 @RequestMapping("/home-services/equipment")
@@ -30,38 +34,41 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class EquipmentController {
 
+    private final EquipmentService service;
     private final TenantModuleRegistry modules;
 
     @GetMapping
     public Flux<Equipment> list() {
-        return guard().thenMany(Flux.empty());
+        return guard().thenMany(service.findAll());
     }
 
     @GetMapping("/{id}")
     public Mono<Equipment> get(@PathVariable UUID id) {
-        return guard().then(Mono.empty());
+        return guard().then(service.findById(id));
     }
 
     @GetMapping("/by-job-site/{jobSiteId}")
     public Flux<Equipment> byJobSite(@PathVariable UUID jobSiteId) {
-        return guard().thenMany(Flux.empty());
+        return guard().thenMany(service.findByJobSite(jobSiteId));
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public Mono<Equipment> create(@RequestBody Equipment body) {
-        return guard().then(Mono.empty());
+        return guard().then(service.create(body));
     }
 
     @PutMapping("/{id}")
     public Mono<Equipment> update(@PathVariable UUID id, @RequestBody Equipment body) {
-        return guard().then(Mono.empty());
+        return guard().then(service.update(id, body));
     }
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public Mono<Void> delete(@PathVariable UUID id) {
-        return guard().then(Mono.empty());
+        return guard()
+                .then(RoleGuard.requireRole("ADMIN"))
+                .then(service.delete(id));
     }
 
     private Mono<Void> guard() {
