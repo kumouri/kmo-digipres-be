@@ -55,6 +55,11 @@ public class User implements Auditable {
     @Builder.Default
     private Portal portal = Portal.STAFF;
 
+    // Links a portal CLIENT user to the Contact record they own in the same tenant.
+    // Null for STAFF users and for CLIENT users not yet stamped with a Contact link.
+    // No index: we always traverse user→contact, never the reverse.
+    private UUID contactId;
+
     @Version
     private Long version;
 

@@ -4,12 +4,15 @@ import com.kumouri.kmodigipresbe.model.contact.Contact;
 import com.kumouri.kmodigipresbe.tenancy.TenantScopedReactiveMongoRepository;
 import org.springframework.data.mongodb.repository.Query;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.util.UUID;
 
 public interface ContactRepository extends TenantScopedReactiveMongoRepository<Contact, UUID> {
 
     Flux<Contact> findAllByTenantIdAndCompanyId(UUID tenantId, UUID companyId);
+
+    Mono<Contact> findByTenantIdAndId(UUID tenantId, UUID id);
 
     /**
      * Look up contacts by tenant + an email channel address. The nested path is
