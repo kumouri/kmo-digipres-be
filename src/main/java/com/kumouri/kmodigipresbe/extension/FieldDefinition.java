@@ -71,6 +71,14 @@ public class FieldDefinition implements TenantScoped {
      */
     private String lookupTarget;
 
+    /**
+     * Phase 9h field-level permissions: roles allowed to see this custom field in
+     * responses. Null / empty = visible to all authenticated users. Enforced at
+     * serialization time by {@code FieldPermissionRedactor}.
+     */
+    @Builder.Default
+    private List<String> visibilityRoles = List.of();
+
     @Version
     private Long version;
 
