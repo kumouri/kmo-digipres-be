@@ -17,6 +17,7 @@ public class JwtTenantResolver implements TenantResolver {
     public static final String CLAIM_TENANT_ID = "tid";
     public static final String CLAIM_USER_ID = "uid";
     public static final String CLAIM_ROLES = "roles";
+    public static final String CLAIM_PORTAL = "portal";
 
     @Override
     public Mono<TenantContext> resolve(Authentication authentication) {

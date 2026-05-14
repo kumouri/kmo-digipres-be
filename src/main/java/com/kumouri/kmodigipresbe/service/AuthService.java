@@ -19,7 +19,7 @@ public class AuthService {
     private final JwtTokenService tokens;
 
     public Mono<LoginResponse> login(LoginRequest req) {
-        return users.findByEmail(req.email().toLowerCase())
+        return users.findByEmailAndPortal(req.email().toLowerCase(), User.Portal.STAFF)
                 .switchIfEmpty(Mono.error(() -> new DigiPresBeException(
                         "Invalid email or password", 1020, 401)))
                 .flatMap(user -> {

@@ -37,6 +37,10 @@ public class JwtTokenService {
                     .claim(JwtTenantResolver.CLAIM_TENANT_ID, user.getTenantId().toString())
                     .claim(JwtTenantResolver.CLAIM_USER_ID, user.getId().toString())
                     .claim(JwtTenantResolver.CLAIM_ROLES, List.copyOf(user.getRoles()))
+                    .claim(JwtTenantResolver.CLAIM_PORTAL,
+                            user.getPortal() == null
+                                    ? User.Portal.STAFF.name()
+                                    : user.getPortal().name())
                     .claim("email", user.getEmail())
                     .build();
             SignedJWT signed = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), claims);
