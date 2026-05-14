@@ -180,10 +180,16 @@ class AuditingCallbackIT {
                 .findFirst()
                 .orElseThrow(() -> new AssertionError(
                         "audit_at_ttl_idx index not found; saw: " + indexes));
-        // Spring Data passes expireAfter as seconds.
-        assertThat(ttl.getLong("expireAfterSeconds"))
-                .isEqualTo(730L * 24 * 60 * 60);
-        assertThat(((org.bson.Document) ttl.get("key")).keySet())
-                .containsExactly("at");
+        // Spring Data passes expireAfter as seconds; Mongo stores it as Int32 when it
+        // fits, so {@code getLong} would ClassCastException. Read as Number and coerce.
+        Number expireAfter = (Number) ttl.get("expireAfterSeconds");
+        assertThat(expireAfter).isNotNull();
+        assertThat(expireAfter.longValue()).isEqualTo(730L * 24 * 60 * 60);
+        // {@code key} is an embedded BSON sub-document; the driver decodes it as a
+        // {@code Map<String, Object>} (Document extends LinkedHashMap, but other
+        // concrete map impls also flow through here depending on codec).
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> keyDoc = (java.util.Map<String, Object>) ttl.get("key");
+        assertThat(keyDoc.keySet()).containsExactly("at");
     }
 }
