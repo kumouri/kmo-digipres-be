@@ -52,6 +52,13 @@ public final class DomainEventType {
     // contact has no E.164 number, in which case the dispatcher skips the send.
     public static final String WORK_ORDER_EN_ROUTE = "workOrder.enRoute";
 
+    // Phase 13b — Service Hub ticketing events. SlaBreachScheduler publishes
+    // SLA_BREACHED; RuleEngine can trigger ESCALATE_TICKET action on it.
+    public static final String TICKET_CREATED        = "ticket.created";
+    public static final String TICKET_UPDATED        = "ticket.updated";
+    public static final String TICKET_STATUS_CHANGED = "ticket.statusChanged";
+    public static final String SLA_BREACHED          = "ticket.slaBreached";
+
     private DomainEventType() {
     }
 }

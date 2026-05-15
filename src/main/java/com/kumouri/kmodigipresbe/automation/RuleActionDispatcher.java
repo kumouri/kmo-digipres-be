@@ -8,6 +8,8 @@ import com.kumouri.kmodigipresbe.model.activity.ActivityDirection;
 import com.kumouri.kmodigipresbe.model.activity.ActivityType;
 import com.kumouri.kmodigipresbe.model.activity.SubjectType;
 import com.kumouri.kmodigipresbe.model.contact.PhoneContact;
+import com.kumouri.kmodigipresbe.model.servicehub.TicketPriority;
+import com.kumouri.kmodigipresbe.repository.TicketRepository;
 import com.kumouri.kmodigipresbe.model.request.SendTemplateRequest;
 import com.kumouri.kmodigipresbe.model.request.SmsCommunicationRequest;
 import com.kumouri.kmodigipresbe.repository.ActivityRepository;
@@ -41,6 +43,7 @@ public class RuleActionDispatcher {
     private final WebhookDeliveryService webhooks;
     private final TwilioSmsService twilioSms;
     private final SmsTemplateRegistry smsTemplates;
+    private final TicketRepository tickets;
 
     public Mono<Void> dispatch(RuleAction action, DomainEvent event) {
         return switch (action.getType()) {
@@ -48,6 +51,7 @@ public class RuleActionDispatcher {
             case CREATE_TASK -> createTask(action, event);
             case OUTBOUND_WEBHOOK -> outboundWebhook(action, event);
             case SEND_SMS -> sendSms(action, event);
+            case ESCALATE_TICKET -> escalateTicket(event);
         };
     }
 
@@ -149,6 +153,32 @@ public class RuleActionDispatcher {
                 .body(body)
                 .build();
         return twilioSms.sendSms(req).then();
+    }
+
+    /**
+     * Phase 13b — raises the ticket identified by {@code event.subjectId()} by one
+     * priority level (LOW→MEDIUM→HIGH→URGENT, capped). No-ops if the subject is not
+     * a known ticket ID or if it is already at URGENT.
+     */
+    private Mono<Void> escalateTicket(DomainEvent event) {
+        if (event.subjectId() == null) {
+            log.debug("Skipping ESCALATE_TICKET: no subjectId in event");
+            return Mono.empty();
+        }
+        return tickets.findById(event.subjectId())
+                .flatMap(ticket -> {
+                    TicketPriority current = ticket.getPriority();
+                    TicketPriority next = switch (current) {
+                        case LOW -> TicketPriority.MEDIUM;
+                        case MEDIUM -> TicketPriority.HIGH;
+                        case HIGH, URGENT -> TicketPriority.URGENT;
+                    };
+                    if (next == current) return Mono.empty();
+                    ticket.setPriority(next);
+                    return tickets.save(ticket).then();
+                })
+                .switchIfEmpty(Mono.fromRunnable(() ->
+                        log.debug("ESCALATE_TICKET: ticket {} not found", event.subjectId())));
     }
 
     /**
