@@ -4,16 +4,23 @@ import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
 import com.kumouri.kmodigipresbe.extension.ModuleAutoConfigurationSupport;
 import com.kumouri.kmodigipresbe.extension.ModuleDefinition;
 import com.kumouri.kmodigipresbe.module.salonspa.repository.BookingRepository;
+import com.kumouri.kmodigipresbe.module.salonspa.repository.LoyaltyAccountRepository;
+import com.kumouri.kmodigipresbe.module.salonspa.repository.LoyaltyTransactionRepository;
 import com.kumouri.kmodigipresbe.module.salonspa.repository.ServiceMenuRepository;
 import com.kumouri.kmodigipresbe.module.salonspa.repository.StaffMemberRepository;
 import com.kumouri.kmodigipresbe.module.salonspa.service.BookingPolicyService;
+import com.kumouri.kmodigipresbe.module.salonspa.service.LoyaltyAccrualService;
+import com.kumouri.kmodigipresbe.module.salonspa.service.RebookingNudgeService;
 import com.kumouri.kmodigipresbe.module.salonspa.service.SalonBookingService;
 import com.kumouri.kmodigipresbe.module.salonspa.service.SalonMenuService;
 import com.kumouri.kmodigipresbe.module.salonspa.service.StaffMemberService;
 import com.kumouri.kmodigipresbe.repository.InvoiceRepository;
+import com.kumouri.kmodigipresbe.repository.SequenceRepository;
+import com.kumouri.kmodigipresbe.service.sequence.SequenceCrudService;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
+import org.springframework.data.mongodb.core.ReactiveMongoTemplate;
 
 import java.util.List;
 
@@ -35,12 +42,12 @@ import java.util.List;
  * <ul>
  *   <li>12a: module skeleton — entities, repositories, and this
  *       {@code AutoConfiguration} registering the {@link ModuleDefinition}.</li>
- *   <li><strong>12b (this PR):</strong> {@link BookingPolicyService},
+ *   <li>12b: {@link BookingPolicyService},
  *       {@link SalonBookingService}, {@link SalonMenuService},
  *       {@link StaffMemberService}, booking controllers, and the public
  *       booking widget.</li>
- *   <li>12c: {@code LoyaltyAccrualService}, {@code RebookingNudgeService}, loyalty
- *       controller.</li>
+ *   <li><strong>12c (this PR):</strong> {@link LoyaltyAccrualService},
+ *       {@link RebookingNudgeService}, loyalty controller.</li>
  *   <li>12d: Square POS integration ({@code SquareAutoConfiguration}).</li>
  *   <li>12e: Marketing infrastructure — {@code FormDefinition}, {@code LandingPage},
  *       UTM capture, {@code FirstTouch} on Contact (core, not module-gated).</li>
@@ -55,7 +62,7 @@ public class SalonSpaAutoConfiguration {
     @Bean
     public ModuleDefinition salonSpaModuleDefinition() {
         return ModuleAutoConfigurationSupport.module(
-                MODULE_KEY, "Salon & Spa", "0.2.0",
+                MODULE_KEY, "Salon & Spa", "0.3.0",
                 List.of("SERVICE_MENU", "BOOKING", "LOYALTY_ACCOUNT"));
     }
 
@@ -81,6 +88,21 @@ public class SalonSpaAutoConfiguration {
                                                     InvoiceRepository invoiceRepo,
                                                     DomainEventPublisher events) {
         return new SalonBookingService(bookings, policy, invoiceRepo, events);
+    }
+
+    @Bean
+    public LoyaltyAccrualService loyaltyAccrualService(LoyaltyAccountRepository accounts,
+                                                        LoyaltyTransactionRepository transactions,
+                                                        DomainEventPublisher events) {
+        return new LoyaltyAccrualService(accounts, transactions, events);
+    }
+
+    @Bean
+    public RebookingNudgeService rebookingNudgeService(SequenceRepository sequences,
+                                                        SequenceCrudService sequenceCrud,
+                                                        DomainEventPublisher events,
+                                                        ReactiveMongoTemplate mongo) {
+        return new RebookingNudgeService(sequences, sequenceCrud, events, mongo);
     }
 
 }
