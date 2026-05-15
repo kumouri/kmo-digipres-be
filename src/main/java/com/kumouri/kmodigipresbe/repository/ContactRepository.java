@@ -10,6 +10,8 @@ import java.util.UUID;
 
 public interface ContactRepository extends TenantScopedReactiveMongoRepository<Contact, UUID> {
 
+    Flux<Contact> findAllByTenantId(UUID tenantId);
+
     Flux<Contact> findAllByTenantIdAndCompanyId(UUID tenantId, UUID companyId);
 
     Mono<Contact> findByTenantIdAndId(UUID tenantId, UUID id);

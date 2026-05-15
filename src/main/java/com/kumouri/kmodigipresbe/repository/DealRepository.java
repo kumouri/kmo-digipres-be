@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 public interface DealRepository extends TenantScopedReactiveMongoRepository<Deal, UUID> {
+    Flux<Deal> findAllByTenantId(UUID tenantId);
     Flux<Deal> findAllByTenantIdAndStage(UUID tenantId, PipelineStage stage);
 
     Mono<Boolean> existsByTenantIdAndPrimaryContactIdAndStageAndUpdatedAtAfter(

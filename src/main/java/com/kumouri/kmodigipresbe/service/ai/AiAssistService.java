@@ -19,6 +19,20 @@ public interface AiAssistService {
 
     Mono<AiDraft> draftReply(DraftReplyRequest req);
 
+    /**
+     * Free-form question-answering over a pre-assembled context string.
+     * Phase 11b: called by {@code AskAiService} after RAG retrieval assembles the
+     * relevant context chunks. Implementations use the same model + budget pipeline
+     * as {@link #summarizeTimeline}.
+     */
+    Mono<AiAnswer> ask(AskRequest req);
+
+    record AskRequest(String context, String question) {
+    }
+
+    record AiAnswer(String text, long inputTokens, long outputTokens) {
+    }
+
     record SummarizeTimelineRequest(UUID contactId, List<TimelineEntry> timeline) {
     }
 

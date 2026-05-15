@@ -88,6 +88,18 @@ public class AnthropicAiAssistService implements AiAssistService {
                 .map(r -> new AiDraft(r.text, r.inputTokens, r.outputTokens));
     }
 
+    @Override
+    public Mono<AiAnswer> ask(AskRequest req) {
+        String prompt = (req.context() == null || req.context().isBlank())
+                ? req.question()
+                : "Context:\n" + req.context() + "\n\nQuestion: " + req.question();
+        return call(summarizeModel, prompt,
+                "You are a helpful CRM assistant. Answer the user's question using only the provided "
+                        + "context. If the context doesn't contain enough information, say so clearly. "
+                        + "Cite relevant details from the context in your answer.")
+                .map(r -> new AiAnswer(r.text, r.inputTokens, r.outputTokens));
+    }
+
     private Mono<CompletionResult> call(String model, String prompt, String system) {
         return TenantContextHolder.required()
                 .flatMap(ctx -> resolveKey(ctx.tenantId()))

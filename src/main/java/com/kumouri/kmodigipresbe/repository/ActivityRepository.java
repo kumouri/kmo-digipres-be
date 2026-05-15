@@ -17,6 +17,13 @@ public interface ActivityRepository extends TenantScopedReactiveMongoRepository<
     Flux<Activity> findAllByTenantIdAndTypeAndSubjectTypeAndSubjectIdOrderByOccurredAtDesc(
             UUID tenantId, ActivityType type, SubjectType subjectType, UUID subjectId);
 
+    Flux<Activity> findAllByTenantIdAndSubjectTypeAndOccurredAtAfter(
+            UUID tenantId, SubjectType subjectType, Instant since);
+
+    Flux<Activity> findAllByTenantIdAndCreatedAtBefore(UUID tenantId, Instant cutoff);
+
+    Mono<Void> deleteByTenantIdAndId(UUID tenantId, UUID id);
+
     Mono<Activity> findTopByTenantIdAndSubjectTypeAndSubjectIdOrderByOccurredAtDesc(
             UUID tenantId, SubjectType subjectType, UUID subjectId);
 

@@ -9,6 +9,8 @@ import java.util.UUID;
 public interface EmailEngagementRepository
         extends TenantScopedReactiveMongoRepository<EmailEngagement, UUID> {
 
+    Flux<EmailEngagement> findAllByTenantId(UUID tenantId);
+
     Flux<EmailEngagement> findAllByTenantIdAndContactIdOrderByEventAtDesc(
             UUID tenantId, UUID contactId);
 

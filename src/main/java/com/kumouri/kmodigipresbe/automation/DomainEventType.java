@@ -63,6 +63,18 @@ public final class DomainEventType {
     // contact has no E.164 number, in which case the dispatcher skips the send.
     public static final String WORK_ORDER_EN_ROUTE = "workOrder.enRoute";
 
+    // Phase 11a — emitted by AttachmentService when an Attachment document is
+    // saved. EmbeddingPipeline subscribes to index the filename/content preview.
+    public static final String ATTACHMENT_CREATED = "attachment.created";
+
+    // Phase 11a — emitted by QuoteService when a Quote document is saved.
+    // EmbeddingPipeline subscribes to index the quote summary/line items.
+    public static final String QUOTE_CREATED = "quote.created";
+
+    // Phase 11c — emitted by LeadScoringV2Service after each nightly scoring run.
+    // Payload: {contactId, score, tier, source}.
+    public static final String LEAD_SCORE_UPDATED = "leadScore.updated";
+
     // Phase 12b — fired by SalonBookingService.complete() when a salon booking
     // transitions to COMPLETED. Phase 12c LoyaltyAccrualService and
     // RebookingNudgeService subscribe. Payload:

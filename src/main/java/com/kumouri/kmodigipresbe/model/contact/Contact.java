@@ -2,6 +2,7 @@ package com.kumouri.kmodigipresbe.model.contact;
 
 import com.kumouri.kmodigipresbe.audit.Auditable;
 import com.kumouri.kmodigipresbe.extension.CustomFieldHost;
+import com.kumouri.kmodigipresbe.model.scoring.LeadScore;
 import com.kumouri.kmodigipresbe.model.marketing.FirstTouch;
 import com.kumouri.kmodigipresbe.model.servicehub.HealthScore;
 import lombok.AllArgsConstructor;
@@ -70,6 +71,9 @@ public class Contact implements Auditable, CustomFieldHost {
 
     @Builder.Default
     private Map<String, Object> customFields = Map.of();
+
+    /** Derived lead quality score. {@code null} until the first nightly scoring run. */
+    private LeadScore leadScore;
 
     /**
      * First marketing touch point. Set once on first form submission or landing-page

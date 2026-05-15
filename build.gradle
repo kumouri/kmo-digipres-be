@@ -64,6 +64,9 @@ dependencies {
     implementation 'org.apache.commons:commons-csv:1.11.0'
     // Phase 7 — quote/invoice PDF generation (OpenPDF: iText fork, MPL/LGPL)
     implementation 'com.github.librepdf:openpdf:2.0.3'
+    // Phase 11c — lead scoring v2. Smile is a pure-Java ML library; all CPU-bound
+    // calls (training, prediction) must be wrapped in Schedulers.boundedElastic().
+    implementation 'com.github.haifengl:smile-core:3.1.0'
     compileOnly 'org.projectlombok:lombok'
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
 //    developmentOnly 'org.springframework.boot:spring-boot-docker-compose'
