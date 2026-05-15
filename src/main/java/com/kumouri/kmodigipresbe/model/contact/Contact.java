@@ -4,6 +4,7 @@ import com.kumouri.kmodigipresbe.audit.Auditable;
 import com.kumouri.kmodigipresbe.extension.CustomFieldHost;
 import com.kumouri.kmodigipresbe.model.scoring.LeadScore;
 import com.kumouri.kmodigipresbe.model.marketing.FirstTouch;
+import com.kumouri.kmodigipresbe.model.servicehub.HealthScore;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -64,6 +65,9 @@ public class Contact implements Auditable, CustomFieldHost {
     private Set<String> subscriptionTopics = Set.of();
 
     private UUID ownerId;
+
+    /** Null until nightly health-score compute runs. */
+    private HealthScore healthScore;
 
     @Builder.Default
     private Map<String, Object> customFields = Map.of();

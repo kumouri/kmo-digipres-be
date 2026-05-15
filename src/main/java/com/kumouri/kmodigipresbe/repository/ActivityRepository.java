@@ -23,4 +23,10 @@ public interface ActivityRepository extends TenantScopedReactiveMongoRepository<
     Flux<Activity> findAllByTenantIdAndCreatedAtBefore(UUID tenantId, Instant cutoff);
 
     Mono<Void> deleteByTenantIdAndId(UUID tenantId, UUID id);
+
+    Mono<Activity> findTopByTenantIdAndSubjectTypeAndSubjectIdOrderByOccurredAtDesc(
+            UUID tenantId, SubjectType subjectType, UUID subjectId);
+
+    Mono<Boolean> existsByTenantIdAndSubjectTypeAndSubjectIdAndOccurredAtAfter(
+            UUID tenantId, SubjectType subjectType, UUID subjectId, Instant since);
 }
