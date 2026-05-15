@@ -59,6 +59,11 @@ public final class DomainEventType {
     public static final String TICKET_STATUS_CHANGED = "ticket.statusChanged";
     public static final String SLA_BREACHED          = "ticket.slaBreached";
 
+    // Phase 13c — KB events. Phase 11's EmbeddingPipeline subscribes to these
+    // to populate KnowledgeBaseArticle.embedding after articles are saved.
+    public static final String KB_ARTICLE_CREATED = "kb.articleCreated";
+    public static final String KB_ARTICLE_UPDATED = "kb.articleUpdated";
+
     private DomainEventType() {
     }
 }
