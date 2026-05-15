@@ -1,3 +1,4 @@
 com.kumouri.kmodigipresbe.module.fieldservice.FieldServiceAutoConfiguration
 com.kumouri.kmodigipresbe.module.homeservices.HomeServicesAutoConfiguration
 com.kumouri.kmodigipresbe.module.homeservices.integration.quickbooks.QuickBooksAutoConfiguration
+com.kumouri.kmodigipresbe.module.salonspa.SalonSpaAutoConfiguration
