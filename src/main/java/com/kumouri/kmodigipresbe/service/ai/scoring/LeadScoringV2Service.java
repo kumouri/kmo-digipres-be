@@ -26,15 +26,8 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
-import smile.classification.RandomForest;
-import smile.data.DataFrame;
-import smile.data.Tuple;
-import smile.data.formula.Formula;
-import smile.data.type.DataTypes;
-import smile.data.type.StructField;
-import smile.data.type.StructType;
-import smile.data.vector.DoubleVector;
-import smile.data.vector.IntVector;
+import smile.classification.LogisticRegression;
+import smile.classification.SoftClassifier;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -50,14 +43,6 @@ import java.util.stream.Collectors;
 public class LeadScoringV2Service {
 
     private static final int MIN_CLOSED_DEALS_FOR_MODEL = 50;
-
-    private static final StructType FEATURE_SCHEMA = DataTypes.struct(
-            new StructField("a7d", DataTypes.DoubleType),
-            new StructField("a30d", DataTypes.DoubleType),
-            new StructField("openRate", DataTypes.DoubleType),
-            new StructField("clickRate", DataTypes.DoubleType),
-            new StructField("dealCount", DataTypes.DoubleType),
-            new StructField("firmographic", DataTypes.DoubleType));
 
     private final TenantRepository tenantRepository;
     private final ContactRepository contactRepository;
@@ -152,11 +137,14 @@ public class LeadScoringV2Service {
                         .contactsScored((int) (long) count)
                         .completedAt(Instant.now())
                         .build()))
-                .onErrorResume(err -> jobRepository.save(job.toBuilder()
-                        .status(LeadScoringJob.JobStatus.FAILED)
-                        .errorMessage(err.getMessage())
-                        .completedAt(Instant.now())
-                        .build()))
+                .onErrorResume(err -> {
+                    log.error("Lead-scoring job {} failed: {}", job.getId(), err.getMessage(), err);
+                    return jobRepository.save(job.toBuilder()
+                            .status(LeadScoringJob.JobStatus.FAILED)
+                            .errorMessage(err.getMessage())
+                            .completedAt(Instant.now())
+                            .build());
+                })
                 .then();
     }
 
@@ -197,12 +185,12 @@ public class LeadScoringV2Service {
             }
         }
 
-        final RandomForest model = trainingFeatures.size() >= MIN_CLOSED_DEALS_FOR_MODEL
+        final SoftClassifier<double[]> model = trainingFeatures.size() >= MIN_CLOSED_DEALS_FOR_MODEL
                 ? trainModel(trainingFeatures, trainingLabels)
                 : null;
 
         if (model != null) {
-            log.info("Lead-scoring: trained RandomForest on {} samples for tenant", trainingFeatures.size());
+            log.info("Lead-scoring: trained LogisticRegression on {} samples for tenant", trainingFeatures.size());
         } else {
             log.info("Lead-scoring: {} closed-deal samples — using rules fallback (need {})",
                     trainingFeatures.size(), MIN_CLOSED_DEALS_FOR_MODEL);
@@ -243,37 +231,15 @@ public class LeadScoringV2Service {
                 (double) contactDeals.size(), firmographic};
     }
 
-    private RandomForest trainModel(List<double[]> featuresList, List<Integer> labels) {
-        int n = featuresList.size();
-        double[] a7d = new double[n], a30d = new double[n], openRate = new double[n],
-                clickRate = new double[n], dealCount = new double[n], firmographic = new double[n];
-        int[] labelArr = new int[n];
-        for (int i = 0; i < n; i++) {
-            a7d[i] = featuresList.get(i)[0];
-            a30d[i] = featuresList.get(i)[1];
-            openRate[i] = featuresList.get(i)[2];
-            clickRate[i] = featuresList.get(i)[3];
-            dealCount[i] = featuresList.get(i)[4];
-            firmographic[i] = featuresList.get(i)[5];
-            labelArr[i] = labels.get(i);
-        }
-        DataFrame df = DataFrame.of(
-                DoubleVector.of("a7d", a7d),
-                DoubleVector.of("a30d", a30d),
-                DoubleVector.of("openRate", openRate),
-                DoubleVector.of("clickRate", clickRate),
-                DoubleVector.of("dealCount", dealCount),
-                DoubleVector.of("firmographic", firmographic),
-                IntVector.of("label", labelArr));
-        return RandomForest.fit(Formula.lhs("label"), df);
+    private SoftClassifier<double[]> trainModel(List<double[]> featuresList, List<Integer> labels) {
+        double[][] x = featuresList.toArray(new double[0][]);
+        int[] y = labels.stream().mapToInt(Integer::intValue).toArray();
+        return LogisticRegression.fit(x, y);
     }
 
-    private LeadScore scoreWithModel(RandomForest model, double[] f) {
-        Tuple tuple = Tuple.of(
-                new Object[]{f[0], f[1], f[2], f[3], f[4], f[5]},
-                FEATURE_SCHEMA);
+    private LeadScore scoreWithModel(SoftClassifier<double[]> model, double[] f) {
         double[] posterior = new double[2];
-        model.predict(tuple, posterior);
+        model.predict(f, posterior);
         double score = posterior[1];
         return new LeadScore(score, LeadScore.tierFrom(score), LeadScore.SOURCE_MODEL, Instant.now());
     }

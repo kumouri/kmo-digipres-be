@@ -105,7 +105,7 @@ class DsrExportIT {
 
         // Poll until DONE
         Awaitility.await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
-            DataSubjectRequest job = dsrRepository.findById(jobId).block();
+            DataSubjectRequest job = mongo.findById(jobId, DataSubjectRequest.class).block();
             assertThat(job).isNotNull();
             assertThat(job.getStatus()).isEqualTo(DataSubjectRequest.DsrStatus.DONE);
             assertThat(job.getResultUrl()).isNotBlank();

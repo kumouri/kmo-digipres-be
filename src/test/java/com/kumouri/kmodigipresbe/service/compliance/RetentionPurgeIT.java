@@ -85,8 +85,8 @@ class RetentionPurgeIT {
 
         retentionPolicyService.runPurge().block();
 
-        assertThat(activityRepository.findById(oldActivityId).block()).isNull();
-        assertThat(activityRepository.findById(recentId).block()).isNotNull();
+        assertThat(mongo.findById(oldActivityId, Activity.class).block()).isNull();
+        assertThat(mongo.findById(recentId, Activity.class).block()).isNotNull();
     }
 
     @Test
@@ -124,7 +124,7 @@ class RetentionPurgeIT {
 
         retentionPolicyService.runPurge().block();
 
-        assertThat(activityRepository.findById(purgeable).block()).isNull();
-        assertThat(activityRepository.findById(legalHold).block()).isNotNull();
+        assertThat(mongo.findById(purgeable, Activity.class).block()).isNull();
+        assertThat(mongo.findById(legalHold, Activity.class).block()).isNotNull();
     }
 }

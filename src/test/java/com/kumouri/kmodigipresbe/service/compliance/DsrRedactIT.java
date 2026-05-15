@@ -105,7 +105,7 @@ class DsrRedactIT {
         UUID jobId = UUID.fromString((String) response.get("id"));
 
         Awaitility.await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
-            DataSubjectRequest job = dsrRepository.findById(jobId).block();
+            DataSubjectRequest job = mongo.findById(jobId, DataSubjectRequest.class).block();
             assertThat(job.getStatus()).isEqualTo(DataSubjectRequest.DsrStatus.DONE);
         });
 
@@ -141,7 +141,7 @@ class DsrRedactIT {
         UUID job1Id = UUID.fromString((String) resp1.get("id"));
 
         Awaitility.await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
-                assertThat(dsrRepository.findById(job1Id).block().getStatus())
+                assertThat(mongo.findById(job1Id, DataSubjectRequest.class).block().getStatus())
                         .isEqualTo(DataSubjectRequest.DsrStatus.DONE));
 
         // Second redact should succeed and also complete without error
@@ -153,7 +153,7 @@ class DsrRedactIT {
         UUID job2Id = UUID.fromString((String) resp2.get("id"));
 
         Awaitility.await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
-                assertThat(dsrRepository.findById(job2Id).block().getStatus())
+                assertThat(mongo.findById(job2Id, DataSubjectRequest.class).block().getStatus())
                         .isEqualTo(DataSubjectRequest.DsrStatus.DONE));
 
         // Contact should still show REDACTED (not double-redacted to something else)
