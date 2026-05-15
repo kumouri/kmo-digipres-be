@@ -1,8 +1,6 @@
-package com.kumouri.kmodigipresbe.model.contact;
+package com.kumouri.kmodigipresbe.model.servicehub;
 
 import com.kumouri.kmodigipresbe.audit.Auditable;
-import com.kumouri.kmodigipresbe.extension.CustomFieldHost;
-import com.kumouri.kmodigipresbe.model.servicehub.HealthScore;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -15,41 +13,48 @@ import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
-@Document("companies")
-@CompoundIndex(name = "tenant_name_idx", def = "{ 'tenantId': 1, 'name': 1 }")
+@Document("tickets")
+@CompoundIndex(name = "tenant_status_idx", def = "{'tenantId':1,'status':1}")
+@CompoundIndex(name = "tenant_assigned_idx", def = "{'tenantId':1,'assignedUserId':1}")
+@CompoundIndex(name = "tenant_sla_due_idx", def = "{'tenantId':1,'slaResolutionDue':1}")
 @Data
 @Builder(toBuilder = true)
 @NoArgsConstructor
 @AllArgsConstructor
-public class Company implements Auditable, CustomFieldHost {
+public class Ticket implements Auditable {
 
     @Id
     private UUID id;
 
     private UUID tenantId;
 
-    private String name;
-    private String website;
-    private String industry;
+    private UUID contactId;
+
+    private UUID companyId;
+
+    private String subject;
+
+    private String body;
 
     @Builder.Default
-    private List<PostalAddress> addresses = List.of();
+    private TicketStatus status = TicketStatus.NEW;
 
     @Builder.Default
-    private Set<String> tags = Set.of();
+    private TicketPriority priority = TicketPriority.MEDIUM;
 
-    private UUID ownerId;
+    private UUID assignedUserId;
 
-    /** Null until nightly health-score compute runs. */
-    private HealthScore healthScore;
+    private UUID slaPolicyId;
 
-    @Builder.Default
-    private Map<String, Object> customFields = Map.of();
+    private Instant slaResponseDue;
+
+    private Instant slaResolutionDue;
+
+    private Instant slaBreachedAt;
+
+    private Instant resolvedAt;
 
     @Version
     private Long version;

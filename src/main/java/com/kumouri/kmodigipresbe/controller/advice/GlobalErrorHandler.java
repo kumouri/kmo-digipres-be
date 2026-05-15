@@ -61,6 +61,11 @@ import java.util.UUID;
  *       WebExchangeBindException today, reserved for custom cross-field
  *       checks); {@code 2710} SMS dispatch failed (passthrough from Twilio
  *       when the {@code SEND_SMS} dispatcher cannot reach Twilio at all).</li>
+ *   <li>{@code 2900-2999} — <em>Phase 13b/13c</em>: Service Hub. {@code 2900} invalid
+ *       ticket status transition; {@code 2901} ticket not found; {@code 2902} SLA policy
+ *       not found; {@code 2910} SLA policy name duplicate; {@code 2920} KB article not
+ *       found; {@code 2921} KB article slug duplicate; {@code 2922} cannot publish empty
+ *       article.</li>
  *   <li>{@code 2800-2899} — <em>Phase 10d</em>: QuickBooks Online. {@code 2800}
  *       no connection / missing realmId or accessToken on connection; {@code 2801}
  *       token exchange or refresh failed; {@code 2802} invoice push failed

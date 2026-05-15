@@ -86,6 +86,18 @@ public final class DomainEventType {
     // {accountId, contactId, previousTier, newTier}.
     public static final String LOYALTY_TIER_UPGRADED = "loyalty.tierUpgraded";
 
+    // Phase 13b — Service Hub ticketing events. SlaBreachScheduler publishes
+    // SLA_BREACHED; RuleEngine can trigger ESCALATE_TICKET action on it.
+    public static final String TICKET_CREATED        = "ticket.created";
+    public static final String TICKET_UPDATED        = "ticket.updated";
+    public static final String TICKET_STATUS_CHANGED = "ticket.statusChanged";
+    public static final String SLA_BREACHED          = "ticket.slaBreached";
+
+    // Phase 13c — KB events. Phase 11's EmbeddingPipeline subscribes to these
+    // to populate KnowledgeBaseArticle.embedding after articles are saved.
+    public static final String KB_ARTICLE_CREATED = "kb.articleCreated";
+    public static final String KB_ARTICLE_UPDATED = "kb.articleUpdated";
+
     private DomainEventType() {
     }
 }

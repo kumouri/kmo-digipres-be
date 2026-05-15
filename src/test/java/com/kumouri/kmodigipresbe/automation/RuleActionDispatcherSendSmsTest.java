@@ -5,6 +5,7 @@ import com.kumouri.kmodigipresbe.automation.webhook.WebhookSubscriptionRepositor
 import com.kumouri.kmodigipresbe.integration.twilio.TwilioSmsService;
 import com.kumouri.kmodigipresbe.model.request.SmsCommunicationRequest;
 import com.kumouri.kmodigipresbe.repository.ActivityRepository;
+import com.kumouri.kmodigipresbe.repository.TicketRepository;
 import com.kumouri.kmodigipresbe.service.template.SmsTemplateRegistry;
 import com.kumouri.kmodigipresbe.service.template.TemplatedEmailService;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,7 +50,8 @@ class RuleActionDispatcherSendSmsTest {
                 mock(WebhookSubscriptionRepository.class),
                 mock(WebhookDeliveryService.class),
                 twilio,
-                registry);
+                registry,
+                mock(TicketRepository.class));
     }
 
     @Test

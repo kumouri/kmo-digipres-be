@@ -34,5 +34,12 @@ public class RuleAction {
     @Builder.Default
     private Map<String, Object> params = Map.of();
 
-    public enum ActionType { SEND_EMAIL_TEMPLATE, CREATE_TASK, OUTBOUND_WEBHOOK, SEND_SMS }
+    public enum ActionType {
+        SEND_EMAIL_TEMPLATE,
+        CREATE_TASK,
+        OUTBOUND_WEBHOOK,
+        SEND_SMS,
+        /** Phase 13b — raises the matched ticket's priority by one level (capped at URGENT). */
+        ESCALATE_TICKET
+    }
 }
