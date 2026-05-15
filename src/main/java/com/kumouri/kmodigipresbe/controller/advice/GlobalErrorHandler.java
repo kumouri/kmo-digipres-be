@@ -77,6 +77,16 @@ import java.util.UUID;
  *       stored {@code webhookVerifierToken}, also reused for invalid OAuth
  *       {@code state} signatures; {@code 2813} webhook payload malformed
  *       (non-JSON or missing required fields).</li>
+ *   <li>{@code 2900-2999} — <em>Phase 12</em>: salon/spa module. {@code 2900}
+ *       service-menu item not found or not eligible for the requested staff member;
+ *       {@code 2901} staff member not available in the requested time window;
+ *       {@code 2902} booking cancelled outside the cancellation policy window;
+ *       {@code 2910} loyalty account not found for a contact;
+ *       {@code 2911} widget-type mismatch on the salon-booking widget token.</li>
+ *   <li>{@code 3000-3099} — <em>Phase 12d</em>: Square POS integration.
+ *       {@code 3000} webhook signature invalid; {@code 3001} no Square connection
+ *       for the tenant referenced in the webhook payload; {@code 3002} Square OAuth
+ *       token exchange or refresh failed; {@code 3003} POS payment sync failed.</li>
  * </ul>
  */
 @Slf4j

@@ -43,6 +43,17 @@ public final class DomainEventType {
     // Payload: {invoiceId, totalAmount, contactId, currency}.
     public static final String INVOICE_FINALIZED = "invoice.finalized";
 
+    // Phase 14 — fired by CateringOrderService when a quote is issued or an order
+    // is confirmed. WorkflowRule automations subscribe to send follow-up sequences.
+    // Payload for QUOTE_ISSUED: {quoteId, contactId, headcount}.
+    // Payload for CONFIRMED: {contactId, headcount}.
+    public static final String CATERING_ORDER_QUOTE_ISSUED = "cateringOrder.quoteIssued";
+    public static final String CATERING_ORDER_CONFIRMED = "cateringOrder.confirmed";
+
+    // Phase 14 — fired by ReservationService.create() for both staff-created and
+    // widget-submitted reservations. Payload: {contactId, partySize}.
+    public static final String RESERVATION_CREATED = "reservation.created";
+
     // Phase 10e — fired by WorkOrderService.update() when a work order transitions
     // INTO EN_ROUTE (not on save-with-no-change, not when previous was already
     // EN_ROUTE). The seeded "on-the-way-sms-default" WorkflowRule subscribes and
@@ -51,6 +62,29 @@ public final class DomainEventType {
     // is resolved by joining JobSite -> contactId -> Contact.phones; null when the
     // contact has no E.164 number, in which case the dispatcher skips the send.
     public static final String WORK_ORDER_EN_ROUTE = "workOrder.enRoute";
+
+    // Phase 12b — fired by SalonBookingService.complete() when a salon booking
+    // transitions to COMPLETED. Phase 12c LoyaltyAccrualService and
+    // RebookingNudgeService subscribe. Payload:
+    // {bookingId, contactId, staffMemberId, loyaltyAccountId, serviceMenuItemId}.
+    public static final String BOOKING_COMPLETED = "booking.completed";
+
+    // Phase 12c — fired when a Payment record is marked as capturing an invoice
+    // in full (sum(payments) >= invoice.total). LoyaltyAccrualService subscribes
+    // to credit points on salon bookings that required a deposit. Payload:
+    // {invoiceId, contactId, amount, currency}.
+    public static final String INVOICE_PAID = "invoice.paid";
+
+    // Phase 12e — fired by FormSubmissionService after a public form submission
+    // is validated and the Contact is upserted. Sequence engine subscribes for
+    // auto-enrollment; UtmCaptureService writes FirstTouch before this event fires.
+    // Payload: {formId, submissionId, contactId, utmSource, utmCampaign}.
+    public static final String FORM_SUBMITTED = "form.submitted";
+
+    // Phase 12c — fired by LoyaltyAccrualService when a LoyaltyAccount crosses a
+    // tier threshold (e.g., BRONZE → SILVER). Payload:
+    // {accountId, contactId, previousTier, newTier}.
+    public static final String LOYALTY_TIER_UPGRADED = "loyalty.tierUpgraded";
 
     // Phase 13b — Service Hub ticketing events. SlaBreachScheduler publishes
     // SLA_BREACHED; RuleEngine can trigger ESCALATE_TICKET action on it.
