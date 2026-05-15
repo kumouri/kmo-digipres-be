@@ -1,6 +1,7 @@
 package com.kumouri.kmodigipresbe.servicehub;
 
 import com.kumouri.kmodigipresbe.TestcontainersConfiguration;
+import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
 import com.kumouri.kmodigipresbe.model.servicehub.SlaPolicy;
 import com.kumouri.kmodigipresbe.model.servicehub.Ticket;
 import com.kumouri.kmodigipresbe.model.servicehub.TicketPriority;
@@ -44,7 +45,8 @@ class SlaBreachIT {
     @Autowired ReactiveMongoTemplate mongo;
     @Autowired TicketRepository ticketRepo;
     @Autowired SlaPolicyRepository slaPolicyRepo;
-    @Autowired SlaBreachScheduler breachScheduler;
+    @Autowired DomainEventPublisher events;
+    SlaBreachScheduler breachScheduler;
 
     private UUID tenantId;
     private String staffToken;
@@ -69,6 +71,7 @@ class SlaBreachIT {
                 .status(User.UserStatus.ACTIVE).build()).block();
 
         staffToken = login("staff@sla.test");
+        breachScheduler = new SlaBreachScheduler(ticketRepo, events);
     }
 
     @Test
@@ -88,7 +91,7 @@ class SlaBreachIT {
         breachScheduler.scanOnce().block();
 
         // Verify slaBreachedAt is now set
-        Ticket after = ticketRepo.findById(ticket.getId()).block();
+        Ticket after = mongo.findById(ticket.getId(), Ticket.class).block();
         assertThat(after).isNotNull();
         assertThat(after.getSlaBreachedAt()).isNotNull();
     }
@@ -107,7 +110,7 @@ class SlaBreachIT {
 
         breachScheduler.scanOnce().block();
 
-        Ticket after = ticketRepo.findById(ticket.getId()).block();
+        Ticket after = mongo.findById(ticket.getId(), Ticket.class).block();
         assertThat(after).isNotNull();
         assertThat(after.getSlaBreachedAt()).isNull();
     }
