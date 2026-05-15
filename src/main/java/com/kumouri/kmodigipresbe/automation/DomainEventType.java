@@ -43,6 +43,17 @@ public final class DomainEventType {
     // Payload: {invoiceId, totalAmount, contactId, currency}.
     public static final String INVOICE_FINALIZED = "invoice.finalized";
 
+    // Phase 14 — fired by CateringOrderService when a quote is issued or an order
+    // is confirmed. WorkflowRule automations subscribe to send follow-up sequences.
+    // Payload for QUOTE_ISSUED: {quoteId, contactId, headcount}.
+    // Payload for CONFIRMED: {contactId, headcount}.
+    public static final String CATERING_ORDER_QUOTE_ISSUED = "cateringOrder.quoteIssued";
+    public static final String CATERING_ORDER_CONFIRMED = "cateringOrder.confirmed";
+
+    // Phase 14 — fired by ReservationService.create() for both staff-created and
+    // widget-submitted reservations. Payload: {contactId, partySize}.
+    public static final String RESERVATION_CREATED = "reservation.created";
+
     // Phase 10e — fired by WorkOrderService.update() when a work order transitions
     // INTO EN_ROUTE (not on save-with-no-change, not when previous was already
     // EN_ROUTE). The seeded "on-the-way-sms-default" WorkflowRule subscribes and
