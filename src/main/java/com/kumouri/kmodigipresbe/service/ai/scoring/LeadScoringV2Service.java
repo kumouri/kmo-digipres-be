@@ -27,7 +27,6 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 import smile.classification.LogisticRegression;
-import smile.classification.SoftClassifier;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -185,7 +184,7 @@ public class LeadScoringV2Service {
             }
         }
 
-        final SoftClassifier<double[]> model = trainingFeatures.size() >= MIN_CLOSED_DEALS_FOR_MODEL
+        final LogisticRegression model = trainingFeatures.size() >= MIN_CLOSED_DEALS_FOR_MODEL
                 ? trainModel(trainingFeatures, trainingLabels)
                 : null;
 
@@ -200,7 +199,7 @@ public class LeadScoringV2Service {
                 .map(contact -> {
                     List<Deal> cd = dealsByContact.getOrDefault(contact.getId(), List.of());
                     double[] f = features(contact, cd, activities30dByContact, engagementsByContact, since7d);
-                    LeadScore score = model != null ? scoreWithModel(model, f) : scoreWithRules(f);
+                    LeadScore score = (model != null) ? scoreWithModel(model, f) : scoreWithRules(f);
                     return contact.toBuilder().leadScore(score).build();
                 })
                 .collect(Collectors.toList());
@@ -231,14 +230,14 @@ public class LeadScoringV2Service {
                 (double) contactDeals.size(), firmographic};
     }
 
-    private SoftClassifier<double[]> trainModel(List<double[]> featuresList, List<Integer> labels) {
+    private LogisticRegression trainModel(List<double[]> featuresList, List<Integer> labels) {
         double[][] x = featuresList.toArray(new double[0][]);
         int[] y = labels.stream().mapToInt(Integer::intValue).toArray();
         // 0 = LOST, 1 = WON; posterior[1] is the WON probability used as score
         return LogisticRegression.fit(x, y);
     }
 
-    private LeadScore scoreWithModel(SoftClassifier<double[]> model, double[] f) {
+    private LeadScore scoreWithModel(LogisticRegression model, double[] f) {
         double[] posterior = new double[2];
         model.predict(f, posterior);
         double score = posterior[1];
