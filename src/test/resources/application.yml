@@ -1,0 +1,4 @@
+kmosf:
+  service-hub:
+    sla-breach-scheduler:
+      enabled: false
