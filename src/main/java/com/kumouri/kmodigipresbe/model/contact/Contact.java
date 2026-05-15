@@ -3,6 +3,7 @@ package com.kumouri.kmodigipresbe.model.contact;
 import com.kumouri.kmodigipresbe.audit.Auditable;
 import com.kumouri.kmodigipresbe.extension.CustomFieldHost;
 import com.kumouri.kmodigipresbe.model.scoring.LeadScore;
+import com.kumouri.kmodigipresbe.model.marketing.FirstTouch;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -69,6 +70,12 @@ public class Contact implements Auditable, CustomFieldHost {
 
     /** Derived lead quality score. {@code null} until the first nightly scoring run. */
     private LeadScore leadScore;
+
+    /**
+     * First marketing touch point. Set once on first form submission or landing-page
+     * lead capture; never overwritten (first-touch attribution model).
+     */
+    private FirstTouch firstTouch;
 
     @Version
     private Long version;
