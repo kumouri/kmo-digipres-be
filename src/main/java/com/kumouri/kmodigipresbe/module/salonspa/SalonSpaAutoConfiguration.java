@@ -1,7 +1,16 @@
 package com.kumouri.kmodigipresbe.module.salonspa;
 
+import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
 import com.kumouri.kmodigipresbe.extension.ModuleAutoConfigurationSupport;
 import com.kumouri.kmodigipresbe.extension.ModuleDefinition;
+import com.kumouri.kmodigipresbe.module.salonspa.repository.BookingRepository;
+import com.kumouri.kmodigipresbe.module.salonspa.repository.ServiceMenuRepository;
+import com.kumouri.kmodigipresbe.module.salonspa.repository.StaffMemberRepository;
+import com.kumouri.kmodigipresbe.module.salonspa.service.BookingPolicyService;
+import com.kumouri.kmodigipresbe.module.salonspa.service.SalonBookingService;
+import com.kumouri.kmodigipresbe.module.salonspa.service.SalonMenuService;
+import com.kumouri.kmodigipresbe.module.salonspa.service.StaffMemberService;
+import com.kumouri.kmodigipresbe.repository.InvoiceRepository;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -24,11 +33,12 @@ import java.util.List;
  *
  * <p>Per-sub-PR build-out within Phase 12:
  * <ul>
- *   <li><strong>12a (this PR):</strong> module skeleton — entities, repositories,
- *       and this {@code AutoConfiguration} registering the {@link ModuleDefinition}.
- *       No service or controller beans yet.</li>
- *   <li>12b: {@code BookingPolicyService}, {@code SalonBookingService}, booking
- *       controllers, and the public booking widget.</li>
+ *   <li>12a: module skeleton — entities, repositories, and this
+ *       {@code AutoConfiguration} registering the {@link ModuleDefinition}.</li>
+ *   <li><strong>12b (this PR):</strong> {@link BookingPolicyService},
+ *       {@link SalonBookingService}, {@link SalonMenuService},
+ *       {@link StaffMemberService}, booking controllers, and the public
+ *       booking widget.</li>
  *   <li>12c: {@code LoyaltyAccrualService}, {@code RebookingNudgeService}, loyalty
  *       controller.</li>
  *   <li>12d: Square POS integration ({@code SquareAutoConfiguration}).</li>
@@ -45,7 +55,32 @@ public class SalonSpaAutoConfiguration {
     @Bean
     public ModuleDefinition salonSpaModuleDefinition() {
         return ModuleAutoConfigurationSupport.module(
-                MODULE_KEY, "Salon & Spa", "0.1.0",
+                MODULE_KEY, "Salon & Spa", "0.2.0",
                 List.of("SERVICE_MENU", "BOOKING", "LOYALTY_ACCOUNT"));
     }
+
+    @Bean
+    public SalonMenuService salonMenuService(ServiceMenuRepository menus) {
+        return new SalonMenuService(menus);
+    }
+
+    @Bean
+    public StaffMemberService staffMemberService(StaffMemberRepository staff) {
+        return new StaffMemberService(staff);
+    }
+
+    @Bean
+    public BookingPolicyService bookingPolicyService(StaffMemberRepository staff,
+                                                      BookingRepository bookings) {
+        return new BookingPolicyService(staff, bookings);
+    }
+
+    @Bean
+    public SalonBookingService salonBookingService(BookingRepository bookings,
+                                                    BookingPolicyService policy,
+                                                    InvoiceRepository invoiceRepo,
+                                                    DomainEventPublisher events) {
+        return new SalonBookingService(bookings, policy, invoiceRepo, events);
+    }
+
 }
