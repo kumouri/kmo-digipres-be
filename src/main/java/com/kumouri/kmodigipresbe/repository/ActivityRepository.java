@@ -5,7 +5,9 @@ import com.kumouri.kmodigipresbe.model.activity.ActivityType;
 import com.kumouri.kmodigipresbe.model.activity.SubjectType;
 import com.kumouri.kmodigipresbe.tenancy.TenantScopedReactiveMongoRepository;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
+import java.time.Instant;
 import java.util.UUID;
 
 public interface ActivityRepository extends TenantScopedReactiveMongoRepository<Activity, UUID> {
@@ -14,4 +16,11 @@ public interface ActivityRepository extends TenantScopedReactiveMongoRepository<
 
     Flux<Activity> findAllByTenantIdAndTypeAndSubjectTypeAndSubjectIdOrderByOccurredAtDesc(
             UUID tenantId, ActivityType type, SubjectType subjectType, UUID subjectId);
+
+    Flux<Activity> findAllByTenantIdAndSubjectTypeAndOccurredAtAfter(
+            UUID tenantId, SubjectType subjectType, Instant since);
+
+    Flux<Activity> findAllByTenantIdAndCreatedAtBefore(UUID tenantId, Instant cutoff);
+
+    Mono<Void> deleteByTenantIdAndId(UUID tenantId, UUID id);
 }

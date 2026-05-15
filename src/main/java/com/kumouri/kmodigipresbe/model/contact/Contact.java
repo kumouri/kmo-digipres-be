@@ -2,6 +2,7 @@ package com.kumouri.kmodigipresbe.model.contact;
 
 import com.kumouri.kmodigipresbe.audit.Auditable;
 import com.kumouri.kmodigipresbe.extension.CustomFieldHost;
+import com.kumouri.kmodigipresbe.model.scoring.LeadScore;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -65,6 +66,9 @@ public class Contact implements Auditable, CustomFieldHost {
 
     @Builder.Default
     private Map<String, Object> customFields = Map.of();
+
+    /** Derived lead quality score. {@code null} until the first nightly scoring run. */
+    private LeadScore leadScore;
 
     @Version
     private Long version;
