@@ -234,6 +234,7 @@ public class LeadScoringV2Service {
     private SoftClassifier<double[]> trainModel(List<double[]> featuresList, List<Integer> labels) {
         double[][] x = featuresList.toArray(new double[0][]);
         int[] y = labels.stream().mapToInt(Integer::intValue).toArray();
+        // 0 = LOST, 1 = WON; posterior[1] is the WON probability used as score
         return LogisticRegression.fit(x, y);
     }
 
