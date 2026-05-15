@@ -16,9 +16,11 @@ import com.kumouri.kmodigipresbe.service.ai.vector.VectorIndex;
 import com.kumouri.kmodigipresbe.tenancy.TenantContext;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import reactor.core.Disposable;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
@@ -68,9 +70,11 @@ public class EmbeddingPipeline {
     private final QuoteRepository quotes;
     private final InboxMessageRepository inboxMessages;
 
+    private Disposable subscription;
+
     @PostConstruct
     public void start() {
-        publisher.stream()
+        subscription = publisher.stream()
                 .filter(e -> HANDLED_TYPES.contains(e.type()))
                 .publishOn(Schedulers.boundedElastic())
                 .flatMap(event -> index(event)
@@ -81,6 +85,14 @@ public class EmbeddingPipeline {
                         }))
                 .subscribe();
         log.info("EmbeddingPipeline subscribed to DomainEventPublisher");
+    }
+
+    @PreDestroy
+    public void stop() {
+        if (subscription != null && !subscription.isDisposed()) {
+            subscription.dispose();
+            log.info("EmbeddingPipeline subscription disposed");
+        }
     }
 
     Mono<Void> index(DomainEvent event) {

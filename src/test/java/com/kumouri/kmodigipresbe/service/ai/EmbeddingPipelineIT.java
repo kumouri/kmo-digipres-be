@@ -19,9 +19,9 @@ import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.mongodb.core.ReactiveMongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
@@ -61,9 +61,7 @@ class EmbeddingPipelineIT {
     @Autowired VectorDocumentRepository vectorDocs;
     @Autowired TenantRepository tenants;
     @Autowired ReactiveMongoTemplate mongo;
-
-    @MockBean
-    EmbeddingService embeddingService;
+    @Autowired EmbeddingService embeddingService; // shared mock from TestcontainersConfiguration
 
     private static final float[] DUMMY_VECTOR = new float[1536];
 
@@ -73,6 +71,8 @@ class EmbeddingPipelineIT {
         mongo.remove(new Query(), VectorDocument.class).block();
         mongo.remove(new Query(), Tenant.class).block();
 
+        // Reset and reconfigure the shared mock from TestcontainersConfiguration
+        Mockito.reset(embeddingService);
         when(embeddingService.embed(any(UUID.class), anyString()))
                 .thenReturn(Mono.just(DUMMY_VECTOR));
         when(embeddingService.providerName()).thenReturn("mock");
