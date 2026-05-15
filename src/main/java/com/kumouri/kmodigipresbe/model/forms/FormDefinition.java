@@ -1,0 +1,62 @@
+package com.kumouri.kmodigipresbe.model.forms;
+
+import com.kumouri.kmodigipresbe.audit.Auditable;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.springframework.data.annotation.CreatedDate;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.annotation.Version;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.mapping.Document;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * Tenant-scoped form definition. Each definition carries the field schema and
+ * an {@link FormOnSubmitPolicy} controlling what happens after submission:
+ * contact creation, sequence enrollment, and redirect.
+ *
+ * <p>Forms are ungated — every tenant gets the form and landing-page surface
+ * regardless of which vertical modules are enabled.
+ */
+@Document("form_definitions")
+@CompoundIndex(name = "tenant_name_idx", def = "{ 'tenantId': 1, 'name': 1 }")
+@Data
+@Builder(toBuilder = true)
+@NoArgsConstructor
+@AllArgsConstructor
+public class FormDefinition implements Auditable {
+
+    @Id
+    private UUID id;
+
+    private UUID tenantId;
+
+    private String name;
+    private String description;
+
+    @Builder.Default
+    private List<FormField> fields = List.of();
+
+    @Builder.Default
+    private FormOnSubmitPolicy onSubmit = FormOnSubmitPolicy.builder().build();
+
+    @Version
+    private Long version;
+
+    @CreatedDate
+    private Instant createdAt;
+
+    @LastModifiedDate
+    private Instant updatedAt;
+
+    @Override
+    public String getAuditEntityType() {
+        return "FORM_DEFINITION";
+    }
+}
