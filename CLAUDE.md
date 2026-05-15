@@ -4,20 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Overview
 
-`kmo-digipres-be` is the backend for a custom CRM system being built for **KMO Solutions Foundry LLC (KMOSF)**. The "digipres" name and `com.kumouri` Java package are historical: the project was scaffolded when the owner was still considering splitting KMOSF into two entities (one for solutions/consulting, one for digital presence management). The CRM stayed as a single project after that decision was reversed, but the naming was not refactored. Treat any "digipres" / "kumouri" references as synonyms for the KMOSF CRM — not a separate product.
+`kmo-digipres-be` is the backend for the **KMOSF CRM** — a custom multi-tenant CRM / back-office platform being built for KMO Solutions Foundry LLC. The "digipres" name and `com.kumouri` Java package are historical: the project was scaffolded when the owner was still considering splitting KMOSF into two entities. The CRM stayed as a single project after that decision was reversed, but the naming was not refactored. Treat any "digipres" / "kumouri" references as synonyms for the KMOSF CRM — not a separate product.
 
-This is the **start** of the system. As of the initial commit, only the single-email communication path is wired end-to-end (`POST /api/communication/singleEmail`). Most other surface area (scheduling, contact persistence, meeting management) is scaffolded but unimplemented.
+This is a **near-complete CRM / back-office platform**. The codebase includes multi-tenant scoping, auth, contacts, companies, deals, activities, meetings, booking links, quotes + line items + PDF generation, invoices + payments, product catalog + price lists, S3 file storage, Twilio SMS, Postmark transactional email + webhook ingest, inbox, email sequences, workflow automation (rules + webhook delivery with circuit-breaker), custom field definitions (per-tenant), module registry (per-tenant feature toggles), portal auth (OAuth / Passkey / MagicLink), AI assist, RAG retrieval + AskAI endpoint, embedding pipeline (OpenAI text-embedding-3-small + Atlas Vector Search), lead scoring v2 (RandomForest + rules fallback), GDPR compliance (data-subject requests, consent records, retention policies), reporting + saved reports, mobile delta-sync, service hub (tickets, SLA policies, health scores, knowledge base), home-services vertical (service agreements, equipment, dispatch board, field-service, QuickBooks Online), restaurant-light module, salon/spa module (bookings, loyalty, Square POS), CSV imports, and public widget endpoints. For the full architectural overview and the roadmap, see `docs/design/01-architecture-audit-and-crm-roadmap.md` (untracked — present in the working tree but not committed; see "Architecture design doc" note below).
 
 ## Stack
 
 - **Spring Boot 3.5.6** on **Java 21** (toolchain pinned in `build.gradle`)
-- **Reactive end-to-end**: `spring-boot-starter-webflux` (Netty) on the web side, `spring-boot-starter-data-mongodb-reactive` with `ReactiveMongoRepository`, and reactive Resilience4j Spring Cloud Circuit Breaker on the classpath. All controllers return `Mono`/`Flux`; all repositories extend `ReactiveMongoRepository`; any blocking I/O (e.g. `Transport.send` in `EmailService`) is wrapped in `Mono.fromCallable(...).subscribeOn(Schedulers.boundedElastic())`. Do not introduce blocking patterns — see "Reactive conventions" below.
+- **Reactive end-to-end**: `spring-boot-starter-webflux` (Netty) on the web side, `spring-boot-starter-data-mongodb-reactive` with `ReactiveMongoRepository`, and reactive Resilience4j Spring Cloud Circuit Breaker on the classpath. All controllers return `Mono`/`Flux`; all repositories extend `ReactiveMongoRepository` or `TenantScopedSimpleReactiveMongoRepository`; any blocking I/O (e.g. `Transport.send` in `EmailService`, PDF generation in `QuotePdfService`) is wrapped in `Mono.fromCallable(...).subscribeOn(Schedulers.boundedElastic())`. Do not introduce blocking patterns — see "Reactive conventions" below.
 - **Jakarta Mail** through a hand-rolled `Session` bean (`AngusConfig`) talking to ProtonMail SMTP — *not* `spring-boot-starter-mail`'s `JavaMailSender`
-- **Quartz** for scheduling (declared, not yet used)
+- **Spring's `@Scheduled`** is in active use: `ReportScheduler`, `SlaBreachScheduler`, `ServiceAgreementSchedulerService`, `SequenceEngine`, `EquipmentService`, `LeadScoringV2Service`, and `RetentionPolicyService` all use `@Scheduled` for recurring ticks. **Quartz** is on the classpath but is not yet wired up — these services use Spring's `@Scheduled` as a stop-gap. `ReportScheduler` explicitly notes "swap to Quartz when the job count justifies the overhead."
 - **MapStruct 1.6.3** + **Lombok** as annotation processors. Order in `build.gradle` matters; don't reorder the `annotationProcessor` block without verifying MapStruct still generates implementations
-- **Spring Cloud Circuit Breaker (Resilience4j, reactor)** declared but not yet applied anywhere
+- **Spring Cloud Circuit Breaker (Resilience4j, reactor)** is **in active use**: `WebhookDeliveryService` wraps outbound webhook calls with a per-subscription `CircuitBreaker`, and `QuickBooksInvoiceSync` uses a `CircuitBreaker` for QBO API calls. Configuration is in `application.properties` under `resilience4j.circuitbreaker.*` and `resilience4j.retry.*`.
+- **Nimbus JOSE + JWT** for HS256 JWT signing/verification (self-issued; no external IdP federation yet — see "Not yet built" below)
 
-`build.gradle` carries a number of **commented-out starters** (security, Kafka, Spring Integration MongoDB, session-data-mongodb, docker-compose, OTLP registry). These are aspirational scaffolding for where the project is heading — don't delete them when cleaning up, and don't assume their features are available.
+`build.gradle` carries a number of **commented-out starters** (Kafka, Spring Integration MongoDB, session-data-mongodb, docker-compose, OTLP registry). These are aspirational scaffolding — don't delete them when cleaning up, and don't assume their features are available.
 
 ## Common Commands
 
@@ -51,37 +52,48 @@ On Windows, `gradlew.bat` is the equivalent of `./gradlew`.
 
 ### MongoDB for local dev
 
-`compose.yaml` defines a Mongo service but **does not map the host port** (`- '27017'` exposes a random host port). `application.properties` hardcodes `mongodb://localhost:27017/`. If you want to use `docker compose up` for local Mongo, either change the compose mapping to `'27017:27017'` or point the app at the random host port.
-
-Also note the **db name case mismatch**: `compose.yaml` sets `MONGO_INITDB_DATABASE=KMO_DIGIPRES_BE` (uppercase) but the app connects to `kmo-digipres-be` (lowercase-hyphenated). MongoDB db names are case-sensitive — the app will create its own db on first write rather than using the one the init script created.
+`compose.yaml` maps port `27017:27017` and `application.properties` connects to `mongodb://localhost:27017/kmo-digipres-be`. The compose file and the app agree on the db name, so `docker compose up` works directly for local Mongo.
 
 ## Architecture
 
-The codebase follows a layered Spring WebFlux structure under `com.kumouri.kmodigipresbe`:
+The codebase follows a layered Spring WebFlux structure under `com.kumouri.kmodigipresbe`. For the full architectural rationale and decision log, read `docs/design/01-architecture-audit-and-crm-roadmap.md` first (untracked file, present in the working tree).
 
-- `controller/` — REST entry points. `CommunicationController` is the only live one; `SchedulingController` is an empty stub.
-- `service/` — Business logic. `ContactService<T extends CommunicationRequest>` is the generic top-level interface; `EmailService` is its first implementation. The intent is one service per outbound channel (email, eventually SMS, calendar, etc.) all funneled through `initiateContact`.
-- `model/contact/` — `Contact` (marker interface, annotated `@Document` so Mongo can persist any implementation) and concrete `EmailContact` record.
-- `model/meeting/` — `Meeting` mongo document with `organizer` + `attendees` typed as the `Contact` interface.
-- `model/request/` — Two parallel hierarchies:
-  - **DTOs** (`CommunicationDTO`, `SingleEmailCommunicationDTO`) — flat string-typed payloads coming in over HTTP
-  - **Requests** (`CommunicationRequest`, `EmailCommunicationRequest`, `SingleEmailCommunicationRequest`) — internal types where `to`/`from` are already parsed `Contact` instances
-  `RequestMapper` (MapStruct) is the boundary between them; a `default` method on the mapper turns email strings into `EmailContact` instances and is how `String → InternetAddress` parsing happens. Add new channel DTOs in pairs and extend `RequestMapper` accordingly.
-- `repository/` — Reactive Spring Data Mongo repositories (`ReactiveMongoRepository<T, UUID>`). All new repositories should follow the same pattern.
-- `config/AngusConfig` — Provides the `jakarta.mail.Session` bean. **The ProtonMail SMTP password is currently hardcoded in source** (`AngusConfig.java:24`) — this needs to be externalized to `application.properties` / env vars / a secret store before any non-trivial work lands. Flag this in PR reviews; do not propagate the pattern.
-- `util/EmailUtil` — Static `String → InternetAddress` parser that wraps `AddressException` in `DigiPresBeException`.
-- `exceptions/DigiPresBeException` — App-wide `RuntimeException` carrying an `errorCode` and `httpStatusCode`. There is currently no `@ControllerAdvice` translating it to an HTTP response — exceptions will bubble out as 500s until one is added.
+### Architecture design doc
+
+`docs/design/01-architecture-audit-and-crm-roadmap.md` is a 341-line design document that exists untracked in the working tree. It is **not committed** — it predates the `.claude/` gitignore and the owner will decide whether to commit it. Do not delete it; do not commit it without explicit instruction.
+
+### Package overview
+
+- **`controller/`** — REST entry points. Substantial surface area including: `AuthController`, `ContactController`, `CompanyController`, `DealController`, `ActivityController`, `MeetingController`, `AttachmentController`, `BookingLinkController`, `CommunicationController`, `SmsCommunicationController`, `EmailTemplateController`, `ImportController`, `InvoiceController`, `QuoteController`, `ProductController`, `PriceListController`, `ReportController`, `PublicBookingController`, `PublicContactController`, `PublicNewsletterController`, `TenantBootstrapController`, `AuditController` (audit/), `InboxController` (inbox/), `SavedReportController` (report/), `SequenceController` (sequence/), `SyncController` (sync/), `AiAssistController` + `AskAiController` + `LeadScoringController` (ai/), `MarketingLandingPageController` + `PublicLandingPageController` (marketing/), admin subpackage (`FieldDefinitionController`, `ModuleAdminController`, `PortalInvitationController`, `FieldPermissionsController`, `RetentionPolicyController`), compliance subpackage (`ConsentController`, `DataSubjectRequestController`), automation subpackage (`WebhookSubscriptionController`, `WorkflowRuleController`), integration subpackage (`IntegrationConnectionController`, `StripeWebhookController`, `PostmarkWebhookController`, `SquareWebhookController`, `SquareOAuthController`), portal subpackage (`PortalAuthController`, `PortalOAuthController`, `PortalPasskeyController`, `PortalActivitiesController`, `PortalInvoicesController`, `PortalProfileController`, `PortalTicketsController`), servicehub subpackage (`TicketController`, `SlaPolicyController`, `HealthScoreController`, `KnowledgeBaseController`, `PublicKnowledgeBaseController`), forms subpackage (`FormDefinitionController`, `FormWidgetController`), widget subpackage (`SampleWidgetController`), and the `GlobalErrorHandler` advice.
+- **`service/`** — Business logic organized per domain: communication (ProtonMail outbound, Postmark transactional, SMS via Twilio), calendar (booking links, booking service), billing (invoices, payments, quotes + PDF via OpenPDF), catalog (products, price lists), AI (`AiAssistService` / `AnthropicAiAssistService`, embedding pipeline, `AskAiService` RAG retrieval, `LeadScoringV2Service`), compliance (`DataSubjectRequestService`, `GdprConsentService`, `RetentionPolicyService`), portal (session, passkey/WebAuthn, MagicLink, OAuth), reports (`ReportScheduler`, `SavedReportCrudService`), service hub (tickets, SLA breach scheduler, health scores, knowledge base), sequences (`SequenceEngine`), sync (`SyncService`), storage (`S3FileStorageService`), templates, imports (`CsvImportService`), and more.
+- **`model/`** — Domain entities and DTOs. Key subpackages: `activity`, `ai` (`VectorDocument`, `LeadScoringJob`, `AskAiRequest`), `auth`, `billing`, `calendar`, `catalog`, `communication`, `compliance` (`ConsentRecord`, `DataSubjectRequest`, `RetentionPolicy`), `contact`, `deal`, `files`, `imports`, `inbox`, `meeting`, `report`, `request`, `scoring` (`LeadScore`), `sequence`, `sync`, `template`.
+- **`tenancy/`** — Multi-tenancy infrastructure: `TenantScopedSimpleReactiveMongoRepository` (base for all tenant-scoped repos — auto-stamps and auto-filters by `tenantId`), `TenantStampingCallback`, `TenantContextHolder` (Reactor Context carrier), `TenantResolver`, `RoleGuard`, `FieldPermissionPolicy` / `FieldPermissionRedactor`. All repositories for tenant-owned resources extend `TenantScopedSimpleReactiveMongoRepository`, not bare `ReactiveMongoRepository`.
+- **`extension/`** — Per-tenant customization: `CustomFieldHost`, `FieldDefinition` + service + repository, `TenantModuleRegistry` (per-tenant feature toggles), `ModuleDefinition`, `EntityType`, `FieldType`.
+- **`automation/`** — Event-driven automation: `DomainEvent` + `DomainEventPublisher`, `WorkflowRule` + `RuleEngine`, webhook delivery (`WebhookSubscription`, `WebhookDeliveryService` with Resilience4j circuit breaker).
+- **`audit/`** — `Auditable` marker, `AuditEvent`, `AuditingCallback`, `AuditDiffComputer`, `AuditEventWriter`.
+- **`integration/`** — Per-tenant external credentials (`IntegrationConnection`), Stripe webhook ingest, Twilio SMS, Postmark, Square (OAuth + webhook + POS).
+- **`config/`** — `AngusConfig` (Jakarta Mail session; all SMTP credentials externalized via `@Value`), `JwtConfig` + `JwtProperties` (HS256 signing), `SecurityConfig`, `PortalSecurityConfig`, `FileStorageConfig`, `DataSeeder`.
+- **`exceptions/`** — `DigiPresBeException` carries an `errorCode` (numeric, namespaced by subsystem — see `GlobalErrorHandler` Javadoc for the allocation table) and `httpStatusCode`.
+- **`module/`** — Optional vertical modules loaded via `ModuleAutoConfigurationSupport`: home-services (`ServiceAgreement`, `Equipment`, `DispatchBoard`, `OnTheWaySmsAutomation`, QuickBooks Online with circuit breaker), field-service (`WorkOrder`, `JobSite`, `Capture`), restaurant-light (reservations, menu, catering orders), salon/spa (bookings, loyalty, Square POS).
 
 ### Reactive conventions
 
 - Controllers return `Mono`/`Flux`. `@RequestBody` parameters can be plain DTOs or `Mono<DTO>` — pick the plain form unless streaming or upstream-deferred validation is needed.
-- Repositories extend `ReactiveMongoRepository`.
-- **Any blocking I/O** (JDBC, `jakarta.mail.Transport.send`, blocking HTTP clients) must be wrapped in `Mono.fromCallable(...).subscribeOn(Schedulers.boundedElastic())`. `EmailService.sendSingleEmail` is the reference pattern. Never call blocking code directly on a Netty event-loop thread.
+- Repositories extend `TenantScopedSimpleReactiveMongoRepository` (for tenant-owned data) or `ReactiveMongoRepository` (for system-level collections).
+- **Any blocking I/O** (JDBC, `jakarta.mail.Transport.send`, blocking HTTP clients, OpenPDF) must be wrapped in `Mono.fromCallable(...).subscribeOn(Schedulers.boundedElastic())`. `EmailService.sendSingleEmail` and `QuotePdfService` are the reference patterns. Never call blocking code directly on a Netty event-loop thread.
 - The base path comes from `spring.webflux.base-path=/api` in `application.properties`. The servlet-style `server.servlet.context-path` is silently ignored under WebFlux — do not use it.
 
 ### REST conventions
 
-Server runs on port **8080** with base path **`/api`** (via `spring.webflux.base-path`), so `CommunicationController`'s `/communication/singleEmail` resolves to `POST /api/communication/singleEmail`. The controller currently returns `Mono<Boolean>` directly — there's no envelope/response-object convention yet.
+Server runs on port **8080** with base path **`/api`** (via `spring.webflux.base-path`). All errors are translated to **RFC 7807 `ProblemDetail`** responses by `GlobalErrorHandler` (implements `ErrorWebExceptionHandler`, ordered `-2`). The handler covers: `DigiPresBeException` (maps `errorCode` + `httpStatusCode` to a typed problem URI `https://kmosf/errors/<errorCode>`), `WebExchangeBindException` (400 with field-error list), `ResponseStatusException`, `AccessDeniedException` (403), `AuthenticationException` (401), and a catch-all 500. A `correlationId` UUID is included in every error response. Error codes are numeric and subsystem-namespaced — see the Javadoc on `GlobalErrorHandler` for the full allocation table.
+
+### SMTP / secrets
+
+All SMTP credentials are externalized to environment variables via `@Value` in `AngusConfig` (`KMOSF_MAIL_SMTP_HOST`, `KMOSF_MAIL_SMTP_PORT`, `KMOSF_MAIL_SMTP_USERNAME`, `KMOSF_MAIL_SMTP_PASSWORD`). Nothing is hardcoded. The password has no default — the app will fail to start if the env var is absent. There is no secret store integration yet (env vars only).
+
+### JWT / auth
+
+JWTs are **self-issued HS256**, signed with a secret from `KMOSF_JWT_SECRET` (env var). If unset, a random ephemeral key is generated and a WARN is logged — tokens invalidate on every restart; not suitable for production. Key must be >= 32 bytes. There is **no external IdP / Zitadel federation** yet (that is a planned future phase).
 
 ## Testing
 
@@ -91,6 +103,20 @@ Tests use Spring Boot Test with **Testcontainers** for Mongo and Kafka (`Testcon
 
 REST Docs is configured (`spring-restdocs-webtestclient` + asciidoctor plugin). When endpoints are documented, snippets land in `build/generated-snippets` and the `asciidoctor` task assembles them.
 
+## Not yet built / next
+
+The following are **not in the codebase** as of the current commit — do not assume they exist:
+
+- **Project / Milestone / Task / TimeEntry / Expense** entities (project management vertical)
+- **Contract + ContractTemplate / RecurringInvoice** entities
+- **Zitadel / external IdP federation** — JWTs are currently self-issued HS256 (see "JWT / auth" above)
+- **`/api/v1` versioning** — the base path is `/api` today; no version prefix yet
+- **OpenAPI / Springdoc generation** — no auto-generated API docs
+- **Idempotency-key middleware** for payment / mutation endpoints
+- **Per-tenant deployment automation**
+
+These are planned in the back-office ultraplan (`C:\Users\willa\.claude\plans\ultraplan-research-back-office-iridescent-wilkes.md`). Do not scaffold or stub these unless a specific phase in that plan is actively in flight.
+
 ## Branching
 
-This repo lives under `kmosf/repos/` in the KMOSF workspace and follows the workspace branching conventions (see `../../CLAUDE.md`): `<plan-slug>` for single-phase plans, `<plan-slug>-phase-N-<desc>` only when one plan is split, `fix/<desc>` and `feat/<desc>` for unplanned work. Don't work directly on `master`.
+This repo lives under `kmosf/repos/` in the KMOSF workspace and follows the workspace branching conventions (see `../../CLAUDE.md`): `<plan-slug>` for single-phase plans, `<plan-slug>-phase-N-<desc>` only when one plan is split, `fix/<desc>` and `feat/<desc>` for unplanned work. The default branch is `main` (renamed from `master`); don't work directly on it.
