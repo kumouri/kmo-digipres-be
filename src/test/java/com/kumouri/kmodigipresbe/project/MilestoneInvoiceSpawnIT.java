@@ -10,7 +10,6 @@ import com.kumouri.kmodigipresbe.model.project.Project;
 import com.kumouri.kmodigipresbe.model.quote.LineItem;
 import com.kumouri.kmodigipresbe.model.tenant.Tenant;
 import com.kumouri.kmodigipresbe.model.user.User;
-import com.kumouri.kmodigipresbe.repository.InvoiceRepository;
 import com.kumouri.kmodigipresbe.repository.TenantRepository;
 import com.kumouri.kmodigipresbe.repository.UserRepository;
 import com.kumouri.kmodigipresbe.repository.project.MilestoneRepository;
@@ -57,7 +56,6 @@ class MilestoneInvoiceSpawnIT {
     @Autowired UserRepository users;
     @Autowired JwtTokenService jwt;
     @Autowired ReactiveMongoTemplate mongo;
-    @Autowired InvoiceRepository invoiceRepo;
     @Autowired ProjectRepository projectRepo;
     @Autowired MilestoneRepository milestoneRepo;
     @Autowired DomainEventPublisher eventPublisher;
@@ -135,7 +133,7 @@ class MilestoneInvoiceSpawnIT {
                 .jsonPath("$.spawnedInvoiceId").isNotEmpty();
 
         // Assert exactly one invoice for this milestone
-        List<Invoice> invoices = invoiceRepo.findAll().collectList().block();
+        List<Invoice> invoices = mongo.findAll(Invoice.class).collectList().block();
         assertThat(invoices).isNotNull();
         List<Invoice> forMilestone = invoices.stream()
                 .filter(i -> milestone.getId().equals(i.getMilestoneId()))
@@ -180,7 +178,7 @@ class MilestoneInvoiceSpawnIT {
                 .header("Idempotency-Key", UUID.randomUUID().toString())
                 .exchange().expectStatus().isOk();
 
-        long invoiceCount = invoiceRepo.findAll()
+        long invoiceCount = mongo.findAll(Invoice.class)
                 .filter(i -> milestone.getId().equals(i.getMilestoneId()))
                 .count().block();
         assertThat(invoiceCount).isEqualTo(1);
@@ -203,7 +201,7 @@ class MilestoneInvoiceSpawnIT {
                 .header("Idempotency-Key", UUID.randomUUID().toString())
                 .exchange().expectStatus().isOk();
 
-        long invoiceCount = invoiceRepo.findAll()
+        long invoiceCount = mongo.findAll(Invoice.class)
                 .filter(i -> milestone.getId().equals(i.getMilestoneId()))
                 .count().block();
         assertThat(invoiceCount).isEqualTo(0);
@@ -232,7 +230,7 @@ class MilestoneInvoiceSpawnIT {
                 .exchange().expectStatus().isOk();
 
         // Invoice should be SENT (auto-finalized)
-        List<Invoice> forMilestone = invoiceRepo.findAll()
+        List<Invoice> forMilestone = mongo.findAll(Invoice.class)
                 .filter(i -> milestone.getId().equals(i.getMilestoneId()))
                 .collectList().block();
         assertThat(forMilestone).hasSize(1);
