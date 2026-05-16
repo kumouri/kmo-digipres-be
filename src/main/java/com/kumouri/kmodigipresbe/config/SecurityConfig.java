@@ -58,9 +58,11 @@ public class SecurityConfig {
                 .formLogin(ServerHttpSecurity.FormLoginSpec::disable)
                 .authorizeExchange(ex -> ex
                         .pathMatchers(HttpMethod.POST, "/auth/login").permitAll()
-                        .pathMatchers("/auth/health", "/actuator/health/**").permitAll()
+                        .pathMatchers("/auth/health", "/auth/discovery", "/actuator/health/**").permitAll()
                         .pathMatchers(HttpMethod.POST, "/tenants").permitAll()
                         .pathMatchers("/public/**").permitAll()
+                        // OpenAPI spec + Swagger UI — CI must be able to read these unauthenticated
+                        .pathMatchers("/openapi", "/v3/api-docs/**", "/swagger-ui/**", "/webjars/**").permitAll()
                         .anyExchange().authenticated())
                 .oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt.jwtDecoder(jwtDecoder)))
                 .build();

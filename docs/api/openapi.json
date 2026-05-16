@@ -1,0 +1,42 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "KMOSF CRM API",
+    "description": "KMO Solutions Foundry CRM — multi-tenant back-office platform",
+    "version": "v1"
+  },
+  "servers": [
+    {
+      "url": "/api/v1",
+      "description": "Current versioned base path"
+    }
+  ],
+  "paths": {
+    "/auth/discovery": {
+      "get": {
+        "summary": "Auth mode discovery",
+        "operationId": "discovery",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "HS256 JWT issued by POST /api/v1/auth/login"
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ]
+}

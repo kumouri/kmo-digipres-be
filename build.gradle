@@ -3,6 +3,7 @@ plugins {
     id 'org.springframework.boot' version '3.5.6'
     id 'io.spring.dependency-management' version '1.1.7'
     id 'org.asciidoctor.jvm.convert' version '3.3.2'
+    id 'org.springdoc.openapi-gradle-plugin' version '1.9.0'
 }
 
 group = 'com.kumouri'
@@ -67,6 +68,8 @@ dependencies {
     // Phase 11c — lead scoring v2. Smile is a pure-Java ML library; all CPU-bound
     // calls (training, prediction) must be wrapped in Schedulers.boundedElastic().
     implementation 'com.github.haifengl:smile-core:3.1.0'
+    // Phase A — OpenAPI / Springdoc (WebFlux variant)
+    implementation 'org.springdoc:springdoc-openapi-starter-webflux-ui:2.6.0'
     compileOnly 'org.projectlombok:lombok'
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
 //    developmentOnly 'org.springframework.boot:spring-boot-docker-compose'
@@ -110,4 +113,60 @@ tasks.named('test') {
 tasks.named('asciidoctor') {
     inputs.dir snippetsDir
     dependsOn test
+}
+
+// Phase A — OpenAPI drift gate.
+// generateOpenApiDocs (from org.springdoc.openapi-gradle-plugin) boots the app and
+// emits the spec to build/openapi.json.  verifyOpenApi normalises both the committed
+// file and the generated file (sort keys, strip whitespace) and fails the build when
+// they differ so spec drift is caught on every PR.
+openApi {
+    outputDir = layout.buildDirectory.dir("openapi")
+    outputFileName = "openapi.json"
+    // The plugin starts the app on a random port; pass Testcontainers-free settings
+    // so it does not require a live database (Springdoc only introspects routes).
+    customBootRun {
+        args = [
+            "--spring.data.mongodb.uri=mongodb://localhost:27017/",
+            "--spring.data.mongodb.auto-index-creation=false",
+            "--kmosf.mail.smtp.password=test",
+            "--spring.quartz.auto-startup=false",
+            "--kmosf.quartz.proof-job.enabled=false"
+        ]
+    }
+}
+
+tasks.register('verifyOpenApi') {
+    description = 'Fails the build if docs/api/openapi.json has drifted from the generated spec.'
+    group = 'verification'
+    dependsOn 'generateOpenApiDocs'
+    doLast {
+        def committed = file('docs/api/openapi.json')
+        def generated = layout.buildDirectory.file('openapi/openapi.json').get().asFile
+        if (!committed.exists()) {
+            throw new GradleException(
+                "docs/api/openapi.json does not exist. Run ./gradlew generateOpenApiDocs, " +
+                "copy build/openapi/openapi.json to docs/api/openapi.json, and commit it.")
+        }
+        if (!generated.exists()) {
+            throw new GradleException(
+                "Generated spec not found at ${generated}. generateOpenApiDocs may have failed.")
+        }
+        def normalize = { String s -> s.replaceAll(/\s+/, ' ').trim() }
+        def c = normalize(committed.text)
+        def g = normalize(generated.text)
+        if (c != g) {
+            throw new GradleException(
+                "OpenAPI spec drift detected! The committed docs/api/openapi.json does not match " +
+                "the spec generated from the running application.\n" +
+                "To fix: run ./gradlew generateOpenApiDocs, review the diff " +
+                "(diff docs/api/openapi.json build/openapi/openapi.json), " +
+                "copy build/openapi/openapi.json to docs/api/openapi.json, and commit.")
+        }
+        println "verifyOpenApi: docs/api/openapi.json matches the generated spec. OK."
+    }
+}
+
+tasks.named('check') {
+    dependsOn 'verifyOpenApi'
 }
