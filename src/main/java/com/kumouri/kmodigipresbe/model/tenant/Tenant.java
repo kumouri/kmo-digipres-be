@@ -30,6 +30,23 @@ public class Tenant {
 
     private String displayName;
 
+    /**
+     * Zitadel organization id this tenant federates to (Phase A2). Null for tenants
+     * that do not use Zitadel — which is every tenant in {@code local} auth-mode and
+     * in the entire IT suite.
+     *
+     * <p>Doubles as the per-tenant portal Zitadel opt-in flag (Phase A2.5): a tenant
+     * with a non-null {@code zitadelOrgId} federates its portal to Zitadel too; a
+     * null value keeps the magic-link / OAuth / passkey fallback. No separate boolean.
+     *
+     * <p>The index <strong>must</strong> be {@code sparse=true}: a non-sparse unique
+     * index would treat every null-org tenant (all 333 IT-seeded tenants) as colliding
+     * on a single null key and {@code DuplicateKeyException} the 2nd insert, wiping the
+     * whole suite. {@code spring.data.mongodb.auto-index-creation=true} builds it.
+     */
+    @Indexed(unique = true, sparse = true)
+    private String zitadelOrgId;
+
     @Builder.Default
     private Set<String> enabledModules = Set.of();
 
