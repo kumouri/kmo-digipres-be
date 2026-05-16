@@ -8,6 +8,7 @@ import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.reactivestreams.Publisher;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.security.SecurityProperties;
 import org.springframework.core.annotation.Order;
 import org.springframework.core.io.buffer.DataBuffer;
@@ -64,6 +65,12 @@ import java.util.UUID;
  */
 @Slf4j
 @Component
+// A WebFilter is only meaningful in a reactive web context. Without this,
+// non-web @SpringBootTest contexts (spring.main.web-application-type=none — e.g.
+// service-layer ITs like RetentionPurgeIT) instantiate this bean and fail: there
+// is no RequestMappingHandlerMapping to inject → NoSuchBeanDefinitionException →
+// the whole ApplicationContext fails to load.
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.REACTIVE)
 @Order(SecurityProperties.DEFAULT_FILTER_ORDER + 2)
 public class IdempotencyWebFilter implements WebFilter {
 
@@ -143,11 +150,19 @@ public class IdempotencyWebFilter implements WebFilter {
                 .flatMap(tenantContext -> {
                     UUID tenantId = tenantContext.tenantId();
 
+                    // Single terminal path: replay XOR run-and-persist. Do NOT use
+                    // findBy(...).flatMap(replayResponse).switchIfEmpty(runAndPersist):
+                    // replayResponse returns Mono<Void> (completes EMPTY), so on a cache
+                    // HIT switchIfEmpty still fires → runAndPersist re-runs the chain on
+                    // the already-committed response (side effect twice + ReadOnlyHttpHeaders
+                    // post-commit). Same empty-completion trap as the outer filter() fix.
                     return repository.findByTenantIdAndRouteAndIdempotencyKey(
                                     tenantId, routeKey, idempotencyKeyValue)
-                            .flatMap(existing -> replayResponse(exchange, existing))
-                            .switchIfEmpty(Mono.defer(() ->
-                                    runAndPersist(exchange, chain, tenantId, routeKey, idempotencyKeyValue)));
+                            .flatMap(existing -> replayResponse(exchange, existing).thenReturn(Boolean.TRUE))
+                            .defaultIfEmpty(Boolean.FALSE)
+                            .flatMap(replayed -> Boolean.TRUE.equals(replayed)
+                                    ? Mono.empty()
+                                    : runAndPersist(exchange, chain, tenantId, routeKey, idempotencyKeyValue));
                 });
     }
 

@@ -29,6 +29,14 @@ public class TestcontainersConfiguration {
     // ran. Requires a single forked test JVM (Gradle: forkEvery=0/maxParallelForks=1)
     // for "static == one per suite" to hold; Testcontainers' JVM shutdown hook + Ryuk
     // (re-enabled in CI) stop them at the end.
+    //
+    // CRITICAL: the @Bean methods use destroyMethod = "". MongoDBContainer /
+    // KafkaContainer are AutoCloseable, so without this Spring calls close()->stop()
+    // on the SHARED static container when the FIRST cached @SpringBootTest context
+    // closes — killing Mongo/Kafka for every later context (whole clusters of ITs
+    // then fail with "Timed out waiting for a server that matches WritableServerSelector"
+    // / "Shutdown in progress"). destroyMethod = "" disables Spring's inferred
+    // close; the JVM shutdown hook / Ryuk is the only thing that stops them.
     // ---------------------------------------------------------------------------
     private static final MongoDBContainer MONGO =
             new MongoDBContainer(DockerImageName.parse("mongo:latest"));
@@ -45,13 +53,13 @@ public class TestcontainersConfiguration {
         KAFKA.start();
     }
 
-    @Bean
+    @Bean(destroyMethod = "")
     @ServiceConnection
     KafkaContainer kafkaContainer() {
         return KAFKA;
     }
 
-    @Bean
+    @Bean(destroyMethod = "")
     @ServiceConnection
     MongoDBContainer mongoDbContainer() {
         return MONGO;

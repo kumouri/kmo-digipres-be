@@ -1,1 +1,8 @@
+// Auto-provisions the Java 21 toolchain (build.gradle) when no matching JDK is
+// installed, so the build runs on any machine. CI is unaffected — it supplies
+// JDK 21 via actions/setup-java, so the resolver never downloads there.
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0'
+}
+
 rootProject.name = 'kmo-digipres-be'
