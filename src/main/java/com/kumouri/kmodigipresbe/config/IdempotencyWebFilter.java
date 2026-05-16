@@ -99,28 +99,28 @@ public class IdempotencyWebFilter implements WebFilter {
             return chain.filter(exchange);
         }
 
-        // Resolve the handler to check for @IdempotentRoute.
-        // getHandler() also writes HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE into
-        // the exchange attributes, which we use to build the route key.
+        // Resolve the handler, decide ONCE whether this route opts into idempotency,
+        // then take exactly one terminal path so chain.filter(exchange) is subscribed
+        // exactly once.
+        //
+        // Why not flatMap(...chain.filter...).switchIfEmpty(chain.filter...): chain.filter
+        // returns Mono<Void> and completes EMPTY, so a pass-through inside flatMap
+        // completes the upstream empty — indistinguishable from "no handler" — and
+        // switchIfEmpty then runs the chain a SECOND time. That double-run reprocesses
+        // the already-completed response (UnsupportedOperationException after response
+        // completed → GlobalErrorHandler cannot write a committed response →
+        // FailureAfterResponseCompletedException), cascading across every IT that does
+        // POST /auth/login. Map to a boolean instead (ofType excludes non-HandlerMethod
+        // handlers; defaultIfEmpty covers no-handler), then a single flatMap.
+        // getHandler() also sets HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE used
+        // by handleIdempotentRequest for the route key.
         return handlerMapping.getHandler(exchange)
-                // ofType (not cast): non-HandlerMethod handlers (functional/router/
-                // resource/springdoc) are never @IdempotentRoute — cast would throw.
                 .ofType(HandlerMethod.class)
-                .flatMap(handlerMethod -> {
-                    IdempotentRoute annotation = handlerMethod.getMethodAnnotation(IdempotentRoute.class);
-                    if (annotation == null) {
-                        // Not an idempotent route — pass through untouched
-                        return chain.filter(exchange);
-                    }
-                    return handleIdempotentRequest(exchange, chain, method);
-                })
-                // Mono.defer so the fallback chain.filter is created/subscribed ONLY when
-                // upstream is genuinely empty. Eager switchIfEmpty(chain.filter(exchange))
-                // double-subscribes the chain (response processed twice → mutation of
-                // committed/read-only headers → FailureAfterResponseCompletedException,
-                // cascading across the whole suite). See R-A2 / TenantWebFilter Javadoc
-                // on the switchIfEmpty double-run trap.
-                .switchIfEmpty(Mono.defer(() -> chain.filter(exchange)));
+                .map(hm -> hm.getMethodAnnotation(IdempotentRoute.class) != null)
+                .defaultIfEmpty(false)
+                .flatMap(isIdempotent -> Boolean.TRUE.equals(isIdempotent)
+                        ? handleIdempotentRequest(exchange, chain, method)
+                        : chain.filter(exchange));
     }
 
     private Mono<Void> handleIdempotentRequest(
