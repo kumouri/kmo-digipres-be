@@ -3,8 +3,8 @@ package com.kumouri.kmodigipresbe.service.recurring;
 import com.kumouri.kmodigipresbe.automation.DomainEvent;
 import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
 import com.kumouri.kmodigipresbe.automation.DomainEventType;
+import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
 import com.kumouri.kmodigipresbe.model.billing.Invoice;
-import com.kumouri.kmodigipresbe.model.quote.LineItem;
 import com.kumouri.kmodigipresbe.model.recurring.RecurringInvoice;
 import com.kumouri.kmodigipresbe.model.recurring.RecurringInvoice.Status;
 import com.kumouri.kmodigipresbe.model.recurring.RecurringInvoiceOccurrence;
@@ -120,6 +120,23 @@ public class RecurringInvoiceSpawnService {
         return recurringInvoices.findAllDueAcrossTenants(clock.instant())
                 .flatMap(this::spawnDueForSafe)
                 .then();
+    }
+
+    /**
+     * Manual single-template spawn ({@code POST /recurring-invoices/{id}/spawn-now}
+     * — E-D12). Loads the template tenant-scoped (404/3605 if absent) and runs the
+     * <strong>identical</strong> idempotent ledger-first {@code spawnDueFor} path,
+     * so a double-click / re-fire produces exactly one invoice + one ledger row
+     * (the {@code @IdempotentRoute} on the endpoint is the belt; the occurrence
+     * ledger is the guarantee). Errors are NOT swallowed here (unlike the tick) —
+     * a manual trigger should surface a bad RRULE (1300) etc. to the caller.
+     */
+    public Mono<Void> spawnNow(UUID recurringInvoiceId) {
+        return TenantContextHolder.required().flatMap(ctx ->
+                recurringInvoices.findByTenantIdAndId(ctx.tenantId(), recurringInvoiceId)
+                        .switchIfEmpty(Mono.error(() -> new DigiPresBeException(
+                                "RecurringInvoice not found", 3605, 404)))
+                        .flatMap(this::spawnDueFor));
     }
 
     /**

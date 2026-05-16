@@ -2,6 +2,7 @@ package com.kumouri.kmodigipresbe.controller;
 
 import com.kumouri.kmodigipresbe.model.billing.Invoice;
 import com.kumouri.kmodigipresbe.model.billing.Payment;
+import com.kumouri.kmodigipresbe.model.idempotency.IdempotentRoute;
 import com.kumouri.kmodigipresbe.service.billing.InvoiceService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -36,7 +37,15 @@ public class InvoiceController {
         return service.findById(id);
     }
 
+    /**
+     * Phase E (E-D6) — {@code @IdempotentRoute}: a money-critical create. Adoption
+     * of the Phase-A idempotency middleware on the money-critical Invoice/Payment
+     * POSTs was explicitly deferred to Phase E. A retry with the same
+     * {@code Idempotency-Key} replays the original 2xx (no duplicate invoice);
+     * a missing key → 400 {@code 3100}.
+     */
     @PostMapping
+    @IdempotentRoute
     @ResponseStatus(HttpStatus.CREATED)
     public Mono<Invoice> create(@RequestBody Invoice body) {
         return service.create(body);
@@ -53,7 +62,14 @@ public class InvoiceController {
         return service.setStatus(id, target);
     }
 
+    /**
+     * Phase E (E-D6) — {@code @IdempotentRoute}: a money-critical payment record.
+     * A retry with the same {@code Idempotency-Key} replays the original 201 (the
+     * payment is recorded once, the balance is unchanged); a missing key → 400
+     * {@code 3100}.
+     */
     @PostMapping("/{id}/payments")
+    @IdempotentRoute
     @ResponseStatus(HttpStatus.CREATED)
     public Mono<Payment> recordPayment(@PathVariable UUID id, @RequestBody Payment body) {
         body.setInvoiceId(id);

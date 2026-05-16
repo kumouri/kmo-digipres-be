@@ -11,8 +11,8 @@
 | E.1 — error range 3600-3699 + DomainEventType Phase-E block + Invoice.PaymentTerms (additive) | done | 4e3b71f | compileJava clean; full test 399/0/0 — no regression, no error-code collision |
 | E.2 — Quartz Mongo JobStore dep + QuartzConfig customizer + properties | done | 15d90d0 | E-D5 RAM-FALLBACK ACTIVE — see decision below; QuartzMongoJobStoreIT 2/0/0 (RAM store, proof job fires) |
 | E.3 — RecurringInvoice + RecurringInvoiceOccurrence + repos | done | 6066774 | E-D2 field tables exact; unique tenant_recurring_period_idx; full test 399/0/0 (entities map clean, index auto-creates) |
-| E.4 — RecurringInvoiceService + RecurringInvoiceSpawnService + Quartz job | done | (this commit) | ledger-insert-FIRST + explicit-boolean probe; self-grep clean (only 3605 not-found switchIfEmpty); full test 399/0/0 |
-| E.5 — StripeWebhookEvent + extended StripeWebhookService + StripeProperties + StripeCheckoutService + controllers | pending | — | — |
+| E.4 — RecurringInvoiceService + RecurringInvoiceSpawnService + Quartz job | done | 69619bc | ledger-insert-FIRST + explicit-boolean probe; self-grep clean (only 3605 not-found switchIfEmpty); full test 399/0/0 |
+| E.5 — StripeWebhookEvent + extended StripeWebhookService + StripeProperties + StripeCheckoutService + controllers | done | (this commit) | event-id idempotency (ledger-first, 200-no-op dup) + INVOICE_PAID; @IdempotentRoute×4; QuickBooksInvoiceSync untouched; self-grep clean; full test 399/0/0 |
 | E.6 — BE ITs AC-E1…AC-E8 | pending | — | — |
 | E.7 — BE CLAUDE.md in-PR + .claude/* local + docs/api/openapi.json committed | pending | — | — |
 | E.8 — Final BE green + PR | pending | — | — |
