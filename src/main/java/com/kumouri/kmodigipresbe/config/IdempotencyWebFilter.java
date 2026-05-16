@@ -103,7 +103,9 @@ public class IdempotencyWebFilter implements WebFilter {
         // getHandler() also writes HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE into
         // the exchange attributes, which we use to build the route key.
         return handlerMapping.getHandler(exchange)
-                .cast(HandlerMethod.class)
+                // ofType (not cast): non-HandlerMethod handlers (functional/router/
+                // resource/springdoc) are never @IdempotentRoute — cast would throw.
+                .ofType(HandlerMethod.class)
                 .flatMap(handlerMethod -> {
                     IdempotentRoute annotation = handlerMethod.getMethodAnnotation(IdempotentRoute.class);
                     if (annotation == null) {
@@ -112,7 +114,13 @@ public class IdempotencyWebFilter implements WebFilter {
                     }
                     return handleIdempotentRequest(exchange, chain, method);
                 })
-                .switchIfEmpty(chain.filter(exchange)); // no handler found → let chain handle (404)
+                // Mono.defer so the fallback chain.filter is created/subscribed ONLY when
+                // upstream is genuinely empty. Eager switchIfEmpty(chain.filter(exchange))
+                // double-subscribes the chain (response processed twice → mutation of
+                // committed/read-only headers → FailureAfterResponseCompletedException,
+                // cascading across the whole suite). See R-A2 / TenantWebFilter Javadoc
+                // on the switchIfEmpty double-run trap.
+                .switchIfEmpty(Mono.defer(() -> chain.filter(exchange)));
     }
 
     private Mono<Void> handleIdempotentRequest(

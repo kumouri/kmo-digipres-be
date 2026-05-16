@@ -42,8 +42,11 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      - name: Upload test reports on failure
-        if: failure()
+      - name: Upload test reports
+        # always() (not failure()) so a *cancelled* job still uploads the reports —
+        # cancellation skips failure()-gated steps, which was hiding the full stack
+        # traces needed to diagnose CI failures. Pre-existing; widened during Phase A.
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-reports
