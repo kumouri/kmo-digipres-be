@@ -5,8 +5,8 @@ import com.kumouri.kmodigipresbe.model.idempotency.IdempotencyKey;
 import com.kumouri.kmodigipresbe.model.idempotency.IdempotentRoute;
 import com.kumouri.kmodigipresbe.repository.IdempotencyKeyRepository;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.reactivestreams.Publisher;
 import org.springframework.boot.autoconfigure.security.SecurityProperties;
 import org.springframework.core.annotation.Order;
@@ -65,7 +65,6 @@ import java.util.UUID;
 @Slf4j
 @Component
 @Order(SecurityProperties.DEFAULT_FILTER_ORDER + 2)
-@RequiredArgsConstructor
 public class IdempotencyWebFilter implements WebFilter {
 
     private static final String IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
@@ -78,6 +77,20 @@ public class IdempotencyWebFilter implements WebFilter {
 
     private final IdempotencyKeyRepository repository;
     private final RequestMappingHandlerMapping handlerMapping;
+
+    /**
+     * Explicit constructor (not Lombok {@code @RequiredArgsConstructor}) so the
+     * {@link Qualifier} can disambiguate {@link RequestMappingHandlerMapping}: the
+     * WebFlux bean is {@code requestMappingHandlerMapping}, but Spring Boot Actuator
+     * also contributes a {@code controllerEndpointHandlerMapping} of the same type.
+     * Injecting by type alone fails context load with NoUniqueBeanDefinitionException.
+     */
+    public IdempotencyWebFilter(
+            IdempotencyKeyRepository repository,
+            @Qualifier("requestMappingHandlerMapping") RequestMappingHandlerMapping handlerMapping) {
+        this.repository = repository;
+        this.handlerMapping = handlerMapping;
+    }
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
