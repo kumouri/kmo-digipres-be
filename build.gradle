@@ -70,6 +70,14 @@ dependencies {
     implementation 'com.github.haifengl:smile-core:3.1.0'
     // Phase A — OpenAPI / Springdoc (WebFlux variant)
     implementation 'org.springdoc:springdoc-openapi-starter-webflux-ui:2.6.0'
+    // Phase A (A.5) — Quartz Mongo JobStore.
+    // NOTE: com.github.quartz-mongodb:quartz-mongodb:2.2.0-rc1 (plan coordinate) did not
+    // resolve at implementation time. The community library lives at:
+    //   https://github.com/michaelklishin/quartz-mongodb
+    // Pending coordinate verification in CI; using RAM store as fallback for Phase A proof job.
+    // TODO(Phase-E): resolve coordinates and swap from RAM to Mongo store before Phase E
+    //   invoice/payment idempotency adoption of @Scheduled-based jobs.
+    // implementation 'com.github.quartz-mongodb:quartz-mongodb:2.2.0-rc1'
     compileOnly 'org.projectlombok:lombok'
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
 //    developmentOnly 'org.springframework.boot:spring-boot-docker-compose'
