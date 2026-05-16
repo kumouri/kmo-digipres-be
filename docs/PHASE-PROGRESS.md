@@ -1,29 +1,33 @@
-# Phase D — Time & Expenses — Progress Ledger
+# Phase E — Billing, Recurring & Stripe — Progress Ledger
 
 > This file is the crash-recovery source of truth per ultraplan §6 Resilience.
-> Each commit is recorded as it lands. The §10 stub mirrors this.
+> Each commit is recorded as it lands. The plan §10 stub mirrors this.
+> Plan: `back-office-kmo-digipres-phase-E-billing-recurring-stripe.md`
 
-## Branch: `back-office-kmo-digipres-phase-D-time-and-expenses`
+## Branch: `back-office-kmo-digipres-phase-E-billing-recurring-stripe`
 
 | Sub-phase | Status | SHA | Notes |
 |---|---|---|---|
-| D.1 — error range 3500-3599 + DomainEventType Phase-D constants | done | 7c5316c | GlobalErrorHandler Javadoc + 8 new DomainEventType constants |
-| D.2 — TimeEntry/Expense entities + repositories | done | 8e78694 | (tenantId,userId,startedAt desc) leading index; findFirst…EndedAtIsNull |
-| D.3 — TimeSplitService (local-day N-segment split) + TimeEntryService | done | 3acec89 | explicit-boolean idempotency; switchIfEmpty only for 3500 not-found |
-| D.4 — ExpenseService (CRUD/approve/reject/invoice-from-expenses) | done | 26a460c | switchIfEmpty only for 3511 not-found and project-header fallback |
-| D.5 — Controllers + @IdempotentRoute + RoleGuard + @ConditionalOnProperty | done | adac90e | 3 @IdempotentRoute endpoints; ADMIN guard on delete/approve/reject |
-| D.6 — BE ITs (AC-D1…AC-D8; incl. TimerMidnightSplitIT) | done | 7bdabfa | 399 tests / 0 failures / 0 errors |
-| D.7 — BE CLAUDE.md in-PR + .claude/* local + docs/api/openapi.json committed | done | (this commit) | 158 paths / 124 schemas |
+| E.1 — error range 3600-3699 + DomainEventType Phase-E block + Invoice.PaymentTerms (additive) | done | (this commit) | compileJava clean; full test 399/0/0 — no regression, no error-code collision |
+| E.2 — Quartz Mongo JobStore dep + QuartzConfig customizer + properties | pending | — | — |
+| E.3 — RecurringInvoice + RecurringInvoiceOccurrence + repos | pending | — | — |
+| E.4 — RecurringInvoiceService + RecurringInvoiceSpawnService + Quartz job | pending | — | — |
+| E.5 — StripeWebhookEvent + extended StripeWebhookService + StripeProperties + StripeCheckoutService + controllers | pending | — | — |
+| E.6 — BE ITs AC-E1…AC-E8 | pending | — | — |
+| E.7 — BE CLAUDE.md in-PR + .claude/* local + docs/api/openapi.json committed | pending | — | — |
+| E.8 — Final BE green + PR | pending | — | — |
 
-## Full suite result (after D.6)
-- **399 tests / 0 failures / 0 errors** — no main regression
+## Quartz-store resolution decision (record before E.4)
+- [ ] `io.fluidsonic.mirror:quartz-mongodb:2.2.0-rc2` resolved + context boots with Mongo store → **Mongo store active**
+- [ ] OR dependency failed → **E-D5 RAM-fallback active** (durability via the Mongo occurrence ledger + `nextRunAt` cursor)
+
+## Full suite result
+- Baseline (main @ 87cb3eb): 399 tests / 0 failures / 0 errors
+- After E.6: TBD
 
 ## OpenAPI spec (docs/api/openapi.json)
-- Paths: 158 (was 143 on main — +15 new time/expense paths)
-- Schemas: 124 (was 120 on main — +4 new schemas)
-- TimeEntry schema: confirmed present
-- Expense schema: confirmed present
+- Baseline (main): 158 paths / 124 schemas
+- After E.7: TBD
 
 ## HANDOFF GATE
-FE work MUST NOT start until the BE PR is merged and docs/api/openapi.json is committed on BE main.
-**[ ] Set SATISFIED after merge**
+N/A — Phase E is BE-only; recurring/Stripe FE deferred to Phase G (E-D13).

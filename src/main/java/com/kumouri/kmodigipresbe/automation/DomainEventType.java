@@ -141,6 +141,26 @@ public final class DomainEventType {
     public static final String EXPENSE_REJECTED   = "expense.rejected";
     public static final String EXPENSE_INVOICED   = "expense.invoiced";
 
+    // Phase E — Recurring billing & Stripe money rails. All are advisory (RuleEngine /
+    // webhook fan-out) — they do NOT drive the recurring spawn, the Stripe payment
+    // recording, or the QBO push (those are synchronous + explicit / ledger-gated in
+    // RecurringInvoiceSpawnService and StripeWebhookService). The Stripe webhook reuses
+    // the existing INVOICE_PAID (above) — NOT a new event — so LoyaltyAccrualService
+    // (which already keys off INVOICE_PAID) accrues on Stripe payments too.
+    // RECURRING_INVOICE_CREATED: emitted by RecurringInvoiceService.create.
+    // RECURRING_INVOICE_SPAWNED: emitted after a per-period DRAFT invoice is materialized;
+    //   payload {recurringInvoiceId, spawnedInvoiceId, periodKey, occurrenceCount}.
+    // RECURRING_INVOICE_PAUSED / RECURRING_INVOICE_ENDED: emitted on status transition
+    //   to PAUSED / ENDED (ENDED also fires when the RRULE has no further occurrence or
+    //   endAt is reached).
+    // STRIPE_CHECKOUT_CREATED: emitted after a Stripe Checkout Session / Payment Link
+    //   URL is generated; payload {invoiceId, mode}.
+    public static final String RECURRING_INVOICE_CREATED = "recurringInvoice.created";
+    public static final String RECURRING_INVOICE_SPAWNED = "recurringInvoice.spawned";
+    public static final String RECURRING_INVOICE_PAUSED  = "recurringInvoice.paused";
+    public static final String RECURRING_INVOICE_ENDED   = "recurringInvoice.ended";
+    public static final String STRIPE_CHECKOUT_CREATED   = "stripe.checkoutCreated";
+
     private DomainEventType() {
     }
 }

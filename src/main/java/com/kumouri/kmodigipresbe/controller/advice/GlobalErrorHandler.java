@@ -131,6 +131,22 @@ import java.util.UUID;
  *       <em>Invoice-from-expenses:</em> {@code 3530} no eligible (approved+billable+unbilled)
  *       expenses (409); {@code 3531} reserved; {@code 3532} all selected expenses already
  *       invoiced (409).</li>
+ *   <li>{@code 3600-3699} — <em>Phase E</em>: Billing / Recurring / Stripe.
+ *       <em>RecurringInvoice:</em> {@code 3601} templateName blank (400);
+ *       {@code 3602} lineItems empty (400); {@code 3603} rrule blank (400);
+ *       {@code 3604} seedAt required (400); {@code 3605} RecurringInvoice not found (404);
+ *       {@code 3606} invalid RecurringInvoice status transition (409);
+ *       {@code 3607} cannot modify an ENDED RecurringInvoice (409).
+ *       <em>Stripe webhook:</em> {@code 3610} webhook event missing id (400, defensive —
+ *       a duplicate event is acknowledged 200, not an error).
+ *       <em>Stripe checkout:</em> {@code 3620} Stripe apiKey not configured for checkout
+ *       (412 — distinct from the webhook's {@code 2511} missing-signing-secret);
+ *       {@code 3621} Stripe checkout session/payment-link creation failed (502).
+ *       <em>Accounting-push:</em> {@code 3630} invoice not eligible for accounting push
+ *       (409, defensive). Reused (not re-allocated): {@code 1300} invalid RRULE
+ *       (owned by {@code Rfc5545RecurringSchedule}); {@code 2300} Invoice not found;
+ *       {@code 2510}/{@code 2511} Stripe webhook connection/secret; {@code 2800-2802}
+ *       QBO; {@code 3100}/{@code 3101} idempotency.</li>
  * </ul>
  */
 @Slf4j
