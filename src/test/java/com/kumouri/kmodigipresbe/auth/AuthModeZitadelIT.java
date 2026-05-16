@@ -45,9 +45,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * AC-5 (zitadel half): with kmosf.auth.mode=zitadel + WireMock JWKS:
  * - Local HS256 token is rejected with 401 (decoder validates RS256, not HS256)
  * - /auth/discovery returns mode=zitadel
- * - A WireMock-RSA-signed JWT passes the decoder but fails tenant resolution with
- *   errorCode 1002 (A/A2 boundary — JwtTenantResolver reads tid/uid/roles claims
- *   which a Zitadel token won't have in Phase A format)
+ * - A bare WireMock-RSA-signed JWT (no Zitadel claims) passes the decoder but fails
+ *   the dual-mode tenant resolver with errorCode 3300 (Phase A2: missing the Zitadel
+ *   organization claim). Pre-A2 this asserted 1002; A2 retargets it to 3300, the
+ *   Zitadel-runtime "missing org" code. Full happy-path Zitadel federation is covered
+ *   by ZitadelFederationIT.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient
@@ -160,24 +162,20 @@ class AuthModeZitadelIT {
     }
 
     @Test
-    void rsaSignedJwtPassesDecoderButFailsTenantResolutionWith1002() throws Exception {
-        // AC-5 (A/A2 boundary): A WireMock-RSA-signed JWT passes the Zitadel decoder
-        // but fails JwtTenantResolver with errorCode 1002 because it lacks tid/uid/roles
-        // claims. This is expected for Phase A — full Zitadel claim mapping is Phase A2.
+    void bareRsaTokenWithoutZitadelClaimsRejectedWith3300() throws Exception {
+        // AC-4 (local-mode regression guard retarget): a WireMock-RSA-signed JWT passes
+        // the Zitadel JWKS decoder but the dual-mode resolver's zitadel branch rejects
+        // it with errorCode 3300 (missing the urn:zitadel:iam:org:id claim). Pre-A2
+        // this asserted the generic 1002; A2 gives Zitadel-runtime failures the
+        // distinct 3300-3399 range. 401 because a missing org claim is unauthenticated.
         String rsaJwt = buildRsaJwt();
 
         web.get().uri("/contacts")
                 .header("Authorization", "Bearer " + rsaJwt)
                 .exchange()
-                // Should be 4xx — either 401 (tenant resolution fails) or 403
-                // The exact code depends on JwtTenantResolver behavior with missing claims
-                .expectStatus().is4xxClientError()
-                .expectBody(Map.class).consumeWith(result -> {
-                    Map<?, ?> body = result.getResponseBody();
-                    // Document the A/A2 line: decoder passes, tenant resolution fails
-                    // errorCode 1002 is the expected "no tenant context" error
-                    assertThat(body).isNotNull();
-                });
+                .expectStatus().isUnauthorized()
+                .expectBody()
+                .jsonPath("$.errorCode").isEqualTo(3300);
     }
 
     private String buildRsaJwt() throws Exception {

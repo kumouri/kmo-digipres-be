@@ -92,9 +92,16 @@ import java.util.UUID;
  *       {@link com.kumouri.kmodigipresbe.model.idempotency.IdempotentRoute}-annotated
  *       endpoint (400 Bad Request); {@code 3101} concurrent duplicate key race
  *       — MongoDB unique index violation on first-insert attempt (409 Conflict).</li>
- *   <li>{@code 3200-3299} — <em>Phase A</em>: API versioning and auth-mode.
- *       {@code 3200} reserved for auth-mode configuration errors (e.g. {@code zitadel}
- *       mode with blank {@code jwksUri} — fails fast at startup).</li>
+ *   <li>{@code 3200-3299} — <em>Phase A</em>: API versioning and auth-mode
+ *       <em>startup/config</em>. {@code 3200} reserved for auth-mode configuration
+ *       errors (e.g. {@code zitadel} mode with blank {@code jwksUri} — fails fast at
+ *       startup). Kept distinct from the A2 runtime range below.</li>
+ *   <li>{@code 3300-3399} — <em>Phase A2</em>: Zitadel federation <em>runtime</em>
+ *       claim/login failures. {@code 3300} Zitadel token missing the organization
+ *       claim (401); {@code 3301} org claim does not map to any tenant (403);
+ *       {@code 3302} token carries no role mappable to a KMOSF role (403);
+ *       {@code 3303} password login disabled — deployment federates to Zitadel
+ *       ({@code POST /auth/login} → 410 Gone, body points at {@code /auth/discovery}).</li>
  * </ul>
  */
 @Slf4j
