@@ -113,6 +113,24 @@ import java.util.UUID;
  *       {@code 3431} Deal not found for conversion (404); {@code 3432} Deal not WON —
  *       cannot convert (409); {@code 3433} Project code generation failed after retry
  *       (500, defensive — should never fire).</li>
+ *   <li>{@code 3500-3599} — <em>Phase D</em>: Time &amp; Expenses.
+ *       <em>TimeEntry:</em> {@code 3500} TimeEntry not found (404); {@code 3501} userId
+ *       required (400); {@code 3502} startedAt required (400); {@code 3503} endedAt before
+ *       startedAt (400); {@code 3504} cannot edit an INVOICED time entry (409);
+ *       {@code 3505} a timer is already running for this user (409); {@code 3506} no timer
+ *       running to stop (409); {@code 3507} invalid time-entry billing-state transition (409,
+ *       defensive).
+ *       <em>Invoice-from-time:</em> {@code 3520} no unbilled time entries to invoice (409);
+ *       {@code 3521} billable time entry has no rate and no default supplied (400);
+ *       {@code 3522} all selected time entries already invoiced (409).
+ *       <em>Expense:</em> {@code 3511} userId required (400); {@code 3512} description
+ *       required (400); {@code 3513} amount must be &gt; 0 (400); {@code 3514} incurredOn
+ *       required (400); {@code 3515} invalid expense approval transition (409);
+ *       {@code 3516} rejection reason required when rejecting (400); {@code 3517} cannot
+ *       edit/decide an INVOICED expense (409).
+ *       <em>Invoice-from-expenses:</em> {@code 3530} no eligible (approved+billable+unbilled)
+ *       expenses (409); {@code 3531} reserved; {@code 3532} all selected expenses already
+ *       invoiced (409).</li>
  * </ul>
  */
 @Slf4j

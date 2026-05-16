@@ -122,6 +122,25 @@ public final class DomainEventType {
     public static final String TASK_CREATED          = "task.created";
     public static final String TASK_STATUS_CHANGED   = "task.statusChanged";
 
+    // Phase D — Time & Expenses vertical. All are advisory (RuleEngine / webhook fan-out)
+    // — they do NOT drive any core mutation (invoice creation, approval, billing status
+    // updates are synchronous + explicit in TimeEntryService / ExpenseService).
+    // TIME_ENTRY_LOGGED: emitted by TimeEntryService on manual create/update.
+    // TIMER_STARTED / TIMER_STOPPED: emitted by startTimer / stopTimer.
+    // TIME_INVOICED: emitted after invoice-from-time DRAFT created; payload includes
+    //   {invoiceId, entryCount, totalSeconds}.
+    // EXPENSE_SUBMITTED: emitted by ExpenseService.create.
+    // EXPENSE_APPROVED / EXPENSE_REJECTED: emitted by approve/reject.
+    // EXPENSE_INVOICED: emitted after invoice-from-expenses DRAFT created.
+    public static final String TIME_ENTRY_LOGGED  = "timeEntry.logged";
+    public static final String TIMER_STARTED      = "timer.started";
+    public static final String TIMER_STOPPED      = "timer.stopped";
+    public static final String TIME_INVOICED      = "time.invoiced";
+    public static final String EXPENSE_SUBMITTED  = "expense.submitted";
+    public static final String EXPENSE_APPROVED   = "expense.approved";
+    public static final String EXPENSE_REJECTED   = "expense.rejected";
+    public static final String EXPENSE_INVOICED   = "expense.invoiced";
+
     private DomainEventType() {
     }
 }
