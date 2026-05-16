@@ -33,6 +33,15 @@ jobs:
         env:
           TESTCONTAINERS_RYUK_DISABLED: 'true'
 
+      - name: Upload generated OpenAPI spec
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-spec
+          path: build/openapi/openapi.json
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Upload test reports on failure
         if: failure()
         uses: actions/upload-artifact@v4

@@ -47,6 +47,20 @@ class OpenApiEndpointIT {
         assertThat(body).isNotNull();
         assertThat(body).contains("KMOSF CRM API");
         assertThat(body).contains("discovery");
+
+        // Export the live spec so the Gradle `verifyOpenApi` task can consume it.
+        // This is the spec-generation path that actually works in CI: it runs in
+        // the Testcontainers test phase (Mongo available) rather than via the
+        // springdoc gradle plugin (which forks a full app boot with no DB in CI).
+        try {
+            Path out = Paths.get("build/openapi/openapi.json");
+            Files.createDirectories(out.getParent());
+            Files.writeString(out, body);
+        } catch (Exception e) {
+            // Non-fatal: the drift gate degrades to skip-with-warning if the
+            // spec wasn't exported. Never fail the AC-1 assertion over an IO hiccup.
+            System.err.println("OpenApiEndpointIT: could not export spec for verifyOpenApi: " + e);
+        }
     }
 
     @Test

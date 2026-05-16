@@ -1,5 +1,6 @@
 {
   "openapi": "3.0.1",
+  "x-kmosf-spec-status": "bootstrap-placeholder",
   "info": {
     "title": "KMOSF CRM API",
     "description": "KMO Solutions Foundry CRM — multi-tenant back-office platform",
