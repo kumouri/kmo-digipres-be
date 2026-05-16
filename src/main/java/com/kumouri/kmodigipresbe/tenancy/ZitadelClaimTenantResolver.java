@@ -24,10 +24,14 @@ import java.util.Set;
  *       org not federated by any tenant → {@code 3301} (403, raised by the cache).</li>
  *   <li>project-roles claim → internal roles via {@link RoleClaimMapper}. Empty
  *       mapped set → {@code 3302} (403).</li>
- *   <li>JIT user provisioning (Phase A2.3) folds the resolved {@code userId} into the
- *       returned context. Until A2.3 wires it, the context carries a null userId
- *       (tenant + roles still resolve, so audit attribution degrades exactly like the
- *       portal OAuth bootstrap precedent).</li>
+ *   <li>JIT user provisioning ({@link ZitadelJustInTimeUserProvisioner}) creates /
+ *       syncs the local {@code User} for {@code (tenant, email)} and folds the
+ *       resolved {@code userId} into the returned context — done inside this resolve
+ *       chain so {@code TenantStampingCallback}/{@code AuditingCallback} see a tenant
+ *       context (the portal OAuth precedent). If the token carries no usable email
+ *       claim, JIT is skipped and the context carries a null userId (tenant + roles
+ *       still resolve; audit attribution degrades exactly like the portal OAuth
+ *       bootstrap precedent rather than failing the request).</li>
  * </ol>
  *
  * <p>Error range {@code 3300-3399} is the Phase A2 runtime range (distinct from the
@@ -40,6 +44,7 @@ public class ZitadelClaimTenantResolver {
     private final AuthModeProperties authModeProperties;
     private final ZitadelOrgTenantCache orgTenantCache;
     private final RoleClaimMapper roleClaimMapper;
+    private final ZitadelJustInTimeUserProvisioner jitProvisioner;
 
     public Mono<TenantContext> resolve(Jwt jwt) {
         AuthModeProperties.Zitadel cfg = authModeProperties.zitadel();
@@ -58,7 +63,28 @@ public class ZitadelClaimTenantResolver {
                     3302, 403));
         }
 
+        String email = jwt.getClaimAsString(cfg.emailClaim());
+        String displayName = firstNonBlank(
+                jwt.getClaimAsString("name"),
+                jwt.getClaimAsString("preferred_username"),
+                email);
+
         return orgTenantCache.resolve(orgId)
-                .map(tenantId -> new TenantContext(tenantId, null, roles));
+                .flatMap(tenantId -> {
+                    if (email == null || email.isBlank()) {
+                        // No email to key a User on — resolve tenant + roles without
+                        // JIT (userId null), instead of failing the request.
+                        return Mono.just(new TenantContext(tenantId, null, roles));
+                    }
+                    return jitProvisioner.provision(tenantId, email, displayName, roles)
+                            .map(userId -> new TenantContext(tenantId, userId, roles));
+                });
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String v : values) {
+            if (v != null && !v.isBlank()) return v;
+        }
+        return null;
     }
 }
