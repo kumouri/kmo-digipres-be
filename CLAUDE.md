@@ -81,11 +81,11 @@ The codebase follows a layered Spring WebFlux structure under `com.kumouri.kmodi
 - Controllers return `Mono`/`Flux`. `@RequestBody` parameters can be plain DTOs or `Mono<DTO>` — pick the plain form unless streaming or upstream-deferred validation is needed.
 - Repositories extend `TenantScopedSimpleReactiveMongoRepository` (for tenant-owned data) or `ReactiveMongoRepository` (for system-level collections).
 - **Any blocking I/O** (JDBC, `jakarta.mail.Transport.send`, blocking HTTP clients, OpenPDF) must be wrapped in `Mono.fromCallable(...).subscribeOn(Schedulers.boundedElastic())`. `EmailService.sendSingleEmail` and `QuotePdfService` are the reference patterns. Never call blocking code directly on a Netty event-loop thread.
-- The base path comes from `spring.webflux.base-path=/api` in `application.properties`. The servlet-style `server.servlet.context-path` is silently ignored under WebFlux — do not use it.
+- The base path is `spring.webflux.base-path=/api/v1` (updated in Phase A). The servlet-style `server.servlet.context-path` is silently ignored under WebFlux — do not use it. Legacy `/api/*` paths are transparently rewritten to `/api/v1/*` by `LegacyApiPathRewriteFilter` (removal scheduled start of Phase B once FE targets `/api/v1` directly).
 
 ### REST conventions
 
-Server runs on port **8080** with base path **`/api`** (via `spring.webflux.base-path`). All errors are translated to **RFC 7807 `ProblemDetail`** responses by `GlobalErrorHandler` (implements `ErrorWebExceptionHandler`, ordered `-2`). The handler covers: `DigiPresBeException` (maps `errorCode` + `httpStatusCode` to a typed problem URI `https://kmosf/errors/<errorCode>`), `WebExchangeBindException` (400 with field-error list), `ResponseStatusException`, `AccessDeniedException` (403), `AuthenticationException` (401), and a catch-all 500. A `correlationId` UUID is included in every error response. Error codes are numeric and subsystem-namespaced — see the Javadoc on `GlobalErrorHandler` for the full allocation table.
+Server runs on port **8080** with base path **`/api/v1`** (via `spring.webflux.base-path`, updated in Phase A). All errors are translated to **RFC 7807 `ProblemDetail`** responses by `GlobalErrorHandler` (implements `ErrorWebExceptionHandler`, ordered `-2`). The handler covers: `DigiPresBeException` (maps `errorCode` + `httpStatusCode` to a typed problem URI `https://kmosf/errors/<errorCode>`), `WebExchangeBindException` (400 with field-error list), `ResponseStatusException`, `AccessDeniedException` (403), `AuthenticationException` (401), and a catch-all 500. A `correlationId` UUID is included in every error response. Error codes are numeric and subsystem-namespaced — see the Javadoc on `GlobalErrorHandler` for the full allocation table. **Phase A error ranges: `3100–3199` idempotency; `3200–3299` versioning/auth-mode.**
 
 ### SMTP / secrets
 
@@ -93,7 +93,19 @@ All SMTP credentials are externalized to environment variables via `@Value` in `
 
 ### JWT / auth
 
-JWTs are **self-issued HS256**, signed with a secret from `KMOSF_JWT_SECRET` (env var). If unset, a random ephemeral key is generated and a WARN is logged — tokens invalidate on every restart; not suitable for production. Key must be >= 32 bytes. There is **no external IdP / Zitadel federation** yet (that is a planned future phase).
+JWTs are **self-issued HS256** by default (auth mode `local`), signed with a secret from `KMOSF_JWT_SECRET` (env var). If unset, a random ephemeral key is generated and a WARN is logged — tokens invalidate on every restart; not suitable for production. Key must be >= 32 bytes.
+
+**Phase A auth-mode switch:** `kmosf.auth.mode` controls which `ReactiveJwtDecoder` is active:
+- `local` (default, `KMOSF_AUTH_MODE` unset) — existing HS256 decoder; no Zitadel config needed.
+- `zitadel` — JWKS-backed decoder via `NimbusReactiveJwtDecoder.withJwkSetUri(...)`. Requires `KMOSF_AUTH_ZITADEL_JWKS_URI`; blank URI fails fast at startup. In Phase A, `JwtTenantResolver` still reads `tid`/`uid`/`roles` claims — a Zitadel token without those fails with errorCode 1002 (expected; Phase A2 adds full Zitadel claim mapping).
+
+**Discovery endpoint:** `GET /api/v1/auth/discovery` (unauthenticated) returns `{mode, issuerUri, jwksUri, loginPath}`.
+
+**Idempotency:** `@IdempotentRoute` (method-level annotation) opts a POST/PUT/PATCH endpoint into idempotency enforcement via `IdempotencyWebFilter`. `Idempotency-Key` header required on annotated routes (missing → 400/3100); duplicate calls within 24h replay the cached response. System collection `idempotency_keys`. `CommunicationController.sendEmail` is the sample annotated endpoint; Invoice/Payment adoption is Phase E.
+
+**Quartz:** The scheduler is wired and a no-op proof job fires ~5s after boot (behind `kmosf.quartz.proof-job.enabled`, default true). Uses Spring Boot RAM store in Phase A (Quartz Mongo JobStore library coordinates unresolved; see R-A4 note in `build.gradle`). Existing `@Scheduled` services are unchanged. Full Quartz Mongo store + `@Scheduled`→Quartz migration is Phase E.
+
+**OpenAPI:** Spec served at `GET /api/v1/v3/api-docs` (JSON) and `/api/v1/openapi` (Swagger UI), unauthenticated. Committed to `docs/api/openapi.json`. `./gradlew verifyOpenApi` (`check`-gated) fails the build on drift. Regenerate after any controller/model changes: `./gradlew generateOpenApiDocs`, copy `build/openapi/openapi.json` to `docs/api/openapi.json`, commit.
 
 ## Testing
 
@@ -109,10 +121,10 @@ The following are **not in the codebase** as of the current commit — do not as
 
 - **Project / Milestone / Task / TimeEntry / Expense** entities (project management vertical)
 - **Contract + ContractTemplate / RecurringInvoice** entities
-- **Zitadel / external IdP federation** — JWTs are currently self-issued HS256 (see "JWT / auth" above)
-- **`/api/v1` versioning** — the base path is `/api` today; no version prefix yet
-- **OpenAPI / Springdoc generation** — no auto-generated API docs
-- **Idempotency-key middleware** for payment / mutation endpoints
+- **Zitadel / external IdP federation Phase A2** — `kmosf.auth.mode=zitadel` wires the JWKS decoder but `JwtTenantResolver` still reads `tid`/`uid`/`roles` — full Zitadel claim mapping, JIT provisioning, role sync is Phase A2
+- **Quartz Mongo JobStore** — wired proof job uses RAM store (Phase A); Mongo store + `@Scheduled`→Quartz migration is Phase E
+- **`@IdempotentRoute` adoption on Invoice/Payment** — infrastructure is built; actual adoption on money-critical endpoints is Phase E
+- **FE codegen switch** — BE now publishes OpenAPI at `/api/v1`; FE `openapi-typescript` codegen switch is Phase B
 - **Per-tenant deployment automation**
 
 These are planned in the back-office ultraplan (`C:\Users\willa\.claude\plans\ultraplan-research-back-office-iridescent-wilkes.md`). Do not scaffold or stub these unless a specific phase in that plan is actively in flight.

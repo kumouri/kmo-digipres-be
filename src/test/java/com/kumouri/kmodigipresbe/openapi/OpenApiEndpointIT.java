@@ -1,0 +1,60 @@
+package com.kumouri.kmodigipresbe.openapi;
+
+import com.kumouri.kmodigipresbe.TestcontainersConfiguration;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.web.reactive.server.WebTestClient;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * AC-1: GET /api/v1/openapi returns full spec unauthenticated (status 200, body
+ * has paths./auth/discovery, info.title).
+ *
+ * AC-2 (build wiring): verifyOpenApi drift gate — asserting docs/api/openapi.json
+ * is non-empty (actual drift check is the Gradle verifyOpenApi task).
+ */
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@AutoConfigureWebTestClient
+@Import(TestcontainersConfiguration.class)
+@TestPropertySource(properties = {
+        "kmosf.quartz.proof-job.enabled=false"
+})
+class OpenApiEndpointIT {
+
+    @Autowired
+    WebTestClient web;
+
+    @Test
+    void openApiEndpointReturnsSpecUnauthenticated() {
+        // AC-1: /openapi (redirects to swagger-ui) or /v3/api-docs returns spec
+        // WebTestClient applies base-path automatically via @AutoConfigureWebTestClient
+        String body = web.get().uri("/v3/api-docs")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(String.class)
+                .returnResult()
+                .getResponseBody();
+
+        assertThat(body).isNotNull();
+        assertThat(body).contains("KMOSF CRM API");
+        assertThat(body).contains("discovery");
+    }
+
+    @Test
+    void committedOpenApiSpecIsNonEmpty() {
+        // AC-2 (partial): the committed spec file exists and is non-empty.
+        // The actual drift check is the Gradle verifyOpenApi task (./gradlew check).
+        Path committedSpec = Paths.get("docs/api/openapi.json");
+        assertThat(committedSpec).exists();
+        assertThat(committedSpec.toFile().length()).isGreaterThan(0);
+    }
+}
