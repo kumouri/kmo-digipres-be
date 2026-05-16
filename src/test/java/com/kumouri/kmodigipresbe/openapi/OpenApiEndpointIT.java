@@ -23,7 +23,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * is non-empty (actual drift check is the Gradle verifyOpenApi task).
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@AutoConfigureWebTestClient
+// springdoc builds the full OpenAPI model lazily on the first /v3/api-docs hit;
+// for a ~43-controller app that first request exceeds WebTestClient's 5s default
+// in CI. 60s is generous headroom — if it still times out the spec generation is
+// genuinely hanging (a real springdoc/model problem), not merely slow.
+@AutoConfigureWebTestClient(timeout = "PT60S")
 @Import(TestcontainersConfiguration.class)
 @TestPropertySource(properties = {
         "kmosf.quartz.proof-job.enabled=false"
