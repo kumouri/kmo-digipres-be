@@ -42,20 +42,32 @@ public class AuthDiscoveryController {
      * <p>Response shape:
      * <pre>{@code
      * {
-     *   "mode": "local",          // "local" | "zitadel"
-     *   "issuerUri": "",          // non-blank in zitadel mode
-     *   "jwksUri": "",            // non-blank in zitadel mode
-     *   "loginPath": "/auth/login" // canonical login path for this mode
+     *   "mode": "local",            // "local" | "zitadel"
+     *   "issuerUri": "",            // non-blank in zitadel mode
+     *   "jwksUri": "",              // non-blank in zitadel mode
+     *   "loginPath": "/auth/login", // canonical local login path (kept in both modes)
+     *   "authorizeUrl": "<issuer>/oauth/v2/authorize" // zitadel mode only
      * }
      * }</pre>
+     *
+     * <p>In {@code zitadel} mode password login is gone (410, errorCode 3303); the FE
+     * uses {@code authorizeUrl} to start the Zitadel OIDC redirect. {@code loginPath}
+     * is retained so a local-mode FE keeps working unchanged.
      */
     @GetMapping("/discovery")
     public Mono<Map<String, Object>> discovery() {
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("mode", authModeProperties.mode());
-        response.put("issuerUri", authModeProperties.zitadel().issuerUri());
+        String issuerUri = authModeProperties.zitadel().issuerUri();
+        response.put("issuerUri", issuerUri);
         response.put("jwksUri", authModeProperties.zitadel().jwksUri());
         response.put("loginPath", "/auth/login");
+        if (authModeProperties.isZitadelMode()) {
+            String base = issuerUri.endsWith("/")
+                    ? issuerUri.substring(0, issuerUri.length() - 1)
+                    : issuerUri;
+            response.put("authorizeUrl", base + "/oauth/v2/authorize");
+        }
         return Mono.just(response);
     }
 }

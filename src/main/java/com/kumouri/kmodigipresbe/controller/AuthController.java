@@ -1,5 +1,6 @@
 package com.kumouri.kmodigipresbe.controller;
 
+import com.kumouri.kmodigipresbe.config.AuthModeProperties;
 import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
 import com.kumouri.kmodigipresbe.model.request.LoginRequest;
 import com.kumouri.kmodigipresbe.model.request.LoginResponse;
@@ -23,9 +24,25 @@ public class AuthController {
 
     private final AuthService authService;
     private final UserRepository users;
+    private final AuthModeProperties authModeProperties;
 
+    /**
+     * Staff password login. In {@code local} auth-mode this mints an HS256 token as
+     * before. In {@code zitadel} auth-mode password login is disabled — the deployment
+     * federates to Zitadel — and this responds {@code 410 Gone} with errorCode 3303
+     * and an RFC7807 body pointing the FE at {@code /auth/discovery} (which carries the
+     * Zitadel {@code authorizeUrl}). The endpoint deliberately still responds (an old
+     * build's client gets a clear 410, not a 404). {@code AuthService}/
+     * {@code JwtTokenService} are untouched.
+     */
     @PostMapping("/login")
     public Mono<LoginResponse> login(@Valid @RequestBody LoginRequest req) {
+        if (authModeProperties.isZitadelMode()) {
+            return Mono.error(new DigiPresBeException(
+                    "Password login is disabled; this deployment federates to Zitadel. "
+                            + "See /api/v1/auth/discovery.",
+                    3303, 410));
+        }
         return authService.login(req);
     }
 

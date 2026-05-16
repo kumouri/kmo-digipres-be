@@ -7,6 +7,7 @@ import com.kumouri.kmodigipresbe.model.tenant.Tenant;
 import com.kumouri.kmodigipresbe.model.user.User;
 import com.kumouri.kmodigipresbe.repository.TenantRepository;
 import com.kumouri.kmodigipresbe.repository.UserRepository;
+import com.kumouri.kmodigipresbe.service.JwtTokenService;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
 import com.nimbusds.jose.crypto.RSASSASigner;
@@ -24,7 +25,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.mongodb.core.ReactiveMongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
@@ -103,7 +103,7 @@ class AuthModeZitadelIT {
     UserRepository users;
 
     @Autowired
-    PasswordEncoder encoder;
+    JwtTokenService jwtTokenService;
 
     @Autowired
     ReactiveMongoTemplate mongo;
@@ -122,21 +122,17 @@ class AuthModeZitadelIT {
                 .status(Tenant.TenantStatus.ACTIVE)
                 .aiBudgetUsd(BigDecimal.ZERO)
                 .build()).block();
-        users.save(User.builder()
+        User staff = users.save(User.builder()
                 .id(UUID.randomUUID()).tenantId(tid)
                 .email("zitadel@example.test")
-                .passwordHash(encoder.encode("pass1234"))
                 .displayName("ZitadelUser")
                 .roles(Set.of("STAFF", "ADMIN"))
                 .status(User.UserStatus.ACTIVE).build()).block();
 
-        // Get a local HS256 token (POST /auth/login still works for login endpoint)
-        Map<?, ?> loginBody = web.post().uri("/auth/login")
-                .bodyValue(Map.of("email", "zitadel@example.test", "password", "pass1234"))
-                .exchange()
-                .expectStatus().isOk()
-                .expectBody(Map.class).returnResult().getResponseBody();
-        localHs256Token = (String) loginBody.get("token");
+        // Mint a local HS256 token directly (A2.4 disabled POST /auth/login in zitadel
+        // mode → 410; this test only needs a valid local-format token to prove the
+        // Zitadel JWKS decoder rejects it). Same minting path as PortalProfileIT.
+        localHs256Token = jwtTokenService.mint(staff);
     }
 
     @Test
