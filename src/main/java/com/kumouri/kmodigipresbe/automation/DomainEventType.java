@@ -110,6 +110,18 @@ public final class DomainEventType {
     public static final String KB_ARTICLE_CREATED = "kb.articleCreated";
     public static final String KB_ARTICLE_UPDATED = "kb.articleUpdated";
 
+    // Phase C — Project / Milestone / Task delivery vertical. PROJECT_CREATED and
+    // PROJECT_STATUS_CHANGED are emitted by ProjectService; MILESTONE_COMPLETED by
+    // MilestoneService (payload includes triggersInvoice + nullable spawnedInvoiceId);
+    // TASK_CREATED and TASK_STATUS_CHANGED by TaskService. All are advisory (RuleEngine
+    // / webhook fan-out) — they do NOT drive Deal→Project (explicit endpoint) or the
+    // Milestone→Invoice spawn (synchronous in MilestoneService.transition).
+    public static final String PROJECT_CREATED       = "project.created";
+    public static final String PROJECT_STATUS_CHANGED = "project.statusChanged";
+    public static final String MILESTONE_COMPLETED   = "milestone.completed";
+    public static final String TASK_CREATED          = "task.created";
+    public static final String TASK_STATUS_CHANGED   = "task.statusChanged";
+
     private DomainEventType() {
     }
 }
