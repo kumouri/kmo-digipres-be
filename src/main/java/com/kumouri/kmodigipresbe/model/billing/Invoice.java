@@ -51,6 +51,18 @@ public class Invoice implements Auditable, CustomFieldHost {
     private UUID contactId;
     private UUID companyId;
 
+    /**
+     * Phase C — nullable; set when an invoice is spawned from a Milestone completion
+     * (C-D8). Allows tracing the invoice back to the originating project and milestone.
+     */
+    private UUID projectId;
+
+    /**
+     * Phase C — nullable; set when an invoice is spawned from a Milestone completion
+     * (C-D8). Non-null iff {@link #projectId} is also non-null.
+     */
+    private UUID milestoneId;
+
     @Builder.Default
     private String currency = "USD";
 

@@ -102,6 +102,17 @@ import java.util.UUID;
  *       {@code 3302} token carries no role mappable to a KMOSF role (403);
  *       {@code 3303} password login disabled — deployment federates to Zitadel
  *       ({@code POST /auth/login} → 410 Gone, body points at {@code /auth/discovery}).</li>
+ *   <li>{@code 3400-3499} — <em>Phase C</em>: Projects / Milestones / Tasks.
+ *       {@code 3400} Project not found (404); {@code 3401} Project name blank (400);
+ *       {@code 3402} invalid Project status transition (409);
+ *       {@code 3410} Milestone not found (404); {@code 3411} Milestone name blank (400);
+ *       {@code 3412} invalid Milestone status transition (409); {@code 3413} Milestone
+ *       already spawned an invoice — idempotent re-spawn attempted (409, defensive);
+ *       {@code 3420} Task not found (404); {@code 3421} Task title blank (400);
+ *       {@code 3422} invalid Task status transition (409);
+ *       {@code 3431} Deal not found for conversion (404); {@code 3432} Deal not WON —
+ *       cannot convert (409); {@code 3433} Project code generation failed after retry
+ *       (500, defensive — should never fire).</li>
  * </ul>
  */
 @Slf4j
