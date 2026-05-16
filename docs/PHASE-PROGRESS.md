@@ -10,8 +10,8 @@
 |---|---|---|---|
 | E.1 — error range 3600-3699 + DomainEventType Phase-E block + Invoice.PaymentTerms (additive) | done | 4e3b71f | compileJava clean; full test 399/0/0 — no regression, no error-code collision |
 | E.2 — Quartz Mongo JobStore dep + QuartzConfig customizer + properties | done | 15d90d0 | E-D5 RAM-FALLBACK ACTIVE — see decision below; QuartzMongoJobStoreIT 2/0/0 (RAM store, proof job fires) |
-| E.3 — RecurringInvoice + RecurringInvoiceOccurrence + repos | done | (this commit) | E-D2 field tables exact; unique tenant_recurring_period_idx; full test 399/0/0 (entities map clean, index auto-creates) |
-| E.4 — RecurringInvoiceService + RecurringInvoiceSpawnService + Quartz job | pending | — | — |
+| E.3 — RecurringInvoice + RecurringInvoiceOccurrence + repos | done | 6066774 | E-D2 field tables exact; unique tenant_recurring_period_idx; full test 399/0/0 (entities map clean, index auto-creates) |
+| E.4 — RecurringInvoiceService + RecurringInvoiceSpawnService + Quartz job | done | (this commit) | ledger-insert-FIRST + explicit-boolean probe; self-grep clean (only 3605 not-found switchIfEmpty); full test 399/0/0 |
 | E.5 — StripeWebhookEvent + extended StripeWebhookService + StripeProperties + StripeCheckoutService + controllers | pending | — | — |
 | E.6 — BE ITs AC-E1…AC-E8 | pending | — | — |
 | E.7 — BE CLAUDE.md in-PR + .claude/* local + docs/api/openapi.json committed | pending | — | — |
