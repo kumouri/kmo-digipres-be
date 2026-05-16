@@ -30,11 +30,25 @@ jobs:
 
       - name: ./gradlew build
         run: ./gradlew build --no-daemon --stacktrace
-        env:
-          TESTCONTAINERS_RYUK_DISABLED: 'true'
+        # Ryuk re-enabled (was TESTCONTAINERS_RYUK_DISABLED=true): with the singleton
+        # container pattern there are only ~3 containers total, and Ryuk reaps any
+        # leak so the runner can't be exhausted. Disabling it (no reaper) + per-context
+        # containers was killing the runner once the full IT suite ran.
 
-      - name: Upload test reports on failure
-        if: failure()
+      - name: Upload generated OpenAPI spec
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-spec
+          path: build/openapi/openapi.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload test reports
+        # always() (not failure()) so a *cancelled* job still uploads the reports —
+        # cancellation skips failure()-gated steps, which was hiding the full stack
+        # traces needed to diagnose CI failures. Pre-existing; widened during Phase A.
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-reports

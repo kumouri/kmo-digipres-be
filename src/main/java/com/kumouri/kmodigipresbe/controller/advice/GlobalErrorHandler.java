@@ -87,6 +87,14 @@ import java.util.UUID;
  *       {@code 3000} webhook signature invalid; {@code 3001} no Square connection
  *       for the tenant referenced in the webhook payload; {@code 3002} Square OAuth
  *       token exchange or refresh failed; {@code 3003} POS payment sync failed.</li>
+ *   <li>{@code 3100-3199} — <em>Phase A</em>: Idempotency middleware.
+ *       {@code 3100} {@code Idempotency-Key} header missing on an
+ *       {@link com.kumouri.kmodigipresbe.model.idempotency.IdempotentRoute}-annotated
+ *       endpoint (400 Bad Request); {@code 3101} concurrent duplicate key race
+ *       — MongoDB unique index violation on first-insert attempt (409 Conflict).</li>
+ *   <li>{@code 3200-3299} — <em>Phase A</em>: API versioning and auth-mode.
+ *       {@code 3200} reserved for auth-mode configuration errors (e.g. {@code zitadel}
+ *       mode with blank {@code jwksUri} — fails fast at startup).</li>
  * </ul>
  */
 @Slf4j

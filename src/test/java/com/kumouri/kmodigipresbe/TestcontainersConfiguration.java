@@ -19,21 +19,50 @@ import static org.mockito.ArgumentMatchers.anyString;
 @TestConfiguration(proxyBeanMethods = false)
 public class TestcontainersConfiguration {
 
-    @Bean
-    @ServiceConnection
-    KafkaContainer kafkaContainer() {
-        // Use the JVM-based Apache Kafka image, not the native-image variant.
-        // apache/kafka-native:latest segfaults intermittently during early VM init
-        // (com.oracle.svm.core.posix.headers.Pwd.getpwuid) on ubuntu-latest GitHub
-        // runners — same crash, two runs in a row. The JVM image starts a few seconds
-        // slower but doesn't crash.
-        return new KafkaContainer(DockerImageName.parse("apache/kafka:latest"));
+    // ---------------------------------------------------------------------------
+    // Singleton containers — started ONCE per test JVM, reused by EVERY
+    // @SpringBootTest ApplicationContext. The @Bean methods below return these same
+    // running instances, so Spring Boot @ServiceConnection wires every context
+    // (~22 distinct @TestPropertySource variants => ~22 cached contexts) to one
+    // shared Mongo + one shared Kafka instead of a per-context pair. Per-context
+    // containers with no Ryuk reaper exhausted the CI runner once the full IT suite
+    // ran. Requires a single forked test JVM (Gradle: forkEvery=0/maxParallelForks=1)
+    // for "static == one per suite" to hold; Testcontainers' JVM shutdown hook + Ryuk
+    // (re-enabled in CI) stop them at the end.
+    //
+    // CRITICAL: the @Bean methods use destroyMethod = "". MongoDBContainer /
+    // KafkaContainer are AutoCloseable, so without this Spring calls close()->stop()
+    // on the SHARED static container when the FIRST cached @SpringBootTest context
+    // closes — killing Mongo/Kafka for every later context (whole clusters of ITs
+    // then fail with "Timed out waiting for a server that matches WritableServerSelector"
+    // / "Shutdown in progress"). destroyMethod = "" disables Spring's inferred
+    // close; the JVM shutdown hook / Ryuk is the only thing that stops them.
+    // ---------------------------------------------------------------------------
+    private static final MongoDBContainer MONGO =
+            new MongoDBContainer(DockerImageName.parse("mongo:latest"));
+
+    // JVM-based Apache Kafka image, not the native-image variant:
+    // apache/kafka-native:latest segfaults intermittently during early VM init
+    // (com.oracle.svm.core.posix.headers.Pwd.getpwuid) on ubuntu-latest GitHub
+    // runners. The JVM image starts a few seconds slower but doesn't crash.
+    private static final KafkaContainer KAFKA =
+            new KafkaContainer(DockerImageName.parse("apache/kafka:latest"));
+
+    static {
+        MONGO.start();
+        KAFKA.start();
     }
 
-    @Bean
+    @Bean(destroyMethod = "")
+    @ServiceConnection
+    KafkaContainer kafkaContainer() {
+        return KAFKA;
+    }
+
+    @Bean(destroyMethod = "")
     @ServiceConnection
     MongoDBContainer mongoDbContainer() {
-        return new MongoDBContainer(DockerImageName.parse("mongo:latest"));
+        return MONGO;
     }
 
     /**

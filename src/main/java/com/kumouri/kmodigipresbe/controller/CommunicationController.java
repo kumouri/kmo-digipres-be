@@ -4,6 +4,7 @@ import com.kumouri.kmodigipresbe.model.activity.Activity;
 import com.kumouri.kmodigipresbe.model.activity.ActivityDirection;
 import com.kumouri.kmodigipresbe.model.activity.ActivityType;
 import com.kumouri.kmodigipresbe.model.activity.SubjectType;
+import com.kumouri.kmodigipresbe.model.idempotency.IdempotentRoute;
 import com.kumouri.kmodigipresbe.model.request.SendTemplateRequest;
 import com.kumouri.kmodigipresbe.model.request.SingleEmailCommunicationDTO;
 import com.kumouri.kmodigipresbe.model.request.SingleEmailCommunicationRequest;
@@ -36,6 +37,14 @@ public class CommunicationController {
     private final ActivityCrudService activities;
     private final TemplatedEmailService templatedEmail;
 
+    /**
+     * Send a single outbound email.
+     *
+     * <p>Annotated with {@link IdempotentRoute}: callers must supply an
+     * {@code Idempotency-Key} header. Duplicate POSTs with the same key within 24h
+     * return the cached response without re-sending the email.
+     */
+    @IdempotentRoute
     @PostMapping("/singleEmail")
     public Mono<Boolean> sendEmail(@RequestBody SingleEmailCommunicationDTO request) {
         SingleEmailCommunicationRequest parsed = requestMapper.toSingleEmailCommunicationRequest(request);
