@@ -30,8 +30,10 @@ jobs:
 
       - name: ./gradlew build
         run: ./gradlew build --no-daemon --stacktrace
-        env:
-          TESTCONTAINERS_RYUK_DISABLED: 'true'
+        # Ryuk re-enabled (was TESTCONTAINERS_RYUK_DISABLED=true): with the singleton
+        # container pattern there are only ~3 containers total, and Ryuk reaps any
+        # leak so the runner can't be exhausted. Disabling it (no reaper) + per-context
+        # containers was killing the runner once the full IT suite ran.
 
       - name: Upload generated OpenAPI spec
         if: always()

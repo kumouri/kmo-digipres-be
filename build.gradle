@@ -116,6 +116,12 @@ tasks.named('bootBuildImage') {
 tasks.named('test') {
     outputs.dir snippetsDir
     useJUnitPlatform()
+    // Single forked JVM (Gradle default: forkEvery=0, maxParallelForks=1) is REQUIRED
+    // so the static singleton Testcontainers (TestcontainersConfiguration) are shared
+    // across every @SpringBootTest context — multiple forks would mean multiple
+    // singletons => many containers again. Heap bump: ~22 distinct @TestPropertySource
+    // variants keep many reactive Spring contexts in the TestContext cache.
+    maxHeapSize = '1600m'
 }
 
 tasks.named('asciidoctor') {
