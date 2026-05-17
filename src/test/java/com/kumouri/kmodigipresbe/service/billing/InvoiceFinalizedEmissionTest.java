@@ -41,6 +41,7 @@ class InvoiceFinalizedEmissionTest {
     private PaymentRepository payments;
     private QuoteRepository quotes;
     private DomainEventPublisher events;
+    private InvoiceNumberGenerator invoiceNumberGenerator;
     private InvoiceService service;
     private List<DomainEvent> observed;
     private Disposable subscription;
@@ -51,7 +52,15 @@ class InvoiceFinalizedEmissionTest {
         payments = mock(PaymentRepository.class);
         quotes = mock(QuoteRepository.class);
         events = new DomainEventPublisher();
-        service = new InvoiceService(invoices, payments, quotes, events);
+        // Phase E blocker resolution: setStatus now assigns a number at the
+        // DRAFT→issued edge via InvoiceNumberGenerator. Stub it so these
+        // event-emission unit tests still construct + run; the returned number
+        // does not affect the INVOICE_FINALIZED assertions.
+        invoiceNumberGenerator = mock(InvoiceNumberGenerator.class);
+        when(invoiceNumberGenerator.next(any(UUID.class)))
+                .thenReturn(Mono.just("INV-2026-0001"));
+        service = new InvoiceService(invoices, payments, quotes, events,
+                invoiceNumberGenerator);
         observed = new CopyOnWriteArrayList<>();
         subscription = events.stream().subscribe(observed::add);
     }
