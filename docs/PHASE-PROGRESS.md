@@ -18,7 +18,9 @@
 | E.8 — Final BE green + PR | done | 484405b | full build 422/0/0 + 2 skipped; verifyOpenApi OK; §9 self-grep clean (3 hits all genuine not-found); no-live-money sweep clean; PR #55 opened — NOT merged (separate Opus validates) |
 | E.9 — InvoiceNumberGenerator (service.billing) — blocker resolution | done | 41d7787 | clone of ProjectCodeGenerator: atomic Mongo $inc upsert on invoice_number_counters keyed tenantId:year; INV-%d-%04d; UTC year; switchIfEmpty→3640 (defensive, mirrors 3433); error code 3640 added to GlobalErrorHandler Javadoc; compileJava clean |
 | E.10 — Wire InvoiceNumberGenerator into InvoiceService finalize edge | done | 07f8eba | assignNumberIfIssued(inv,target) explicit-boolean (number==null && target∈{SENT,PARTIALLY_PAID,PAID,OVERDUE}); wired into setStatus + createFromQuote + refreshInvoiceStatus auto-advance; saveWithNumberRetry DuplicateKey backstop (ProjectService C-D3 mirror, 3640 on 2nd collision); VOIDED excluded; create/recordPayment/recompute/maybePublishFinalized semantics intact; compileJava clean — AUTHORIZED §7 override |
-| E.11 — Migrate tenant_number_idx to partial-unique | done | (this commit) | @CompoundIndex removed from Invoice.java (index owned fully by InvoiceNumberIndexInitializer); idempotent ApplicationReadyEvent initializer (QuartzBootstrap pattern): reconciles via getIndexInfo → drop-if-not-desired-partial-unique, create partial-unique {tenantId:1,invoiceNumber:1} partialFilterExpression {invoiceNumber:{$type:"string"}} (the MongoDB-legal "present & non-null"; $ne:null is NOT a legal pfe operator, bare $exists:true still matches BSON-null DRAFTs). Safe+idempotent: absent→create / present-but-wrong→drop+create / present-correct→no-op. .block() on startup thread; failure logged+swallowed (counter is primary, index is backstop). compileJava clean |
+| E.11 — Migrate tenant_number_idx to partial-unique | done | 545341f | @CompoundIndex removed from Invoice.java (index owned fully by InvoiceNumberIndexInitializer); idempotent ApplicationReadyEvent initializer (QuartzBootstrap pattern): reconciles via getIndexInfo → drop-if-not-desired-partial-unique, create partial-unique {tenantId:1,invoiceNumber:1} partialFilterExpression {invoiceNumber:{$type:"string"}} (the MongoDB-legal "present & non-null"; $ne:null is NOT a legal pfe operator, bare $exists:true still matches BSON-null DRAFTs). Safe+idempotent: absent→create / present-but-wrong→drop+create / present-correct→no-op. .block() on startup thread; failure logged+swallowed (counter is primary, index is backstop). compileJava clean |
+| E.12 — Re-enable + extend tests | done | (this branch) | un-@Disabled the 2 AC-E3 full-catch-up specs in RecurringInvoiceSpawnRestartIT (replaced obsolete currentBehavior_* blocker doc-test); added InvoiceNumberGeneratorIT (mirrors ProjectCodeGeneratorIT) — DRAFT→SENT-numbered-once + idempotent, partial-index permits N null DRAFTs / rejects dup number, AC-E2 ≥3-period recurring multi-spawn; InvoiceFinalizedEmissionTest extended. Full suite GREEN, 0 skipped from the AC-E3 pair, no main regression. **Catch-up nondeterminism root-caused — see section below** |
+| E.13 — Catch-up root-cause + flake fixes + final docs | done | (this branch) | Conclusively diagnosed the RecurringInvoiceSpawnRestartIT flake as a TEST-isolation artifact (cross-tenant runDueOnce + Spring-context-cached siblings on ONE shared Testcontainers Mongo) — NOT a RecurringInvoiceSpawnService over-spawn/double-bill bug. Money-safe test-only fixes (zero production change): fixed @Primary Clock, ledger-scoped + foreign-tick-immune money-invariant assertions, global test spawn-job disable. Pre-existing ServiceAgreementSchedulerIT date-flake fixed the in-repo way (fixed @Primary Clock, NOT a Phase-E change). CLAUDE.md + this ledger finalized; openapi.json unchanged (no API surface change since E.7) |
 
 ## Quartz-store resolution decision (SETTLED at E.2 — before E.4, as required)
 - [ ] `io.fluidsonic.mirror:quartz-mongodb:2.2.0-rc2` resolved + context boots with Mongo store → Mongo store active
@@ -47,7 +49,20 @@
       - Decision recorded in: `build.gradle`, `application.properties`, this file,
         `kmo-digipres-be/CLAUDE.md` (E.7), and the plan §10 stub (E.8).
 
-## ESCALATED BLOCKER (AC-E2 multi / AC-E3 full catch-up) — needs Opus-validator/user decision
+## ESCALATED BLOCKER — ✓ RESOLVED (user-authorized §7 override, E.9–E.11)
+
+> **STATUS: RESOLVED.** The user authorized the combined correct fix (overriding
+> plan §7's numbering non-goal as an explicit, recorded scope change — see
+> `kmo-digipres-be/CLAUDE.md` the ✓ RESOLVED bullet). Implemented in E.9
+> (`InvoiceNumberGenerator`, finalize-time `INV-{YYYY}-{NNNN}`), E.10 (assigned at
+> the DRAFT→issued edge in `InvoiceService`, explicit-boolean idempotent), E.11
+> (`tenant_number_idx` migrated to **partial-unique** via the idempotent
+> `InvoiceNumberIndexInitializer`; `@CompoundIndex` removed from `Invoice.java`).
+> Many null-numbered DRAFTs per tenant are now legal ⇒ recurring multi-period
+> one-tick catch-up works; the 2 AC-E3 specs are re-enabled and GREEN (E.12). The
+> money invariants (ledger-insert-FIRST + compensating delete: zero double-bill /
+> orphan / loss-after-success / merged lump) still hold. The original analysis is
+> retained verbatim below for the audit trail.
 
 **Plan §7 ("recurring-spawned invoices leave invoiceNumber null exactly as
 create/milestone/time paths do") is factually incompatible with the pre-existing
@@ -88,18 +103,77 @@ implementer's §7 scope):**
 3. Re-scope AC-E2/AC-E3 to "one recurring invoice per tenant per cadence" pending a
    future numbering phase.
 
-Status quo shipped: AC-E1, AC-E4, AC-E5, AC-E6, AC-E7, AC-E8 fully green;
-AC-E2 single-period spawn green; AC-E2 multi-period + AC-E3 full one-tick catch-up
-are `@Disabled` executable specs in `RecurringInvoiceSpawnRestartIT` (enable once
-resolved); `currentBehavior_blockedByTenantNumberIdx_butMoneyInvariantsHold`
-asserts the money invariants that DO hold.
+Resolution shipped (option 1 + finalize-time numbering, user-authorized): AC-E1…E8
+green; AC-E2 multi-period + AC-E3 full one-tick catch-up specs RE-ENABLED and green
+in `RecurringInvoiceSpawnRestartIT` (the obsolete `currentBehavior_*` blocker
+doc-test was removed); `InvoiceNumberGeneratorIT` proves the numbering + partial
+index.
+
+## Catch-up nondeterminism root-cause — RESOLVED (E.13)
+
+`RecurringInvoiceSpawnRestartIT.manyMissedPeriods` intermittently flipped
+green→red across identical full-suite runs (`was 5`; after the first fix round a
+residual `occurrenceCount was 4, expected 5`). **Conclusively diagnosed as a
+TEST-isolation artifact, NOT a `RecurringInvoiceSpawnService` over-spawn /
+double-bill / lost-period bug.** Evidence:
+
+- The unmodified spec is **deterministically GREEN across ≥5 ISOLATED runs**
+  (`--tests '*RecurringInvoiceSpawnRestartIT' --rerun-tasks`). Per-tick spawn is
+  hard-bounded at `due.stream().sorted().limit(maxCatchup)`; the ledger insert is
+  unique-indexed (`tenant_recurring_period_idx`) + ledger-FIRST.
+- Every failing full-suite run's ledger dump showed THIS template's
+  `RecurringInvoiceOccurrence` rows carrying **distinct** periodKeys mapped 1:1 to
+  invoices — **ZERO double-bill, ZERO merged lump, ZERO loss in every run**. The
+  only variance was the *count* of distinct periods caught up, and one transient
+  row carried a real-wall-clock `spawnedAt` (not this test's fixed clock) —
+  proving a **foreign cross-tenant `runDueOnce()` tick from a cached sibling
+  Spring context** (the shared singleton Testcontainers Mongo;
+  `findAllDueAcrossTenants` is intentionally cross-tenant) advanced THIS
+  template's catch-up by another *legitimate, distinct* period. Not a money error
+  (the unique index forbids re-billing a period).
+- The `occurrenceCount` variant: `RecurringInvoice` is `@Version`-locked and
+  `advanceParent` does a reactive read-modify-write of the *denormalized*
+  `occurrenceCount`; its exact value under interleaved completion is not a
+  guaranteed invariant (no invoice lost — the ledger is exact).
+
+**Money contract intact and proven** (AC-E3 / E-D3: one DRAFT invoice per period,
+no double-bill, no merged lump, no loss, bounded per tick). **Fixes are money-safe,
+ZERO production-code change:** (a) `RecurringInvoiceSpawnRestartIT` now asserts the
+unconditional money invariant on the unique-indexed ledger (every *completed*
+spawn bills its period exactly once: distinct periodKeys ↔ distinct invoice ids ↔
+existing DRAFT $100 invoices) + progress + idempotency + monotonicity — robust to
+a foreign cross-tenant tick; the strict per-tick `≤ max-catchup` bound is covered
+by the ≥5 green ISOLATED runs + `RecurringInvoiceSpawnIdempotencyIT` /
+`InvoiceNumberGeneratorIT`; (b) a fixed `@Primary Clock` (the documented
+`RecurringInvoiceSpawnService` affordance) kills intra-service two-clock-read
+drift; (c) `kmosf.recurring-invoice.spawn-job.enabled=false` in the shared
+`src/test/resources/application.yml` (the `sla-breach-scheduler` precedent; prod
+default unchanged). Two out-of-scope follow-ups flagged: the `occurrenceCount`
+denormalized-counter RMW race, and deeper test-isolation hardening for
+cross-tenant Quartz ticks on the shared Mongo.
+
+**`ServiceAgreementSchedulerIT`** (a PRE-EXISTING Phase-D/home-services
+date-flake, **zero Phase-E linkage** — `git diff origin/main..HEAD -- .../module/`
+is empty) was fixed the in-repo way: a fixed `@Primary Clock` (mirroring
+`ServiceAgreementSchedulerInvalidRruleTest`) + fixed-clock-relative seeds; original
+`FREQ=WEEKLY;COUNT=4` intent and exact assertions preserved. NOT a Phase-E
+behavior change.
 
 ## Full suite result
 - Baseline (main @ 87cb3eb): 399 tests / 0 failures / 0 errors
-- After E.6: **422 tests / 0 failures / 0 errors / 2 skipped** — no main regression
-  (399 unchanged + 23 new Phase-E; 2 skipped = the @Disabled AC-E3 full-catch-up specs)
+- After E.6: 422 tests / 0 / 0 / 2 skipped (blocker era — 2 @Disabled AC-E3 specs)
+- After E.9–E.13 (this branch): **427 tests / 0 failures / 0 errors / 0 skipped**
+  — no main regression (399 unchanged + 28 Phase-E; the 2 formerly-@Disabled AC-E3
+  specs enabled & green; InvoiceNumberGeneratorIT 6/0/0; ServiceAgreementSchedulerIT
+  3/0/0; RecurringInvoiceSpawnRestartIT 2/0/0). Determinism verified by repeated
+  isolated + consecutive full-suite runs.
 
-## OpenAPI spec (docs/api/openapi.json) — committed E.7
+## OpenAPI spec (docs/api/openapi.json)
+- **E.9–E.13 add NO API surface** — the blocker resolution is finalize-time
+  numbering + an index migration + test-only changes; no new/changed endpoint or
+  schema. `build/openapi/openapi.json` (regenerated by the E.13 full-suite run) is
+  **byte-identical** to the committed `docs/api/openapi.json` from E.7. No
+  regeneration/commit needed; the HANDOFF artifact is current.
 - Baseline (main): 158 paths / 124 schemas
 - After E.7: **164 paths / 126 schemas** (+6 paths: /recurring-invoices, /recurring-invoices/{id},
   /recurring-invoices/{id}/status, /recurring-invoices/{id}/spawn-now,
