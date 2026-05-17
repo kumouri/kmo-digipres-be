@@ -11,8 +11,8 @@
 | Sub-phase | Status | SHA | Build (main base / +F / skip) | Mandated checks | Deviations |
 |---|---|---|---|---|---|
 | F.1 error range 3700-3799 + DomainEventType Phase-F + contracts module prop | done | 9b5c937 | main base 427/0/0 ; +0 Phase-F ; 0 skip (total 428/0/0/0) | no error-code collision; compileJava clean; full test green | none |
-| F.2 DocumensoProperties/Config + FileStorageService.putBytes (S3AsyncClient, no new dep) | in-progress |  |  | presign paths unregressed | |
-| F.3 Contract + ContractTemplate + DocumensoWebhookEvent + repos | todo |  |  | indexes auto-create; DocumensoWebhookEvent NOT Auditable | |
+| F.2 DocumensoProperties/Config + FileStorageService.putBytes (S3AsyncClient, no new dep) | done | b5c9abe | 428/0/0/0 (no change vs F.1) | presign paths unregressed — all 428 tests pass; S3AsyncClientBuilder (separate class in SDK v2, not nested) | none |
+| F.3 Contract + ContractTemplate + DocumensoWebhookEvent + repos | in-progress |  |  | indexes auto-create; DocumensoWebhookEvent NOT Auditable | |
 | F.4 ContractPdfService + ContractTemplateService + ContractService (explicit-boolean SOW-from-quote) | todo |  |  | switchIfEmpty grep (genuine not-found only) | |
 | F.5 DocumensoClient send + ContractNumberGenerator + /send + controllers | todo |  |  | switchIfEmpty grep; no Documenso host/live token | |
 | F.6 DocumensoSignatureVerifier + Adapter + DocumensoWebhookService + controller (HMAC headline) | todo |  |  | switchIfEmpty grep; ledger-insert-FIRST; tenant-from-path; promotion reuses existing path | |
