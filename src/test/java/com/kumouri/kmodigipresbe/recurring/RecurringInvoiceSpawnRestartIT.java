@@ -77,12 +77,17 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       cross-tenant) advanced THIS template's catch-up by another
  *       <em>legitimate, distinct</em> period. That is not a money error — the
  *       unique {@code tenant_recurring_period_idx} forbids re-billing a period.</li>
- *   <li>The {@code occurrenceCount} variant: the parent {@code RecurringInvoice}
- *       is {@code @Version}-locked and {@code advanceParent} does a reactive
- *       read-modify-write of the <em>denormalized</em> {@code occurrenceCount} per
- *       spawn; its exact final value under concurrent/interleaved completion is
- *       not a guaranteed invariant (no invoice is lost — the ledger is exact).
- *       Flagged as a separate out-of-scope follow-up.</li>
+ *   <li>The {@code occurrenceCount} variant (formerly flagged here as a separate
+ *       out-of-scope follow-up — now <strong>RESOLVED</strong> in
+ *       {@code fix/recurring-occurrence-count-atomic}): {@code advanceParent} no
+ *       longer does a reactive read-modify-write of the {@code @Version}-locked
+ *       denormalized counter — it is ONE atomic {@code findAndModify}
+ *       ({@code $inc occurrenceCount}), reached exactly once per completed spawn
+ *       with nothing failure-prone after it, so {@code occurrenceCount} now equals
+ *       the completed occurrence-ledger row count EXACTLY and foreign-tick-
+ *       immunely. Dedicated proof: {@code RecurringInvoiceOccurrenceCountIT}; the
+ *       assertion below is now ledger-relative exact (no longer a bare
+ *       {@code > 1}).</li>
  * </ul>
  * <strong>Conclusion:</strong> the flake is a TEST-isolation artifact of
  * cross-tenant {@code runDueOnce()} + Spring-context-cached sibling contexts
@@ -117,8 +122,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       spawned-invoice ids.</li>
  * </ul>
  * Do not revert to {@code Instant.now()} / unscoped {@code mongo.findAll}, do not
- * remove the global spawn-job disable, and do not re-introduce exact running-total
- * assertions (they are foreign-tick-fragile on the shared Mongo).
+ * remove the global spawn-job disable, and do not re-introduce exact running-
+ * <em>total</em> assertions bound to a HARDCODED period count (those are
+ * foreign-tick-fragile on the shared Mongo). A ledger-RELATIVE exact assertion
+ * ({@code occurrenceCount == 1 + completed-ledger-rows} — both advanced together
+ * by the same atomic per-period {@code $inc} + unique-indexed ledger insert) is
+ * foreign-tick-IMMUNE and is the correct post-fix tightening.
  *
  * <p>{@code max-catchup=2} so bounded catch-up is exercised.
  */
@@ -336,13 +345,20 @@ class RecurringInvoiceSpawnRestartIT {
         RecurringInvoice after = recurringInvoices
                 .findByTenantIdAndId(tenantId, ri.getId()).block();
         // Parent cursor advanced past the seed (a period was spawned and the
-        // cursor moved forward). The EXACT money guarantee is on the ledger above;
-        // occurrenceCount is a derived denormalized counter (seeds at 1,
-        // lastRunAt != null) — only sanity-checked as "advanced", NOT bound to a
-        // shared-ledger-derived value (its exact value under concurrent reactive
-        // read-modify-write + @Version is not a contract guarantee; see the
-        // spawned out-of-scope counter follow-up).
+        // cursor moved forward). occurrenceCount is now an ATOMIC counter
+        // ($inc — fix/recurring-occurrence-count-atomic): it equals the completed
+        // occurrence-ledger row count EXACTLY, plus the seed offset of 1 (this
+        // template is seeded occurrenceCount=1 / lastRunAt=seedAt, simulating one
+        // prior run that left NO ledger row). Ledger-RELATIVE, so foreign-tick-
+        // immune (a foreign tick advances BOTH sides via the same atomic $inc) —
+        // no longer the former bare `> 1` best-effort sanity check.
         assertThat(after.getLastRunAt()).isAfter(seedAt);
-        assertThat(after.getOccurrenceCount()).isGreaterThan(1);
+        long completedLedgerRows = ledgerFor(ri.getId()).stream()
+                .filter(o -> o.getSpawnedInvoiceId() != null)
+                .count();
+        assertThat((long) after.getOccurrenceCount())
+                .as("occurrenceCount must EXACTLY equal seed offset (1) + completed "
+                        + "occurrence-ledger rows — the E-D3 atomic-counter fix")
+                .isEqualTo(1 + completedLedgerRows);
     }
 }

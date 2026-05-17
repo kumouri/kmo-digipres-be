@@ -18,6 +18,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
+import org.springframework.data.mongodb.core.ReactiveMongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -45,7 +50,8 @@ import java.util.UUID;
  *       NEVER {@code switchIfEmpty(doSpawn)} — that fires whenever the probe
  *       completes empty and would double-create (the {@code IdempotencyWebFilter}
  *       documented trap). {@code switchIfEmpty} appears in this file ONLY around a
- *       genuine not-found (3605 in {@code RecurringInvoiceService}, not here).</li>
+ *       genuine not-found (3605 — {@code spawnNow} and {@code advanceParent}'s
+ *       template-deleted-mid-tick guard; never {@code switchIfEmpty(doSpawn)}).</li>
  *   <li><strong>Ledger-insert FIRST</strong>: {@code doSpawn} saves the
  *       {@link RecurringInvoiceOccurrence} row (unique
  *       {@code tenant_recurring_period_idx}) BEFORE {@code invoiceService.create}.
@@ -90,6 +96,7 @@ public class RecurringInvoiceSpawnService {
     private final RecurringSchedule recurringSchedule;
     private final InvoiceService invoiceService;
     private final DomainEventPublisher events;
+    private final ReactiveMongoTemplate mongoTemplate;
     private final Clock clock;
 
     /**
@@ -104,12 +111,14 @@ public class RecurringInvoiceSpawnService {
                                         RecurringSchedule recurringSchedule,
                                         InvoiceService invoiceService,
                                         DomainEventPublisher events,
+                                        ReactiveMongoTemplate mongoTemplate,
                                         ObjectProvider<Clock> clockProvider) {
         this.recurringInvoices = recurringInvoices;
         this.occurrences = occurrences;
         this.recurringSchedule = recurringSchedule;
         this.invoiceService = invoiceService;
         this.events = events;
+        this.mongoTemplate = mongoTemplate;
         this.clock = clockProvider.getIfAvailable(Clock::systemUTC);
     }
 
@@ -232,11 +241,19 @@ public class RecurringInvoiceSpawnService {
      *       a {@link DuplicateKeyException} means another fire owns this period ⇒
      *       {@code Mono.empty()} (ZERO invoice, ZERO double-bill, ZERO orphan DRAFT);</li>
      *   <li>create the DRAFT invoice via the existing {@code InvoiceService.create};</li>
-     *   <li>back-fill {@code spawnedInvoiceId} + advance the parent
-     *       (lastRunAt / lastSpawnedInvoiceId / occurrenceCount++ / nextRunAt — null
-     *       or endAt-reached ⇒ ENDED) + publish RECURRING_INVOICE_SPAWNED;</li>
+     *   <li>back-fill {@code spawnedInvoiceId};</li>
      *   <li>if {@code autoFinalize}, transition the invoice DRAFT→SENT (fires
-     *       INVOICE_FINALIZED → the shipped QuickBooksInvoiceSync).</li>
+     *       INVOICE_FINALIZED → the shipped QuickBooksInvoiceSync) — ordered
+     *       BEFORE the parent advance so nothing failure-prone runs after the
+     *       atomic {@code occurrenceCount} {@code $inc} (a post-{@code $inc}
+     *       failure tripping the compensating delete would drift the counter vs
+     *       the ledger);</li>
+     *   <li>atomically advance the parent in ONE {@code findAndModify}
+     *       ({@code $inc occurrenceCount}/{@code $inc version} + {@code $set}
+     *       lastRunAt/lastSpawnedInvoiceId/updatedAt/nextRunAt; null next or
+     *       endAt-reached ⇒ status ENDED) — see {@link #advanceParent};</li>
+     *   <li>publish RECURRING_INVOICE_SPAWNED from the returned post-advance
+     *       document (no second read).</li>
      * </ol>
      *
      * <p><strong>Compensating cleanup (money-safety):</strong> the unique-index
@@ -288,10 +305,20 @@ public class RecurringInvoiceSpawnService {
                     return invoiceService.create(draft)
                             .flatMap(created -> {
                                 savedLedger.setSpawnedInvoiceId(created.getId());
+                                // Order is load-bearing: maybeAutoFinalize BEFORE
+                                // advanceParent so nothing failure-prone runs after
+                                // the atomic occurrenceCount $inc. A post-$inc
+                                // failure would trip the compensating delete (ledger
+                                // row removed) while the increment already applied —
+                                // drifting the counter vs the exact ledger. After
+                                // the reorder the only post-$inc step is
+                                // publishSpawned (an in-memory event emit; cannot
+                                // fail) consuming the post-advance document.
                                 return occurrences.save(savedLedger)
-                                        .then(advanceParent(ri, occ, created.getId()))
                                         .then(maybeAutoFinalize(ri, created))
-                                        .then(publishSpawned(ri, created, periodKey));
+                                        .then(advanceParent(ri, occ, created.getId()))
+                                        .flatMap(updated ->
+                                                publishSpawned(updated, created, periodKey));
                             })
                             // Compensating cleanup: a post-ledger-insert failure
                             // (e.g. invoiceService.create E11000 on the pre-existing
@@ -308,45 +335,89 @@ public class RecurringInvoiceSpawnService {
     }
 
     /**
-     * Advances the parent cursor after a successful spawn: lastRunAt, monotonic
-     * lastSpawnedInvoiceId, occurrenceCount++, and the next nextRunAt (first
-     * occurrence strictly after this one — {@code occ.plus(OCCURRENCE_STEP)} so
-     * {@code occ} itself is excluded at ical4j's second granularity; a bare
-     * {@code plusMillis(1)} would round back and re-select {@code occ}, freezing
-     * the cursor on the spent period). No further occurrence, or endAt reached ⇒
-     * ENDED.
+     * Atomically advances the parent cursor after a successful spawn in ONE
+     * {@code ReactiveMongoTemplate.findAndModify} — replacing the former
+     * non-atomic reactive read-modify-write of the {@code @Version}-locked
+     * denormalized {@code occurrenceCount} (which drifted under a concurrent
+     * spawn: a foreign cross-tenant tick, or {@code spawnNow} racing the
+     * scheduled tick on the same template). {@code occurrenceCount} is server-side
+     * {@code $inc}-ed, so — because {@code advanceParent} is reached exactly once
+     * per successfully-completed {@code doSpawn} (a duplicate-fire loser
+     * short-circuits earlier at the unique-indexed ledger insert) and
+     * (post-reorder) nothing failure-prone runs after it — it converges to
+     * EXACTLY the completed-ledger-row count for the template, regardless of
+     * interleaving. That makes {@code occurrenceCount == ledger-row-count} a
+     * foreign-tick-immune invariant (same class as the per-period ledger money
+     * invariant), not the former best-effort counter.
+     *
+     * <p>{@code version} is {@code $inc}-ed too: {@code findAndModify} bypasses
+     * Spring Data optimistic locking, so without bumping it a stale concurrent
+     * {@code RecurringInvoiceService} versioned {@code save}
+     * (update/setStatus/create) could silently revert the money cursor;
+     * incrementing the numeric {@code @Version} exactly as Spring Data would keeps
+     * that conflict loud (fail-fast over silent corruption). {@code updatedAt} is
+     * set explicitly via the injected {@code Clock} — {@code findAndModify}
+     * bypasses the {@code @LastModifiedDate}/{@code Auditable} callback, so the
+     * per-spawn UPDATE audit row is intentionally dropped (precedent-consistent
+     * with {@code HealthScoreService}'s in-place {@code updateFirst}; cursor
+     * advance is denormalized bookkeeping, not a CRM mutation; CREATE auditing via
+     * {@code RecurringInvoiceService} is unchanged).
+     *
+     * <p>{@code next} is the first occurrence strictly after this one
+     * ({@code occ.plus(OCCURRENCE_STEP)} so {@code occ} itself is excluded at
+     * ical4j's second granularity; a bare {@code plusMillis(1)} would round back
+     * and re-select {@code occ}, freezing the cursor). No further occurrence
+     * ({@code next == null}), or {@code endAt} reached ⇒ {@code status=ENDED} +
+     * RECURRING_INVOICE_ENDED. rrule/seedAt/endAt are immutable template config,
+     * read off the passed-in {@code ri} (no pre-read; the second former race
+     * window — {@link #publishSpawned}'s separate re-read — is likewise removed).
+     * The {@code recurringSchedule.next} {@code Optional} is consumed directly
+     * (NOT {@code .orElse(null)} inside {@code Mono.fromCallable}, which would
+     * complete empty on a finite/exhausted RRULE and skip the ENDED advance).
+     * Returns the post-advance document so {@code publishSpawned} needs no re-read.
      */
-    private Mono<Void> advanceParent(RecurringInvoice ri, Instant occ, UUID createdInvoiceId) {
-        return recurringInvoices.findByTenantIdAndId(ri.getTenantId(), ri.getId())
-                .flatMap(fresh -> Mono.fromCallable(() ->
-                                recurringSchedule.next(fresh.getRrule(), fresh.getSeedAt(),
-                                        occ.plus(OCCURRENCE_STEP)).orElse(null))
-                        .flatMap(next -> {
-                            fresh.setLastRunAt(occ);
-                            fresh.setLastSpawnedInvoiceId(createdInvoiceId);
-                            fresh.setOccurrenceCount(fresh.getOccurrenceCount() + 1);
-                            boolean endReached = fresh.getEndAt() != null
-                                    && !occ.isBefore(fresh.getEndAt());
-                            if (next == null || endReached) {
-                                fresh.setNextRunAt(null);
-                                fresh.setStatus(Status.ENDED);
-                            } else {
-                                fresh.setNextRunAt(next);
-                            }
-                            return recurringInvoices.save(fresh)
-                                    .flatMap(saved -> {
-                                        if (saved.getStatus() == Status.ENDED) {
-                                            Map<String, Object> p = new HashMap<>();
-                                            p.put("recurringInvoiceId", saved.getId().toString());
-                                            p.put("reason", endReached
-                                                    ? "endAt reached" : "no further occurrence");
-                                            events.publish(DomainEvent.of(
-                                                    DomainEventType.RECURRING_INVOICE_ENDED,
-                                                    saved.getTenantId(), saved.getId(), p));
-                                        }
-                                        return Mono.empty();
-                                    });
-                        }));
+    private Mono<RecurringInvoice> advanceParent(RecurringInvoice ri, Instant occ,
+                                                 UUID createdInvoiceId) {
+        return Mono.fromCallable(() -> recurringSchedule.next(
+                        ri.getRrule(), ri.getSeedAt(), occ.plus(OCCURRENCE_STEP)))
+                .flatMap(nextOpt -> {
+                    Instant next = nextOpt.orElse(null);
+                    boolean endReached = ri.getEndAt() != null
+                            && !occ.isBefore(ri.getEndAt());
+                    boolean ended = next == null || endReached;
+                    Update update = new Update()
+                            .inc("occurrenceCount", 1)
+                            .inc("version", 1)
+                            .set("lastRunAt", occ)
+                            .set("lastSpawnedInvoiceId", createdInvoiceId)
+                            .set("updatedAt", clock.instant());
+                    if (ended) {
+                        update.set("nextRunAt", (Instant) null)
+                                .set("status", Status.ENDED);
+                    } else {
+                        update.set("nextRunAt", next);
+                    }
+                    Query query = new Query(Criteria.where("_id").is(ri.getId())
+                            .and("tenantId").is(ri.getTenantId()));
+                    return mongoTemplate.findAndModify(query, update,
+                                    FindAndModifyOptions.options().returnNew(true),
+                                    RecurringInvoice.class)
+                            .switchIfEmpty(Mono.error(() -> new DigiPresBeException(
+                                    "RecurringInvoice not found", 3605, 404)))
+                            .flatMap(updated -> {
+                                if (updated.getStatus() == Status.ENDED) {
+                                    Map<String, Object> p = new HashMap<>();
+                                    p.put("recurringInvoiceId",
+                                            updated.getId().toString());
+                                    p.put("reason", endReached
+                                            ? "endAt reached" : "no further occurrence");
+                                    events.publish(DomainEvent.of(
+                                            DomainEventType.RECURRING_INVOICE_ENDED,
+                                            updated.getTenantId(), updated.getId(), p));
+                                }
+                                return Mono.just(updated);
+                            });
+                });
     }
 
     private Mono<Void> maybeAutoFinalize(RecurringInvoice ri, Invoice created) {
@@ -358,18 +429,23 @@ public class RecurringInvoiceSpawnService {
         return invoiceService.setStatus(created.getId(), Invoice.Status.SENT).then();
     }
 
-    private Mono<Void> publishSpawned(RecurringInvoice ri, Invoice created, String periodKey) {
-        return recurringInvoices.findByTenantIdAndId(ri.getTenantId(), ri.getId())
-                .flatMap(fresh -> {
-                    Map<String, Object> payload = new HashMap<>();
-                    payload.put("recurringInvoiceId", ri.getId().toString());
-                    payload.put("spawnedInvoiceId", created.getId().toString());
-                    payload.put("periodKey", periodKey);
-                    payload.put("occurrenceCount", fresh.getOccurrenceCount());
-                    events.publish(DomainEvent.of(
-                            DomainEventType.RECURRING_INVOICE_SPAWNED,
-                            ri.getTenantId(), ri.getId(), payload));
-                    return Mono.<Void>empty();
-                });
+    /**
+     * Publishes RECURRING_INVOICE_SPAWNED from the post-advance document returned
+     * by {@link #advanceParent} — no second {@code findByTenantIdAndId} re-read
+     * (that was the former second {@code occurrenceCount} race window). Only emits
+     * an in-memory event; it cannot fail, so it is safe as the last step after the
+     * atomic {@code $inc} (see the {@code doSpawn} ordering rationale).
+     */
+    private Mono<Void> publishSpawned(RecurringInvoice updated, Invoice created,
+                                      String periodKey) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("recurringInvoiceId", updated.getId().toString());
+        payload.put("spawnedInvoiceId", created.getId().toString());
+        payload.put("periodKey", periodKey);
+        payload.put("occurrenceCount", updated.getOccurrenceCount());
+        events.publish(DomainEvent.of(
+                DomainEventType.RECURRING_INVOICE_SPAWNED,
+                updated.getTenantId(), updated.getId(), payload));
+        return Mono.empty();
     }
 }

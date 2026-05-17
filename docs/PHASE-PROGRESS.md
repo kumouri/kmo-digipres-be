@@ -148,9 +148,10 @@ by the ≥5 green ISOLATED runs + `RecurringInvoiceSpawnIdempotencyIT` /
 `RecurringInvoiceSpawnService` affordance) kills intra-service two-clock-read
 drift; (c) `kmosf.recurring-invoice.spawn-job.enabled=false` in the shared
 `src/test/resources/application.yml` (the `sla-breach-scheduler` precedent; prod
-default unchanged). Two out-of-scope follow-ups flagged: the `occurrenceCount`
-denormalized-counter RMW race, and deeper test-isolation hardening for
-cross-tenant Quartz ticks on the shared Mongo.
+default unchanged). Two out-of-scope follow-ups were flagged: the
+`occurrenceCount` denormalized-counter RMW race (now **RESOLVED** — see
+"occurrenceCount atomicity follow-up" below), and deeper test-isolation hardening
+for cross-tenant Quartz ticks on the shared Mongo (still open).
 
 **`ServiceAgreementSchedulerIT`** (a PRE-EXISTING Phase-D/home-services
 date-flake, **zero Phase-E linkage** — `git diff origin/main..HEAD -- .../module/`
@@ -158,6 +159,86 @@ is empty) was fixed the in-repo way: a fixed `@Primary Clock` (mirroring
 `ServiceAgreementSchedulerInvalidRruleTest`) + fixed-clock-relative seeds; original
 `FREQ=WEEKLY;COUNT=4` intent and exact assertions preserved. NOT a Phase-E
 behavior change.
+
+## occurrenceCount atomicity follow-up — RESOLVED (`fix/recurring-occurrence-count-atomic`)
+
+> Branch: `fix/recurring-occurrence-count-atomic` (one PR, stacked on the Phase-E
+> branch — Phase E is not yet merged to `main`). Closes the `occurrenceCount`
+> out-of-scope follow-up flagged in the E.13 root-cause section above.
+
+**Root cause.** `RecurringInvoiceSpawnService.advanceParent` did a non-atomic
+reactive read-modify-write of the `@Version`-locked *denormalized*
+`RecurringInvoice.occurrenceCount` (`findByTenantIdAndId` → `setOccurrenceCount(+1)`
++ cursor sets → `save`), and `publishSpawned` did a *second* independent
+`findByTenantIdAndId` re-read for the `RECURRING_INVOICE_SPAWNED` payload. Two race
+windows ⇒ the operator-visible counter drifted off-by-one under a concurrent spawn
+(a foreign cross-tenant tick on the shared Testcontainers Mongo in tests; in
+production `POST /recurring-invoices/{id}/spawn-now` racing the scheduled tick — the
+job's `@DisallowConcurrentExecution` does not cover `spawn-now`). The authoritative
+unique-indexed `RecurringInvoiceOccurrence` ledger was always exactly correct — only
+the denormalized counter drifted (never money: zero double-bill, zero loss).
+
+**Fix (production: `RecurringInvoiceSpawnService` only).**
+- `advanceParent` is now ONE atomic `ReactiveMongoTemplate.findAndModify` —
+  `$inc occurrenceCount` + `$inc version` + `$set lastRunAt / lastSpawnedInvoiceId
+  / updatedAt` + `$set nextRunAt` (or `nextRunAt=null` + `status=ENDED`),
+  tenant-scoped query, `returnNew(true)`; returns the post-advance document.
+  rrule/seedAt/endAt read off the passed-in template (no pre-read);
+  `recurringSchedule.next` consumed as `Optional` (NOT `.orElse(null)` inside
+  `Mono.fromCallable`, which completes empty on a finite/exhausted RRULE and would
+  skip the ENDED advance — incidental hardening). Genuine not-found
+  (template deleted mid-tick) ⇒ `switchIfEmpty(Mono.error(3605))` — §9-compliant.
+- `publishSpawned` consumes that returned document — the 2nd re-read race window
+  is gone.
+- `doSpawn` reordered: `maybeAutoFinalize` BEFORE `advanceParent`, so nothing
+  failure-prone runs after the atomic `$inc` — the per-`$inc` ↔ per-completed-
+  ledger-row pairing is exact and a post-`$inc` compensating-delete drift is
+  impossible (strictly better than, and never worse than, the prior code).
+- `version` is `$inc`-ed because `findAndModify` bypasses optimistic locking:
+  without it a stale concurrent `RecurringInvoiceService` versioned `save` could
+  silently revert the money cursor; bumping the numeric `@Version` exactly as
+  Spring Data would keeps that conflict loud (fail-fast over silent corruption).
+
+**Now-guaranteed invariant.** `advanceParent` is reached exactly once per
+successfully-completed `doSpawn` (a duplicate-fire loser short-circuits at the
+unique-indexed ledger insert) and nothing failure-prone follows the `$inc`, so
+`occurrenceCount` == the completed occurrence-ledger row count EXACTLY, and
+foreign-tick-IMMUNELY (both advanced together by the same atomic per-period
+`$inc` + unique-indexed ledger insert — the same robustness class as the
+per-period money invariant). The former bare `> 1` best-effort sanity check is gone.
+
+**Tests.**
+- New `RecurringInvoiceOccurrenceCountIT` — a *fresh* template (zero seed offset),
+  multi-period multi-tick catch-up; asserts `occurrenceCount == completed-ledger-
+  rows` exactly at every tick + the per-period money invariant + idempotency.
+- `RecurringInvoiceSpawnRestartIT.manyMissedPeriods` `> 1` → ledger-RELATIVE exact
+  (`occurrenceCount == 1 + completed-ledger-rows`; the +1 is the spec's seeded
+  prior-run offset). Class Javadoc updated: the `occurrenceCount` bullet is
+  RESOLVED; the "no exact running-total" warning refined (hardcoded totals stay
+  forbidden; a ledger-relative exact assertion is the correct foreign-tick-immune
+  tightening).
+
+**Money invariants preserved.** Ledger-insert FIRST, unique
+`tenant_recurring_period_idx`, the compensating delete, bounded catch-up
+(`limit(maxCatchup)`), the explicit-boolean occurrence probe (never
+`switchIfEmpty(doSpawn)`), §9 (`switchIfEmpty` only for genuine not-found) — all
+intact. `InvoiceService`, `QuickBooksInvoiceSync`, invoice numbering (E.9–E.11)
+untouched. No live Stripe/QBO.
+
+**Flagged residuals (accepted, not fixed here).**
+- *R1 (low).* The per-spawn UPDATE `audit_events` row + `@LastModifiedDate`
+  callback no longer fire on the cursor advance (`findAndModify` bypasses the
+  `Auditable`/`@LastModifiedDate` callback); `updatedAt` is set explicitly so it
+  keeps advancing, and the dropped UPDATE audit row is accepted —
+  precedent-consistent with `HealthScoreService`'s in-place `updateFirst` (cursor
+  advance is denormalized bookkeeping, not a CRM mutation). CREATE auditing via
+  `RecurringInvoiceService` is unchanged; `RecurringInvoiceAuditIT` (CREATE-only)
+  is unaffected.
+- *R4 (low, pre-existing, correct trade).* A stale concurrent
+  `RecurringInvoiceService.update/setStatus` versioned `save` during a spawn now
+  fails loud with `OptimisticLockingFailureException` (the spawn `$inc`s
+  `version`) instead of silently reverting the money cursor — fail-loud over
+  corruption.
 
 ## Full suite result
 - Baseline (main @ 87cb3eb): 399 tests / 0 failures / 0 errors
