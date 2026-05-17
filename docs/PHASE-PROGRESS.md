@@ -12,13 +12,21 @@
 |---|---|---|---|---|---|
 | F.1 error range 3700-3799 + DomainEventType Phase-F + contracts module prop | done | 9b5c937 | main base 427/0/0 ; +0 Phase-F ; 0 skip (total 428/0/0/0) | no error-code collision; compileJava clean; full test green | none |
 | F.2 DocumensoProperties/Config + FileStorageService.putBytes (S3AsyncClient, no new dep) | done | b5c9abe | 428/0/0/0 (no change vs F.1) | presign paths unregressed — all 428 tests pass; S3AsyncClientBuilder (separate class in SDK v2, not nested) | none |
-| F.3 Contract + ContractTemplate + DocumensoWebhookEvent + repos | in-progress |  |  | indexes auto-create; DocumensoWebhookEvent NOT Auditable | |
+| F.3 Contract + ContractTemplate + DocumensoWebhookEvent + repos | done | 179bcf1 | F.3 gate: compileJava+compileTestJava clean (exit 0); ContractEntityIndexIT 9/9 green (BUILD SUCCESSFUL 55s). Full-suite Chunk-1 re-validation: see RECOVERY note | indexes auto-create (verified by ContractEntityIndexIT); Contract/ContractTemplate Auditable, DocumensoWebhookEvent TenantScoped NOT Auditable (verified) | **F-D10 (necessary correction):** plan said declare partial-unique `tenant_number_idx` on `@CompoundIndex` (greenfield ⇒ no initializer). Spring Data `@CompoundIndex` CANNOT express `partialFilterExpression` (literal E.11 root cause; confirmed by `InvoiceNumberIndexInitializer` Javadoc). Applied the proven `InvoiceNumberIndexInitializer` pattern via new `scheduling/ContractNumberIndexInitializer` (key-only `@CompoundIndex` + initializer owns partial-unique). F-D10 premise infeasible; only working approach. Validator: confirm the initializer faithfully mirrors `InvoiceNumberIndexInitializer`. |
 | F.4 ContractPdfService + ContractTemplateService + ContractService (explicit-boolean SOW-from-quote) | todo |  |  | switchIfEmpty grep (genuine not-found only) | |
 | F.5 DocumensoClient send + ContractNumberGenerator + /send + controllers | todo |  |  | switchIfEmpty grep; no Documenso host/live token | |
 | F.6 DocumensoSignatureVerifier + Adapter + DocumensoWebhookService + controller (HMAC headline) | todo |  |  | switchIfEmpty grep; ledger-insert-FIRST; tenant-from-path; promotion reuses existing path | |
 | F.7 BE ITs AC-F1/F2/F3 (Documenso WireMock, signed→S3, exactly-once promo, 3710) | todo |  |  | AC-F1/F2/F3 covered; no main regression | |
 | F.8 CLAUDE.md in-PR + .claude/* local + docs/api/openapi.json committed | todo |  |  | spec has Contract/ContractTemplate + new paths | |
 | F.9 final BE green + PR | todo |  |  | Opus validation sign-off | |
+
+## RECOVERY LOG (ultraplan §6 Resilience — crash-recovery source of truth)
+- **2026-05-17 — Chunk-1 implementer crash, orchestrator-direct recovery.** The Sonnet Chunk-1 (F.1–F.3) agent returned a **non-contract report** ("Good. All F.3 files are untracked and ready to stage. Waiting for the test results.") after ~40 min / 116 tool calls — a suspected crash per the §6 no-report⇒assume-crash rule. The orchestrator did NOT trust the summary; reconstructed state from `git log` + this ledger:
+  - F.1 (`9b5c937`) + F.2 (`b5c9abe`) committed + pushed + ledger-closed by the agent (forward-only discipline held — all 5 pre-crash commits pushed, `origin` in sync).
+  - F.3 was uncommitted WIP (entities/repos/initializer/IT untracked) + the unplanned `ContractNumberIndexInitializer` — classified **build-on** after a full conformance review vs F-D2/F-D3 + the proven `InvoiceNumberIndexInitializer` (the deviation is the necessary F-D10 correction above).
+  - Re-validated independently: `compileJava+compileTestJava` exit 0 (F.1+F.2 committed + F.3 WIP); cleared a transient Windows build-lock (orphaned gradle JVMs from the crashed agent's in-flight test run, surgically killed by PID — VS Code LSP + unrelated JVMs untouched); `ContractEntityIndexIT` 9/9 green on a clean process space.
+  - Orchestrator-direct finalization (small/high-judgment remainder per the runbook): committed F.3 (`179bcf1`) + this ledger close. Friction logged per §6 Learn.
+  - **Pending authoritative re-validation:** the crashed agent's self-reported "F.1/F.2 full-suite 428/0/0/0" is NOT trusted; a full `./gradlew test` re-validation of F.1–F.3 together is the Chunk-1 close gate (running next). CI re-proves at scale at PR time regardless.
 
 ## Documenso-payload-format ASSUMPTION (the ultraplan's called-out known unknown — F-D7)
 - Signature header (assumed): `X-Documenso-Signature` — referenced ONLY in DocumensoWebhookController + DocumensoSignatureVerifier.
