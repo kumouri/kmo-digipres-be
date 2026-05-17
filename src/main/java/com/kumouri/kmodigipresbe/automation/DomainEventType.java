@@ -161,6 +161,25 @@ public final class DomainEventType {
     public static final String RECURRING_INVOICE_ENDED   = "recurringInvoice.ended";
     public static final String STRIPE_CHECKOUT_CREATED   = "stripe.checkoutCreated";
 
+    // Phase F — Contracts & Documenso vertical. All are advisory (RuleEngine /
+    // webhook fan-out) — they do NOT drive the SOW spawn, the signed-PDF store, or
+    // the Deal→WON+Project promotion (those are synchronous + explicit / ledger-gated
+    // in ContractService and DocumensoWebhookService). The Deal→WON promotion is NOT
+    // event-driven — it is the synchronous reuse of DealCrudService.moveStage +
+    // ProjectService.convertFromDeal inside the webhook handler's signed branch.
+    // CONTRACT_CREATED: emitted by ContractService.create / spawnFromQuote.
+    // CONTRACT_SENT: emitted after DocumensoClient.sendForSignature succeeds;
+    //   payload {contractId, documensoDocumentId}.
+    // CONTRACT_SIGNED: emitted after signedAt + signedPdfStorageRef are persisted;
+    //   payload {contractId, dealId, kind, signedPdfStorageRef}.
+    // CONTRACT_VOIDED: emitted by ContractService.setStatus(VOIDED).
+    // CONTRACT_TEMPLATE_CREATED: emitted by ContractTemplateService.create.
+    public static final String CONTRACT_CREATED          = "contract.created";
+    public static final String CONTRACT_SENT             = "contract.sent";
+    public static final String CONTRACT_SIGNED           = "contract.signed";
+    public static final String CONTRACT_VOIDED           = "contract.voided";
+    public static final String CONTRACT_TEMPLATE_CREATED = "contractTemplate.created";
+
     private DomainEventType() {
     }
 }
