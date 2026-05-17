@@ -94,7 +94,12 @@ import static org.mockito.Mockito.when;
 @Import(TestcontainersConfiguration.class)
 @TestPropertySource(properties = {
         "kmosf.quartz.proof-job.enabled=false",
-        "kmosf.recurring-invoice.spawn-job.enabled=false"
+        "kmosf.recurring-invoice.spawn-job.enabled=false",
+        // @MockBean causes a distinct ApplicationContext that shares the same Testcontainers Mongo.
+        // Without this flag the second context tries to create the Spring-Data @CompoundIndex
+        // "tenant_number_idx" (non-partial) which conflicts with the already-created partial-unique
+        // index managed by ContractNumberIndexInitializer → IndexKeySpecsConflict (86).
+        "spring.data.mongodb.auto-index-creation=false"
 })
 class DocumensoWebhookSignedIT {
 
