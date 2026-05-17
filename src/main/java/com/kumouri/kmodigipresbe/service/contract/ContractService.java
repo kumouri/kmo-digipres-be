@@ -4,6 +4,7 @@ import com.kumouri.kmodigipresbe.automation.DomainEvent;
 import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
 import com.kumouri.kmodigipresbe.automation.DomainEventType;
 import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
+import com.kumouri.kmodigipresbe.integration.documenso.DocumensoClient;
 import com.kumouri.kmodigipresbe.model.contract.Contract;
 import com.kumouri.kmodigipresbe.model.contract.Contract.Status;
 import com.kumouri.kmodigipresbe.model.contract.ContractTemplate;
@@ -11,12 +12,15 @@ import com.kumouri.kmodigipresbe.model.quote.Quote;
 import com.kumouri.kmodigipresbe.repository.contract.ContractRepository;
 import com.kumouri.kmodigipresbe.repository.contract.ContractTemplateRepository;
 import com.kumouri.kmodigipresbe.service.quote.QuoteService;
+import com.kumouri.kmodigipresbe.service.storage.FileStorageService;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -85,6 +89,10 @@ public class ContractService {
     private final ContractTemplateRepository templates;
     private final QuoteService quoteService;
     private final DomainEventPublisher events;
+    private final ContractPdfService pdfService;
+    private final FileStorageService fileStorageService;
+    private final DocumensoClient documensoClient;
+    private final ContractNumberGenerator numberGenerator;
 
     // -------------------------------------------------------------------------
     // Query
@@ -256,6 +264,182 @@ public class ContractService {
                                     );
                         })
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // Send (F.5 — the /send flow: render PDF → store → Documenso send → number → SENT)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Renders the contract PDF, stores it in S3, sends it to Documenso for
+     * e-signature, assigns a contract number (first send only), and transitions
+     * the contract from DRAFT to SENT (F-D5, F-D10, F.5).
+     *
+     * <h2>Idempotency — explicit boolean (NEVER switchIfEmpty(send))</h2>
+     * If {@code contract.documensoDocumentId != null} the send has already happened;
+     * we return the contract as-is (idempotent). The check is an explicit boolean
+     * branch — NOT {@code switchIfEmpty(send)}.
+     *
+     * <h2>Contract-number assignment</h2>
+     * {@link ContractNumberGenerator#next} is called ONLY when
+     * {@code contract.contractNumber == null} (explicit-boolean guard — a re-send
+     * / retry never regenerates the number). A one-retry
+     * {@link DuplicateKeyException} backstop mirrors the
+     * {@code ProjectService.generateCodeAndSave} C-D3 pattern.
+     *
+     * <h2>Template lookup for PDF rendering</h2>
+     * If the contract has a {@code templateId} the {@code bodyTemplate} (and
+     * optional {@code defaultTitle}) are loaded from the template for rendering;
+     * otherwise the contract's own {@code title} is used as the body.
+     *
+     * @param contractId  the id of the DRAFT contract to send
+     * @param recipientEmail the e-mail to send the signature request to
+     * @param recipientName  the recipient's display name
+     * @return the updated (SENT) contract
+     */
+    public Mono<Contract> send(UUID contractId, String recipientEmail, String recipientName) {
+        return TenantContextHolder.required().flatMap(ctx ->
+                findById(contractId).flatMap(contract -> {
+                    // Explicit-boolean idempotency: if already sent, return as-is
+                    if (contract.getDocumensoDocumentId() != null) {
+                        return Mono.just(contract);
+                    }
+
+                    // Resolve the body template string for PDF rendering
+                    Mono<String> bodyTemplateMono;
+                    Mono<String> titleTemplateMono;
+                    if (contract.getTemplateId() != null) {
+                        bodyTemplateMono = templates
+                                .findByTenantIdAndId(ctx.tenantId(), contract.getTemplateId())
+                                .map(t -> t.getBodyTemplate() != null ? t.getBodyTemplate() : "")
+                                .defaultIfEmpty("");
+                        titleTemplateMono = templates
+                                .findByTenantIdAndId(ctx.tenantId(), contract.getTemplateId())
+                                .map(t -> t.getDefaultTitle() != null ? t.getDefaultTitle() : "")
+                                .defaultIfEmpty("");
+                    } else {
+                        bodyTemplateMono = Mono.just(contract.getTitle() != null
+                                ? contract.getTitle() : "");
+                        titleTemplateMono = Mono.just("");
+                    }
+
+                    return bodyTemplateMono.zipWith(titleTemplateMono)
+                            .flatMap(tuple -> {
+                                String bodyTemplate = tuple.getT1();
+                                String titleTemplate = tuple.getT2().isBlank()
+                                        ? null : tuple.getT2();
+
+                                // 1. Render PDF (blocking on boundedElastic via ContractPdfService)
+                                return pdfService.render(contract, bodyTemplate, titleTemplate)
+                                        .flatMap(pdfBytes -> {
+                                            // 2. Store rendered PDF in S3
+                                            String partition = "contracts/" + contractId;
+                                            return fileStorageService.putBytes(
+                                                    ctx.tenantId(), partition, pdfBytes,
+                                                    "application/pdf", "pdf")
+                                                    .flatMap(storageRef -> {
+                                                        contract.setRenderedPdfStorageRef(storageRef);
+
+                                                        // 3. Send to Documenso
+                                                        return documensoClient.sendForSignature(
+                                                                contract, pdfBytes,
+                                                                recipientEmail, recipientName)
+                                                                .flatMap(sendResult -> {
+                                                                    contract.setDocumensoDocumentId(
+                                                                            sendResult.documensoDocumentId());
+                                                                    contract.setSentAt(Instant.now());
+
+                                                                    // 4. Assign contract number only on first send
+                                                                    if (contract.getContractNumber() == null) {
+                                                                        return saveWithNumberRetry(contract, ctx.tenantId());
+                                                                    } else {
+                                                                        contract.setStatus(Status.SENT);
+                                                                        return contracts.save(contract)
+                                                                                .flatMap(saved -> {
+                                                                                    events.publish(DomainEvent.of(
+                                                                                            DomainEventType.CONTRACT_SENT,
+                                                                                            saved.getTenantId(),
+                                                                                            saved.getId(),
+                                                                                            Map.of("documensoDocumentId",
+                                                                                                    saved.getDocumensoDocumentId())));
+                                                                                    return Mono.just(saved);
+                                                                                });
+                                                                    }
+                                                                });
+                                                    });
+                                        });
+                            });
+                }));
+    }
+
+    /**
+     * Assigns the next contract number and saves. On a {@link DuplicateKeyException}
+     * from the partial-unique {@code tenant_number_idx}, retries once with a fresh
+     * number (the {@code ProjectService.generateCodeAndSave} C-D3 pattern).
+     */
+    private Mono<Contract> saveWithNumberRetry(Contract contract, UUID tenantId) {
+        return numberGenerator.next(tenantId)
+                .flatMap(number -> {
+                    contract.setContractNumber(number);
+                    contract.setStatus(Status.SENT);
+                    return contracts.save(contract)
+                            .onErrorResume(DuplicateKeyException.class, ex ->
+                                    numberGenerator.next(tenantId).flatMap(retryNumber -> {
+                                        contract.setContractNumber(retryNumber);
+                                        return contracts.save(contract)
+                                                .onErrorMap(DuplicateKeyException.class, e ->
+                                                        new DigiPresBeException(
+                                                                "Contract number generation failed after retry",
+                                                                3708, 500));
+                                    }))
+                            .flatMap(saved -> {
+                                events.publish(DomainEvent.of(
+                                        DomainEventType.CONTRACT_SENT,
+                                        saved.getTenantId(),
+                                        saved.getId(),
+                                        Map.of("documensoDocumentId",
+                                                saved.getDocumensoDocumentId())));
+                                return Mono.just(saved);
+                            });
+                });
+    }
+
+    /**
+     * Renders the contract PDF bytes for the {@code GET /{id}/pdf} endpoint.
+     * Returns the signed PDF if signed, otherwise the rendered (pre-signature) PDF.
+     * Falls back to rendering fresh from the template if no stored ref exists.
+     *
+     * @param contractId the contract to render
+     * @return PDF bytes
+     */
+    public Mono<byte[]> renderPdfBytes(UUID contractId) {
+        return TenantContextHolder.required().flatMap(ctx ->
+                findById(contractId).flatMap(contract -> {
+                    // Resolve body/title templates for rendering
+                    Mono<String> bodyTemplateMono;
+                    Mono<String> titleTemplateMono;
+                    if (contract.getTemplateId() != null) {
+                        bodyTemplateMono = templates
+                                .findByTenantIdAndId(ctx.tenantId(), contract.getTemplateId())
+                                .map(t -> t.getBodyTemplate() != null ? t.getBodyTemplate() : "")
+                                .defaultIfEmpty("");
+                        titleTemplateMono = templates
+                                .findByTenantIdAndId(ctx.tenantId(), contract.getTemplateId())
+                                .map(t -> t.getDefaultTitle() != null ? t.getDefaultTitle() : "")
+                                .defaultIfEmpty("");
+                    } else {
+                        bodyTemplateMono = Mono.just(contract.getTitle() != null
+                                ? contract.getTitle() : "");
+                        titleTemplateMono = Mono.just("");
+                    }
+                    return bodyTemplateMono.zipWith(titleTemplateMono)
+                            .flatMap(tuple -> {
+                                String bodyTemplate = tuple.getT1();
+                                String titleTemplate = tuple.getT2().isBlank()
+                                        ? null : tuple.getT2();
+                                return pdfService.render(contract, bodyTemplate, titleTemplate);
+                            });
+                }));
     }
 
     // -------------------------------------------------------------------------
