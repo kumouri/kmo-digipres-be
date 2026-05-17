@@ -15,7 +15,7 @@
 | E.5 — StripeWebhookEvent + extended StripeWebhookService + StripeProperties + StripeCheckoutService + controllers | done | 576b7d3 | event-id idempotency (ledger-first, 200-no-op dup) + INVOICE_PAID; @IdempotentRoute×4; QuickBooksInvoiceSync untouched; self-grep clean; full test 399/0/0 |
 | E.6 — BE ITs AC-E1…AC-E8 | done | 019fb3f | full suite 422/0/0 + 2 skipped (399 main, no regression, +23 Phase-E). **BLOCKER: AC-E3 full catch-up blocked by pre-existing non-sparse Invoice tenant_number_idx — see below** |
 | E.7 — BE CLAUDE.md in-PR + .claude/* local + docs/api/openapi.json committed | done | (this commit) | CLAUDE.md Phase E SHIPPED note + blocker; .claude/* local (gitignored); openapi.json 164 paths/126 schemas |
-| E.8 — Final BE green + PR | pending | — | — |
+| E.8 — Final BE green + PR | done | (this commit) | full build 422/0/0 + 2 skipped; verifyOpenApi OK; §9 self-grep clean (3 hits all genuine not-found); no-live-money sweep clean; PR opened — NOT merged (separate Opus validates) |
 
 ## Quartz-store resolution decision (SETTLED at E.2 — before E.4, as required)
 - [ ] `io.fluidsonic.mirror:quartz-mongodb:2.2.0-rc2` resolved + context boots with Mongo store → Mongo store active
