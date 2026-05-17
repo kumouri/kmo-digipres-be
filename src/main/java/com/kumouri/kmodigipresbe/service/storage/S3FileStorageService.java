@@ -15,6 +15,7 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
+import java.io.Closeable;
 import java.net.URI;
 import java.time.Duration;
 import java.util.UUID;
@@ -36,7 +37,7 @@ import java.util.UUID;
  * non-blocking Netty HTTP client); wrapping in {@code Mono.fromFuture} keeps
  * everything on the reactive event loop without a {@code boundedElastic} hop.
  */
-public class S3FileStorageService implements FileStorageService {
+public class S3FileStorageService implements FileStorageService, Closeable {
 
     private final S3Presigner presigner;
     private final S3AsyncClient asyncClient;
@@ -147,6 +148,26 @@ public class S3FileStorageService implements FileStorageService {
         if (props.bucket() == null || props.bucket().isBlank()) {
             throw new DigiPresBeException(
                     "kmosf.files.bucket is not configured", 1310, 503);
+        }
+    }
+
+    /**
+     * Releases the SDK clients (Phase F — F.11). The {@link S3AsyncClient} added in
+     * F-D8 owns a Netty event-loop group + connection pool; without an explicit
+     * close it leaks threads/FDs/direct-memory for the life of the JVM. Spring's
+     * {@code @Bean} (FileStorageConfig) default destroy-method inference invokes
+     * this on context close, so each cached {@code @SpringBootTest} context's
+     * client is released on eviction (bounding an otherwise unbounded accumulation
+     * that starved the shared Testcontainers Mongo and cascaded the CI suite). Both
+     * clients are {@code SdkAutoCloseable}; close is idempotent and null-safe.
+     */
+    @Override
+    public void close() {
+        if (asyncClient != null) {
+            asyncClient.close();
+        }
+        if (presigner != null) {
+            presigner.close();
         }
     }
 }
