@@ -2,6 +2,7 @@ package com.kumouri.kmodigipresbe.repository.project;
 
 import com.kumouri.kmodigipresbe.model.project.Project;
 import com.kumouri.kmodigipresbe.tenancy.TenantScopedReactiveMongoRepository;
+import org.springframework.data.mongodb.repository.Query;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -12,6 +13,15 @@ import java.util.UUID;
  * methods ({@code findById}, {@code save}, etc.) apply the {@code tenantId} predicate
  * automatically via {@link com.kumouri.kmodigipresbe.tenancy.TenantScopedSimpleReactiveMongoRepository};
  * derived finders pass {@code tenantId} explicitly for index-friendliness (C-D2).
+ *
+ * <p>Portal contact/company finders (Phase G — G-D9) mirror the
+ * {@code InvoiceRepository} portal-finder precedent. Note that the contact field
+ * on {@link Project} is {@code primaryContactId} (not {@code contactId}) — the
+ * derived finders and {@code $or} query use this exact field name.
+ * Derived finders require an explicit {@code tenantId} argument — the
+ * {@link com.kumouri.kmodigipresbe.tenancy.TenantScopedReactiveMongoRepository}
+ * marker does NOT auto-scope derived finders (per the
+ * {@code PortalInvoicesController} Javadoc).
  */
 public interface ProjectRepository extends TenantScopedReactiveMongoRepository<Project, UUID> {
 
@@ -24,4 +34,22 @@ public interface ProjectRepository extends TenantScopedReactiveMongoRepository<P
     Mono<Project> findFirstByTenantIdAndDealId(UUID tenantId, UUID dealId);
 
     Mono<Boolean> existsByTenantIdAndDealId(UUID tenantId, UUID dealId);
+
+    /**
+     * Portal "my projects" when the caller's contact has no company link — selects
+     * only the direct primaryContactId match. Avoids the {@code {companyId: null}}
+     * predicate trap in the {@code $or}-based query below.
+     */
+    Flux<Project> findAllByTenantIdAndPrimaryContactIdOrderByCreatedAtDesc(
+            UUID tenantId, UUID primaryContactId);
+
+    /**
+     * Portal "my projects" when the caller's contact has a companyId — projects
+     * match if either the primaryContactId or companyId points at them. Mirrors
+     * {@code InvoiceRepository.findAllByTenantAndContactOrCompany}.
+     */
+    @Query(value = "{ 'tenantId': ?0, '$or': [ { 'primaryContactId': ?1 }, { 'companyId': ?2 } ] }",
+            sort = "{ 'createdAt': -1 }")
+    Flux<Project> findAllByTenantAndPrimaryContactOrCompany(
+            UUID tenantId, UUID primaryContactId, UUID companyId);
 }

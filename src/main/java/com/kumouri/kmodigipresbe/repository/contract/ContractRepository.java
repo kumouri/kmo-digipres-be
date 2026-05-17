@@ -2,6 +2,7 @@ package com.kumouri.kmodigipresbe.repository.contract;
 
 import com.kumouri.kmodigipresbe.model.contract.Contract;
 import com.kumouri.kmodigipresbe.tenancy.TenantScopedReactiveMongoRepository;
+import org.springframework.data.mongodb.repository.Query;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -21,6 +22,13 @@ import java.util.UUID;
  * <p>{@link #findByTenantIdAndDocumensoDocumentId} is the webhook correlation
  * key: Documenso returns a {@code documentId} and we look up the CRM
  * {@link Contract} from it (errorCode 3716 if absent, defensive).
+ *
+ * <p>Portal contact/company finders (Phase G — G-D9) mirror the
+ * {@code InvoiceRepository} portal-finder precedent. Derived finders require an
+ * explicit {@code tenantId} argument — the
+ * {@link com.kumouri.kmodigipresbe.tenancy.TenantScopedReactiveMongoRepository}
+ * marker does NOT auto-scope derived finders (per the
+ * {@code PortalInvoicesController} Javadoc).
  */
 public interface ContractRepository
         extends TenantScopedReactiveMongoRepository<Contract, UUID> {
@@ -56,4 +64,22 @@ public interface ContractRepository
      * record and by the SOW promotion guard.
      */
     Flux<Contract> findAllByTenantIdAndDealId(UUID tenantId, UUID dealId);
+
+    /**
+     * Portal "my contracts" when the caller's contact has no company link — selects
+     * only the direct contactId match. Avoids the {@code {companyId: null}}
+     * predicate trap in the {@code $or}-based query below.
+     */
+    Flux<Contract> findAllByTenantIdAndContactIdOrderByCreatedAtDesc(
+            UUID tenantId, UUID contactId);
+
+    /**
+     * Portal "my contracts" when the caller's contact has a companyId — contracts
+     * match if either the contactId or companyId points at them. Mirrors
+     * {@code InvoiceRepository.findAllByTenantAndContactOrCompany}.
+     */
+    @Query(value = "{ 'tenantId': ?0, '$or': [ { 'contactId': ?1 }, { 'companyId': ?2 } ] }",
+            sort = "{ 'createdAt': -1 }")
+    Flux<Contract> findAllByTenantAndContactOrCompany(
+            UUID tenantId, UUID contactId, UUID companyId);
 }
