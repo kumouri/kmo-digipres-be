@@ -2,6 +2,7 @@ package com.kumouri.kmodigipresbe.contract;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.kumouri.kmodigipresbe.TestcontainersConfiguration;
+import com.kumouri.kmodigipresbe.contract.support.ContractItStorageTestConfig;
 import com.kumouri.kmodigipresbe.integration.IntegrationConnection;
 import com.kumouri.kmodigipresbe.integration.IntegrationConnectionRepository;
 import com.kumouri.kmodigipresbe.model.contract.Contract;
@@ -11,25 +12,20 @@ import com.kumouri.kmodigipresbe.model.user.User;
 import com.kumouri.kmodigipresbe.repository.TenantRepository;
 import com.kumouri.kmodigipresbe.repository.UserRepository;
 import com.kumouri.kmodigipresbe.service.JwtTokenService;
-import com.kumouri.kmodigipresbe.service.storage.FileStorageService;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.mongodb.core.ReactiveMongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
-import reactor.core.publisher.Mono;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -42,16 +38,16 @@ import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.when;
 
 /**
  * F.7 — DocumensoSendWireMockIT: contract send flow — WireMock Documenso (§7 hard boundary).
  *
  * <p>{@code kmosf.documenso.api-base-url} pointed at WireMock via {@code @DynamicPropertySource}.
- * {@link FileStorageService} is mocked so no real S3 bucket is needed (the IT proves the
- * send path is exercised and the stored ref is set without a real object-store).
+ * {@link com.kumouri.kmodigipresbe.service.storage.FileStorageService} is provided by
+ * {@link ContractItStorageTestConfig} — an in-memory stub declared as a real
+ * {@code @Bean @Primary} (no {@code @MockBean}) so this IT and
+ * {@code DocumensoWebhookSignedIT} share ONE Spring ApplicationContext cache key
+ * (F.10 de-splinter — the #58-proven approach).
  *
  * <p>Asserts:
  * <ul>
@@ -63,15 +59,10 @@ import static org.mockito.Mockito.when;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, ContractItStorageTestConfig.class})
 @TestPropertySource(properties = {
         "kmosf.quartz.proof-job.enabled=false",
-        "kmosf.recurring-invoice.spawn-job.enabled=false",
-        // @MockBean causes a distinct ApplicationContext that shares the same Testcontainers Mongo.
-        // Without this flag the second context tries to create the Spring-Data @CompoundIndex
-        // "tenant_number_idx" (non-partial) which conflicts with the already-created partial-unique
-        // index managed by ContractNumberIndexInitializer → IndexKeySpecsConflict (86).
-        "spring.data.mongodb.auto-index-creation=false"
+        "kmosf.recurring-invoice.spawn-job.enabled=false"
 })
 class DocumensoSendWireMockIT {
 
@@ -93,15 +84,6 @@ class DocumensoSendWireMockIT {
         // §7 boundary: every Documenso call goes to WireMock, never a real host.
         registry.add("kmosf.documenso.api-base-url", () -> wireMock.baseUrl());
     }
-
-    /**
-     * Mock FileStorageService so no S3 bucket is required. The send path calls
-     * putBytes (renderedPdf → S3), which we stub to return a fake storage ref.
-     * The context is distinct (due to @DynamicPropertySource + @MockBean) so this
-     * mock does not affect other IT contexts.
-     */
-    @MockBean
-    FileStorageService fileStorageService;
 
     @Autowired WebTestClient web;
     @Autowired TenantRepository tenants;
@@ -133,16 +115,6 @@ class DocumensoSendWireMockIT {
                 .status(User.UserStatus.ACTIVE).build();
         users.save(admin).block();
         adminToken = "Bearer " + jwt.mint(admin);
-
-        // FileStorageService mock: putBytes returns a fake storage ref under the tenant prefix
-        when(fileStorageService.putBytes(any(UUID.class), anyString(), any(byte[].class),
-                anyString(), anyString()))
-                .thenAnswer(inv -> {
-                    UUID tid = inv.getArgument(0);
-                    String partition = inv.getArgument(1);
-                    String suffix = inv.getArgument(4);
-                    return Mono.just("tenants/" + tid + "/" + partition + "/" + UUID.randomUUID() + "." + suffix);
-                });
     }
 
     private void seedDocumensoConn(boolean withApiToken) {

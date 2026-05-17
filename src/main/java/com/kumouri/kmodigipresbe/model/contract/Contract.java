@@ -11,7 +11,6 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.annotation.Version;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
-import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
@@ -33,25 +32,23 @@ import java.util.UUID;
  * <ul>
  *   <li>{@code tenant_status_idx} — list-by-status queries</li>
  *   <li>{@code tenant_deal_idx} — "contracts for a deal" lookups</li>
- *   <li><strong>{@code tenant_number_idx}</strong> — partial-unique
- *       ({@code partialFilterExpression: {'contractNumber':{'$type':'string'}}}).
- *       DRAFTs stay {@code contractNumber=null}; uniqueness holds only for issued
- *       (SENT+) contracts. Spring Data's {@code @CompoundIndex} cannot express a
- *       {@code partialFilterExpression} (the E.11 lesson), so the annotation
- *       carries only the key fields; the partial-unique definition is owned end-to-end
- *       by {@code scheduling.ContractNumberIndexInitializer} (the
- *       {@code InvoiceNumberIndexInitializer} pattern).</li>
  * </ul>
+ *
+ * <p>NOTE (Phase F — the E.11 lesson): {@code tenant_number_idx} is deliberately
+ * NOT declared here as a {@code @CompoundIndex}. Spring Data's {@code @CompoundIndex}
+ * cannot express a {@code partialFilterExpression}, and a plain key-only annotation
+ * would conflict with the partial-unique index created by
+ * {@code scheduling.ContractNumberIndexInitializer} (exactly the E.11 root cause that
+ * forced the same fix on {@code Invoice.java} in Phase E). The index is owned
+ * end-to-end by {@code ContractNumberIndexInitializer} as a partial-unique index
+ * ({@code partialFilterExpression: {'contractNumber':{'$type':'string'}}}): DRAFTs stay
+ * {@code contractNumber=null}; uniqueness holds only for issued/numbered contracts;
+ * many null-numbered DRAFTs per tenant are allowed. Exactly one
+ * {@code tenant_number_idx} definition exists, and it lives there.
  */
 @Document("contracts")
-@CompoundIndexes({
-        @CompoundIndex(name = "tenant_status_idx",
-                def = "{'tenantId':1,'status':1}"),
-        @CompoundIndex(name = "tenant_deal_idx",
-                def = "{'tenantId':1,'dealId':1}"),
-        @CompoundIndex(name = "tenant_number_idx",
-                def = "{'tenantId':1,'contractNumber':1}")
-})
+@CompoundIndex(name = "tenant_status_idx", def = "{'tenantId':1,'status':1}")
+@CompoundIndex(name = "tenant_deal_idx", def = "{'tenantId':1,'dealId':1}")
 @Data
 @Builder(toBuilder = true)
 @NoArgsConstructor

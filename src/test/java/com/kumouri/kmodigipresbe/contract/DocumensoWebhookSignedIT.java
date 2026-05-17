@@ -5,6 +5,7 @@ import com.kumouri.kmodigipresbe.TestcontainersConfiguration;
 import com.kumouri.kmodigipresbe.automation.DomainEvent;
 import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
 import com.kumouri.kmodigipresbe.automation.DomainEventType;
+import com.kumouri.kmodigipresbe.contract.support.ContractItStorageTestConfig;
 import com.kumouri.kmodigipresbe.integration.IntegrationConnection;
 import com.kumouri.kmodigipresbe.integration.IntegrationConnectionRepository;
 import com.kumouri.kmodigipresbe.model.contract.Contract;
@@ -15,18 +16,15 @@ import com.kumouri.kmodigipresbe.model.deal.PipelineStage;
 import com.kumouri.kmodigipresbe.model.project.Project;
 import com.kumouri.kmodigipresbe.model.tenant.Tenant;
 import com.kumouri.kmodigipresbe.repository.TenantRepository;
-import com.kumouri.kmodigipresbe.service.storage.FileStorageService;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.mongodb.core.ReactiveMongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
@@ -53,25 +51,29 @@ import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.when;
 
 /**
  * F.7 — DocumensoWebhookSignedIT: the AC-F1/AC-F2/AC-F3 headline test.
  *
  * <p>Mirrors {@code StripeWebhookIdempotencyIT} exactly (the mandated shape):
  * {@code @SpringBootTest(RANDOM_PORT)} + {@code @AutoConfigureWebTestClient} +
- * {@code @Import(TestcontainersConfiguration.class)} + {@code @TestPropertySource} job disables;
- * local HMAC signing helper; {@code mongo.remove/findAll/findById} bypass tenant scope;
+ * {@code @Import(TestcontainersConfiguration.class, ContractItStorageTestConfig.class)} +
+ * {@code @TestPropertySource} job disables; local HMAC signing helper;
+ * {@code mongo.remove/findAll/findById} bypass tenant scope;
  * {@code eventPublisher.stream().subscribe(observed)} + {@code Awaitility}.
+ *
+ * <p>{@link com.kumouri.kmodigipresbe.service.storage.FileStorageService} is provided
+ * by {@link ContractItStorageTestConfig} — an in-memory stub declared as a real
+ * {@code @Bean @Primary} (no {@code @MockBean}) so this IT and
+ * {@code DocumensoSendWireMockIT} share ONE Spring ApplicationContext cache key
+ * (F.10 de-splinter — the #58-proven approach).
  *
  * <h2>No live Documenso (§7)</h2>
  * {@code kmosf.documenso.api-base-url} pointed at WireMock. The signed-PDF download
- * endpoint is stubbed to return fake PDF bytes. {@link FileStorageService#putBytes} is
- * mocked to return a storage ref without a real S3 bucket, so we can assert
- * {@code signedPdfStorageRef} is set non-null under the tenant prefix (legal-integrity:
- * the store call is exercised; bytes don't round-trip a real bucket in the IT).
+ * endpoint is stubbed to return fake PDF bytes. The in-memory storage stub absorbs
+ * the {@code putBytes} call so we can assert {@code signedPdfStorageRef} is set
+ * non-null under the tenant prefix (legal-integrity: the store call is exercised;
+ * bytes don't round-trip a real bucket in the IT).
  *
  * <h2>AC-F1 (legal-signature happy path)</h2>
  * POST signed webhook (valid HMAC) → 200; Awaitility:
@@ -91,15 +93,10 @@ import static org.mockito.Mockito.when;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, ContractItStorageTestConfig.class})
 @TestPropertySource(properties = {
         "kmosf.quartz.proof-job.enabled=false",
-        "kmosf.recurring-invoice.spawn-job.enabled=false",
-        // @MockBean causes a distinct ApplicationContext that shares the same Testcontainers Mongo.
-        // Without this flag the second context tries to create the Spring-Data @CompoundIndex
-        // "tenant_number_idx" (non-partial) which conflicts with the already-created partial-unique
-        // index managed by ContractNumberIndexInitializer → IndexKeySpecsConflict (86).
-        "spring.data.mongodb.auto-index-creation=false"
+        "kmosf.recurring-invoice.spawn-job.enabled=false"
 })
 class DocumensoWebhookSignedIT {
 
@@ -125,14 +122,6 @@ class DocumensoWebhookSignedIT {
         // §7 boundary: every Documenso call goes to WireMock.
         registry.add("kmosf.documenso.api-base-url", () -> wireMock.baseUrl());
     }
-
-    /**
-     * Mock FileStorageService: putBytes returns a synthetic storage ref so the
-     * signed-PDF store path is exercised without a real S3 bucket. The ref is
-     * under the tenant prefix (legal-integrity: tenant/<tenantId>/contracts/...).
-     */
-    @MockBean
-    FileStorageService fileStorageService;
 
     @Autowired WebTestClient web;
     @Autowired TenantRepository tenants;
@@ -189,18 +178,6 @@ class DocumensoWebhookSignedIT {
                 .dealId(dealId)
                 .promotedDealToWon(false)
                 .build()).block();
-
-        // FileStorageService mock: putBytes returns a synthetic ref under the tenant prefix.
-        // This exercises the store-call path without a real S3 bucket.
-        when(fileStorageService.putBytes(any(UUID.class), anyString(), any(byte[].class),
-                anyString(), anyString()))
-                .thenAnswer(inv -> {
-                    UUID tid = inv.getArgument(0);
-                    String partition = inv.getArgument(1);
-                    String suffix = inv.getArgument(4);
-                    return reactor.core.publisher.Mono.just(
-                            "tenants/" + tid + "/" + partition + "/" + UUID.randomUUID() + "." + suffix);
-                });
 
         // WireMock: stub the DocumensoClient.downloadSignedPdf GET endpoint to return fake PDF bytes
         wireMock.stubFor(get(urlPathMatching("/api/v1/documents/.*/download"))
