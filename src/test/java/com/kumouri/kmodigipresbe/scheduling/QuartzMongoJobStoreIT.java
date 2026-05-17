@@ -49,7 +49,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 @TestPropertySource(properties = {
         "kmosf.quartz.proof-job.enabled=true",
         // RAM-fallback active (E-D5). Mongo store is non-functional under Quartz 2.5.
-        "kmosf.quartz.store=memory"
+        "kmosf.quartz.store=memory",
+        // This IT asserts NoOpQuartzJob actually fires, so it is the SOLE opt-in
+        // that needs the Quartz scheduler started. It overrides the test-wide
+        // default from application-test.properties (spring.quartz.auto-startup=
+        // false, profile 'test'); inlined @TestPropertySource outranks the
+        // profile-specific file.
+        "spring.quartz.auto-startup=true",
+        // Even though this context starts its scheduler, the recurring spawn job
+        // must NOT run here — it would tick runDueOnce() cross-tenant against the
+        // shared Testcontainers Mongo ~60s after boot, for the whole cached-context
+        // lifetime. Explicitly disable it so the started scheduler runs ONLY the
+        // harmless one-shot NoOpQuartzJob — zero cross-tenant runDueOnce, zero
+        // contamination. (application-test.properties also sets this false, but a
+        // started-scheduler context is the one place it is load-bearing, so assert
+        // it explicitly here rather than rely on inheritance.)
+        "kmosf.recurring-invoice.spawn-job.enabled=false"
 })
 class QuartzMongoJobStoreIT {
 

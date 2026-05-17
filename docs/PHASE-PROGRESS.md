@@ -186,3 +186,60 @@ behavior change.
 
 ## HANDOFF GATE
 N/A — Phase E is BE-only; recurring/Stripe FE deferred to Phase G (E-D13).
+
+## Post-Phase-E follow-up — deeper test-isolation hardening (Quartz autostart) — RESOLVED
+
+Branch `fix/test-isolation-recurring-quartz-cross-talk` (independent PR into `main`, post-Phase-E
+merge of #55). Resolves the **second** of the two out-of-scope follow-ups flagged at the end of the
+"Catch-up nondeterminism root-cause — RESOLVED (E.13)" section above ("deeper test-isolation
+hardening for cross-tenant Quartz ticks on the shared Mongo"). The first follow-up (the
+`occurrenceCount` denormalized-counter RMW race) is a separate, orthogonal change.
+
+**Corrected root cause (supersedes the E.13 belief that the test-yml spawn-job disable was
+effective).** E.13 added `kmosf.recurring-invoice.spawn-job.enabled=false` to
+`src/test/resources/application.yml` ("the sla-breach precedent"). That line is in fact **shadowed**:
+Spring Boot loads the profile-agnostic main `src/main/resources/application.properties` at a HIGHER
+precedence than the test `src/test/resources/application.yml` (there is no test
+`application.properties`). So for every key main `application.properties` defines —
+`spring.quartz.auto-startup=true` (:24), `kmosf.recurring-invoice.spawn-job.enabled=...:true` (:37),
+`spring.quartz.properties.org.quartz.scheduler.instanceName=KmosQuartzScheduler` (:26) — the test-yml
+value never took effect. Only per-IT `@TestPropertySource` (highest precedence) overrode it.
+(`sla-breach-scheduler.enabled: false` worked in the yml only because main `application.properties`
+does not define that key, so nothing shadowed it — which is why the "precedent" was misleading.)
+Consequently the Quartz scheduler **auto-started in every cached `@SpringBootTest` context** and
+`RecurringInvoiceJobScheduler` **registered the spawn job** there; that cached, started scheduler then
+ticked `runDueOnce()` cross-tenant against the ONE shared Testcontainers Mongo ~60s after boot,
+perturbing other tests (the observed `RecurringInvoiceSpawnJob tick failed` WARN). Empirically proven
+on this branch via JUnit-XML capture: with only the test-yml form, `RecurringInvoiceSpawnRestartIT`
+showed `Scheduler … started` and `QuartzMongoJobStoreIT` showed
+`RecurringInvoiceSpawnJob scheduled — first run in 60000ms` despite the disables.
+
+**Fix (test-scope only; ZERO production-code/default change; ZERO money-design change).** A
+**profile-specific** `src/test/resources/application-test.properties` (profile-specific reliably
+overrides profile-agnostic main `application.properties`) carrying `spring.quartz.auto-startup=false`
+(primary — a non-started scheduler stores but never fires triggers, removing the *firing* capability
+outright), `kmosf.recurring-invoice.spawn-job.enabled=false` (defense-in-depth, now genuinely
+effective), and a unique test scheduler `instanceName` (belt). Activated for the whole test source
+set via `spring.profiles.active: test` in `src/test/resources/application.yml` (no `@Profile`
+collision — the only main `@Profile` is `DataSeeder @Profile("dev")`; `test` ≠ `dev`, nothing is
+`@Profile("!test")`). The sole scheduler-dependent IT, `QuartzMongoJobStoreIT`, opts back in via its
+`@TestPropertySource` (`spring.quartz.auto-startup=true` + explicit
+`kmosf.recurring-invoice.spawn-job.enabled=false`) so its started scheduler runs ONLY the harmless
+one-shot `NoOpQuartzJob` — zero cross-tenant `runDueOnce` even from that one context. Money-design
+untouched (ledger-insert-FIRST, unique `tenant_recurring_period_idx`, explicit-boolean probe, bounded
+catch-up); recurring durability lives in the `RecurringInvoiceOccurrence` ledger + `nextRunAt` cursor,
+never the Quartz JobStore, so a not-started test scheduler is immaterial to correctness.
+
+**Verification.** Validation gate (per-context, JUnit XMLs): `RecurringInvoiceSpawnRestartIT`
+(non-opt-in) — scheduler never starts, zero scheduler/spawn/NoOp markers, 2/0/0;
+`QuartzMongoJobStoreIT` (opt-in) — `Scheduler KmosQuartzScheduler-test … started`,
+`NoOpQuartzJob fired`, **no** `RecurringInvoiceSpawnJob scheduled`, 2/0/0; profile `test` active in
+both. Full suite **3/3 consecutive runs green** (`./gradlew --no-daemon -Dorg.gradle.java.home=<JDK17>
+test --rerun-tasks`): each EXIT 0 / BUILD SUCCESSFUL / **427 tests, 0 failures, 0 errors, 0 skipped**
+(no regression vs the E.13 427 baseline) / **zero `RecurringInvoiceSpawnJob tick` occurrences across
+that run's JUnit XMLs** (the authoritative artifact — Gradle does not stream Spring app logs to the
+console).
+
+| Sub-phase | Status | SHA | Notes |
+|---|---|---|---|
+| FU-Q1 — test-isolation: never auto-start Quartz in tests (profile-specific override) | done | (this branch) | application-test.properties (profile `test`) + spring.profiles.active in test yml + QuartzMongoJobStoreIT opt-in; corrected the .properties-over-.yml precedence root cause; 3/3 full-suite green 427/0/0/0, zero spawn-job tick; no prod/money change |
