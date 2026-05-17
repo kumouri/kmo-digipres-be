@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.annotation.Transient;
 import org.springframework.data.annotation.Version;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.mapping.Document;
@@ -59,6 +60,13 @@ public class User implements Auditable {
     // Null for STAFF users and for CLIENT users not yet stamped with a Contact link.
     // No index: we always traverse user→contact, never the reverse.
     private UUID contactId;
+
+    // Non-persisted projection of the owning Tenant's displayName, populated on
+    // /auth/me (and mirrored on the login response) so the FE can show the
+    // human business name instead of a raw tenant UUID. Spring Data @Transient
+    // keeps it out of Mongo; Jackson still serializes it. Nullable.
+    @Transient
+    private String tenantName;
 
     @Version
     private Long version;
