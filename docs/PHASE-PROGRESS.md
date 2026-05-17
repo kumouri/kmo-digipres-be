@@ -1,337 +1,58 @@
-# Phase E — Billing, Recurring & Stripe — Progress Ledger
+# Phase F — Contracts & Documenso — Progress Ledger
 
-> This file is the crash-recovery source of truth per ultraplan §6 Resilience.
-> Each commit is recorded as it lands. The plan §10 stub mirrors this.
-> Plan: `back-office-kmo-digipres-phase-E-billing-recurring-stripe.md`
+> Crash-recovery source of truth per ultraplan §6 Resilience. Each sub-phase is its
+> own commit; this row is set →in-progress (committed) as the first action and
+> →done+results (committed) as the last action of every sub-phase. Plan §10 is a
+> one-line pointer here. Plan: back-office-kmo-digipres-phase-F-contracts-documenso.md
 
-## Branch: `back-office-kmo-digipres-phase-E-billing-recurring-stripe`
+## Branch: back-office-kmo-digipres-phase-F-contracts-documenso  (base main @ e5f3fb9)
+## Model: Plan=Opus 4.7 · Implement=Sonnet 4.6 · Validate/final=Opus 4.7 (HMAC/legal-signature focus)
 
-| Sub-phase | Status | SHA | Notes |
-|---|---|---|---|
-| E.1 — error range 3600-3699 + DomainEventType Phase-E block + Invoice.PaymentTerms (additive) | done | 4e3b71f | compileJava clean; full test 399/0/0 — no regression, no error-code collision |
-| E.2 — Quartz Mongo JobStore dep + QuartzConfig customizer + properties | done | 15d90d0 | E-D5 RAM-FALLBACK ACTIVE — see decision below; QuartzMongoJobStoreIT 2/0/0 (RAM store, proof job fires) |
-| E.3 — RecurringInvoice + RecurringInvoiceOccurrence + repos | done | 6066774 | E-D2 field tables exact; unique tenant_recurring_period_idx; full test 399/0/0 (entities map clean, index auto-creates) |
-| E.4 — RecurringInvoiceService + RecurringInvoiceSpawnService + Quartz job | done | 69619bc | ledger-insert-FIRST + explicit-boolean probe; self-grep clean (only 3605 not-found switchIfEmpty); full test 399/0/0 |
-| E.5 — StripeWebhookEvent + extended StripeWebhookService + StripeProperties + StripeCheckoutService + controllers | done | 576b7d3 | event-id idempotency (ledger-first, 200-no-op dup) + INVOICE_PAID; @IdempotentRoute×4; QuickBooksInvoiceSync untouched; self-grep clean; full test 399/0/0 |
-| E.6 — BE ITs AC-E1…AC-E8 | done | 019fb3f | full suite 422/0/0 + 2 skipped (399 main, no regression, +23 Phase-E). **BLOCKER: AC-E3 full catch-up blocked by pre-existing non-sparse Invoice tenant_number_idx — see below** |
-| E.7 — BE CLAUDE.md in-PR + .claude/* local + docs/api/openapi.json committed | done | 697f5e8 | CLAUDE.md Phase E SHIPPED note + blocker; .claude/* local (gitignored); openapi.json 164 paths/126 schemas |
-| E.8 — Final BE green + PR | done | 484405b | full build 422/0/0 + 2 skipped; verifyOpenApi OK; §9 self-grep clean (3 hits all genuine not-found); no-live-money sweep clean; PR #55 opened — NOT merged (separate Opus validates) |
-| E.9 — InvoiceNumberGenerator (service.billing) — blocker resolution | done | 41d7787 | clone of ProjectCodeGenerator: atomic Mongo $inc upsert on invoice_number_counters keyed tenantId:year; INV-%d-%04d; UTC year; switchIfEmpty→3640 (defensive, mirrors 3433); error code 3640 added to GlobalErrorHandler Javadoc; compileJava clean |
-| E.10 — Wire InvoiceNumberGenerator into InvoiceService finalize edge | done | 07f8eba | assignNumberIfIssued(inv,target) explicit-boolean (number==null && target∈{SENT,PARTIALLY_PAID,PAID,OVERDUE}); wired into setStatus + createFromQuote + refreshInvoiceStatus auto-advance; saveWithNumberRetry DuplicateKey backstop (ProjectService C-D3 mirror, 3640 on 2nd collision); VOIDED excluded; create/recordPayment/recompute/maybePublishFinalized semantics intact; compileJava clean — AUTHORIZED §7 override |
-| E.11 — Migrate tenant_number_idx to partial-unique | done | 545341f | @CompoundIndex removed from Invoice.java (index owned fully by InvoiceNumberIndexInitializer); idempotent ApplicationReadyEvent initializer (QuartzBootstrap pattern): reconciles via getIndexInfo → drop-if-not-desired-partial-unique, create partial-unique {tenantId:1,invoiceNumber:1} partialFilterExpression {invoiceNumber:{$type:"string"}} (the MongoDB-legal "present & non-null"; $ne:null is NOT a legal pfe operator, bare $exists:true still matches BSON-null DRAFTs). Safe+idempotent: absent→create / present-but-wrong→drop+create / present-correct→no-op. .block() on startup thread; failure logged+swallowed (counter is primary, index is backstop). compileJava clean |
-| E.12 — Re-enable + extend tests | done | (this branch) | un-@Disabled the 2 AC-E3 full-catch-up specs in RecurringInvoiceSpawnRestartIT (replaced obsolete currentBehavior_* blocker doc-test); added InvoiceNumberGeneratorIT (mirrors ProjectCodeGeneratorIT) — DRAFT→SENT-numbered-once + idempotent, partial-index permits N null DRAFTs / rejects dup number, AC-E2 ≥3-period recurring multi-spawn; InvoiceFinalizedEmissionTest extended. Full suite GREEN, 0 skipped from the AC-E3 pair, no main regression. **Catch-up nondeterminism root-caused — see section below** |
-| E.13 — Catch-up root-cause + flake fixes + final docs | done | (this branch) | Conclusively diagnosed the RecurringInvoiceSpawnRestartIT flake as a TEST-isolation artifact (cross-tenant runDueOnce + Spring-context-cached siblings on ONE shared Testcontainers Mongo) — NOT a RecurringInvoiceSpawnService over-spawn/double-bill bug. Money-safe test-only fixes (zero production change): fixed @Primary Clock, ledger-scoped + foreign-tick-immune money-invariant assertions, global test spawn-job disable. Pre-existing ServiceAgreementSchedulerIT date-flake fixed the in-repo way (fixed @Primary Clock, NOT a Phase-E change). CLAUDE.md + this ledger finalized; openapi.json unchanged (no API surface change since E.7) |
+| Sub-phase | Status | SHA | Build (main base / +F / skip) | Mandated checks | Deviations |
+|---|---|---|---|---|---|
+| F.1 error range 3700-3799 + DomainEventType Phase-F + contracts module prop | done | 9b5c937 | crashed-agent self-report "428/0/0/0 full green" — UNVERIFIED by orchestrator (not trusted per §6). Orchestrator-verified: compileJava clean; additive-only (Javadoc + event constants + 1 property). Full-suite no-regression → CI at PR (§6 scale gate) | no error-code collision (verified by inspection); compileJava clean (verified) | none |
+| F.2 DocumensoProperties/Config + FileStorageService.putBytes (S3AsyncClient, no new dep) | done | b5c9abe | crashed-agent self-report "428 green" — UNVERIFIED. Orchestrator-verified: compileJava+compileTestJava clean; full Spring context boots WITH DocumensoConfig + S3FileStorageService (proven by ContractEntityIndexIT @SpringBootTest green); putBytes is additive (interface + impl), presign methods untouched | presign methods unchanged (verified by inspection — additive interface method); S3AsyncClient in already-present aws sdk:s3 (no new dep, verified build.gradle) | none |
+| F.3 Contract + ContractTemplate + DocumensoWebhookEvent + repos | done | 179bcf1 | F.3 gate (orchestrator-verified): compileJava+compileTestJava clean (exit 0); ContractEntityIndexIT 9/9 green (BUILD SUCCESSFUL 55s, full Spring context). Full-suite Chunk-1 local re-validation INCONCLUSIVE (25-min `timeout` kill, exit 124 — local env limitation; 0 failures/0 errors in the partial run; NOT a test failure) → authoritative no-regression is CI at PR per §6 | indexes auto-create (verified by ContractEntityIndexIT); Contract/ContractTemplate Auditable, DocumensoWebhookEvent TenantScoped NOT Auditable (verified) | **F-D10 (necessary correction):** plan said declare partial-unique `tenant_number_idx` on `@CompoundIndex` (greenfield ⇒ no initializer). Spring Data `@CompoundIndex` CANNOT express `partialFilterExpression` (literal E.11 root cause; confirmed by `InvoiceNumberIndexInitializer` Javadoc). Applied the proven `InvoiceNumberIndexInitializer` pattern via new `scheduling/ContractNumberIndexInitializer` (key-only `@CompoundIndex` + initializer owns partial-unique). F-D10 premise infeasible; only working approach. Validator: confirm the initializer faithfully mirrors `InvoiceNumberIndexInitializer`. |
+| F.4 ContractPdfService + ContractTemplateService + ContractService (explicit-boolean SOW-from-quote) | done | 8951f7b | compileJava + compileTestJava → BUILD SUCCESSFUL exit 0 — **orchestrator-reverified independently** (true GRADLE_EXIT=0, 16s) + F.4 commit diff = exactly the 3 service files (592 ins, nothing else); F-D6 spawnFromQuote explicit-boolean probe confirmed by code read. Full suite → CI at PR per §6 | switchIfEmpty grep over service/contract/ **independently re-run by orchestrator**: 3 functional hits — ContractTemplateService:48 genuine 3705; ContractService:101 genuine 3707; ContractService:241 genuine 3705 active-template. NO switchIfEmpty(create/spawn). Comments/Javadoc otherwise. PASS. | **Minor (orchestrator-recorded; implementer under-reported as "none"): PDF-generation failure uses errorCode `3799`** — plan F-D11 did not allocate a PDF-failure code (plan F.4 only said "→ HTTP 500"); `3799` is an in-range last-bucket overflow choice in the reserved 3700-3799 block, traceable, DigiPresBeException re-thrown so the 3702 mustache error is not masked. Defensible for a plan-unspecified detail — **Opus validator: confirm 3799 acceptable or assign a dedicated code.** Also: `spawnFromQuote` uses `QuoteService.findById` (no `QuoteRepository.findByTenantIdAndId` exists) — tenant-scoped via TenantScopedSimpleReactiveMongoRepository; per-plan ("use existing QuoteService"), not a deviation. F-D10 (F.3) unchanged. |
+| F.5 DocumensoClient send + ContractNumberGenerator + /send + controllers | done | 3223ef1 | compileJava + compileTestJava → BUILD SUCCESSFUL exit 0 (24s) | **switchIfEmpty grep (service/contract/ + integration/documenso/):** 5 functional hits — (1) ContractTemplateService:48 genuine 3705 template-not-found; (2) ContractNumberGenerator:76 defensive counter-empty 3708 (not a create/spawn); (3) ContractService:109 genuine 3707 contract-not-found; (4) ContractService:249 genuine 3705 active-template-not-found; (5) DocumensoClient:181 genuine 2510 Documenso-not-connected. NO switchIfEmpty(create/spawn/send). PASS. **no-live-Documenso:** grep shows 2 hits, both `https://documenso.internal.invalid` (non-routable .invalid TLD placeholder in DocumensoProperties default + DocumensoClient Javadoc). No real Documenso host hardcoded, no live token anywhere. PASS. | **ContractService.send() template loading pattern:** loads template body/title via two separate `findByTenantIdAndId` calls (query by id, then `.map(t->t.getBodyTemplate())` / `.map(t->t.getDefaultTitle())`). Not a second findByIdAndActiveTrue — intentional: a DRAFT contract may have been created with a now-inactive template; rendering for send should still work. Both calls `defaultIfEmpty("")` so a null template id produces an empty-string body (graceful). No deviation from plan semantics. **Recipient email/name:** `POST /{id}/send` accepts an optional `SendRequest` record body with `recipientEmail`/`recipientName`; both may be null (Documenso uses its own defaults for the document). The plan did not specify the send-request shape but the design decision F-D5 says the `sendForSignature` signature is `(Contract, byte[] renderedPdf, String recipientEmail, String recipientName)`; the controller wires them via the optional request body. **renderPdfBytes()** added to ContractService to support `GET /{id}/pdf`; renders fresh from template each time (the controller does not fetch a stored ref — simpler and correct for the PDF endpoint which the plan says should "render and return the current PDF bytes"). **Orchestrator-flagged for Opus validator (cross-file consistency):** `DocumensoClient:181` uses errorCode `2510` for "Documenso not connected" (the established cross-integration not-connected code — StripeWebhookService precedent), but plan F-D7 specifies `3712,404` for the *webhook's* same "Documenso not connected" condition (F.6). Intra-Phase-F: send-path=2510 vs webhook=3712. Defensible (2510 = existing convention) but inconsistent — **validator: reconcile (standardize on 3712, or accept 2510 as the cross-integration convention and confirm F.6 webhook uses 3712 per plan).** |
+| F.6 DocumensoSignatureVerifier + Adapter + DocumensoWebhookService + controller (HMAC headline) | done | 918b005 | compileJava+compileTestJava → BUILD SUCCESSFUL exit 0 (22s) | **switchIfEmpty grep (service/contract/ + integration/documenso/):** 7 functional hits — (1) DocumensoWebhookService:136 genuine 3712 Documenso-not-connected; (2) DocumensoWebhookService:273 genuine 3716 contract-not-found-by-documensoDocumentId; (3) ContractTemplateService:48 genuine 3705 template-not-found; (4) ContractNumberGenerator:76 defensive 3708 counter-empty; (5) ContractService:109 genuine 3707 contract-not-found; (6) ContractService:249 genuine 3705 active-template-not-found; (7) DocumensoClient:181 genuine 2510 Documenso-not-connected. NO switchIfEmpty(process/promote/create). PASS. **ledger-insert-FIRST:** `documensoEvents.save(ledger).onErrorResume(DuplicateKeyException.class, e -> Mono.empty()).flatMap(savedLedger -> ...)` — save before dispatch (verified). **tenant from path:** connections.findByTenantIdAndProvider(tenantId, PROVIDER) where tenantId is parsed from the URL path in the controller; payload never read for tenant. PASS. **promotion reuses existing moveStage+convertFromDeal; git diff --stat origin/main for DealCrudService/ProjectService/integration/stripe/ = EMPTY.** PASS. **HMAC failure → 3710,401 verified:** `!DocumensoSignatureVerifier.verify(...) → DigiPresBeException(..., 3710, 401)`. PASS. **payload assumption confined:** DocumensoEventAdapter.parse is the only place payload fields are accessed; DocumensoSignatureVerifier is the only place digest scheme lives; controller @RequestHeader is the only place header name lives. PASS. **ORCHESTRATOR-REVERIFIED (trust-but-verify, headline path): independently re-ran compile (true GRADLE_EXIT=0, 16s) + switchIfEmpty grep + the EMPTY-DIFF invariant (`git diff origin/main..HEAD -- DealCrudService/ProjectService/integration/stripe` = EMPTY, confirmed) + read the full DocumensoWebhookService/Verifier/Adapter/Controller diff: HMAC→3710,401; explicit-boolean event-id probe; ledger-insert-FIRST (save→onErrorResume(DupKey→empty)→flatMap dispatch); tenant from path; synthetic TenantContext(INTEGRATION_DOCUMENSO); DOCUMENT_SIGNED order load-bearing (download→putBytes(3717)→signedAt/SIGNED save→CONTRACT_SIGNED→F-D9); F-D9 explicit-boolean gate (SOW&&dealId&&!promotedDealToWon)→existing moveStage+convertFromDeal, doubly idempotent; constant-time MessageDigest.isEqual HMAC-SHA256 hex. All correct.** | **Minor (orchestrator note for Opus validator — NOT a defect):** the `if (savedLedger == null) return Mono.empty()` guard in `processAndRecord` is defensive dead code — `onErrorResume(DuplicateKeyException → Mono.empty())` makes the chain complete empty so the downstream `.flatMap(savedLedger -> ...)` never fires with null. Harmless belt-and-suspenders; the concurrent-duplicate→200-no-op correctness comes from the empty completion regardless. Validator: confirm acceptable (recommend keeping — it documents intent). |
+| F.7 BE ITs AC-F1/F2/F3 (Documenso WireMock, signed→S3, exactly-once promo, 3710) | done | c863bed…+fix | Full contract package BUILD SUCCESSFUL: ContractTemplateLifecycleIT 8/0/0, ContractLifecycleIT 8/0/0, QuoteAcceptedSpawnsSowIT 6/0/0, DocumensoSendWireMockIT 3/0/0, DocumensoWebhookSignedIT 5/0/0, ContractAuditIT 2/0/0 (total 32/0/0 new; plus pre-existing ContractEntityIndexIT 9/0/0 = 41 total). All AC-F1/F2/F3 covered; no main regression. **ORCHESTRATOR-REVERIFIED (trust-but-verify): `git diff src/main/` for the F.7 range = EMPTY (production byte-untouched); read DocumensoWebhookSignedIT in full (genuinely asserts AC-F1 signedAt+`tenants/<id>/` ref+SIGNED; AC-F2 Deal WON+exactly-one-Project+sequential-re-delivery exactly-once+CONTRACT_SIGNED+one ledger row; AC-F3 invalid/missing sig→401 `$.errorCode==3710`+zero-side-effects, unknown-tenant→3711; local HMAC signer mirrors DocumensoSignatureVerifier); FORCED clean re-execution `cleanTest test --tests com.kumouri.kmodigipresbe.contract.* --rerun-tasks` → BUILD SUCCESSFUL 1m49s, 6 tasks EXECUTED (not cached), fresh XMLs 41/0/0/0. Authoritatively green.** Full-suite no-regression → CI at PR per §6. | **IndexKeySpecsConflict (86) fix (test-only):** `@MockBean FileStorageService` in DocumensoSendWireMockIT + DocumensoWebhookSignedIT creates distinct Spring ApplicationContexts sharing the Testcontainers Mongo. Second-context Spring Data applied the `@CompoundIndex tenant_number_idx` (non-partial) which conflicted with the ContractNumberIndexInitializer partial-unique. Fix: `spring.data.mongodb.auto-index-creation=false` added to `@TestPropertySource` for both `@MockBean` contexts — test-only, zero production change, zero deviation from F.1–F.6 production code. **User implements Auditable:** saving the seed User in ContractAuditIT's @BeforeEach produced a spurious audit event; fix was moving `AuditEvent.class` cleanup to after User save (test-only, zero production change). **ORCHESTRATOR ANALYSIS for Opus validator:** the `auto-index-creation=false` workaround is the SAME class of shared-Testcontainers-Mongo cross-context fragility that bit Phase E (PR #58 — recurring friction). Production-safe: production keeps auto-index-creation ON and F.3's `ContractEntityIndexIT` independently proves both `contracts.tenant_number_idx` (partial-unique, via `ContractNumberIndexInitializer`) and `documenso_webhook_events.tenant_event_idx` (unique) auto-create. It does NOT weaken AC-F2: `DocumensoWebhookSignedIT`'s re-delivery test is **sequential**, so exactly-once is proven by the explicit-boolean ledger probe (index-independent); the unique index is the *concurrent* DuplicateKeyException backstop (a sequential test never exercises it) — production correctness unaffected. **Validator: confirm acceptable; consider a future hardening so the `@CompoundIndex` vs `ContractNumberIndexInitializer` ownership of `tenant_number_idx` cannot conflict across cached contexts (the E.11/E.13/#58 lesson).** |
+| F.8 CLAUDE.md in-PR + .claude/* local + docs/api/openapi.json committed | done | 0c9ec5c | **ORCHESTRATOR-VERIFIED:** F.8-range `git diff src/` = EMPTY (no code/test touched); `git diff .claude/ docs/design/` = EMPTY (gitignored + untracked arch doc correctly NOT committed); `docs/api/openapi.json` grep-confirmed carries `/contracts*`,`/contract-templates*`,`/contracts/quotes/{quoteId}/spawn-contract`,`/public/integrations/documenso/{tenantId}/webhook`; CLAUDE.md +23 Phase-F SHIPPED section. Spec genuinely regenerated (single-line JSON). | spec regenerated (173 paths/129 schemas → +9 paths/+3 schemas vs Phase-E; Contract=yes ContractTemplate=yes spawn-contract=yes /public/integrations/documenso=yes /contracts/{id}/send=yes); CLAUDE.md Phase-F SHIPPED section added; .claude/* local only | compileJava+compileTestJava exit 0; OpenApiEndpointIT BUILD SUCCESSFUL 1m23s; verifyOpenApi BUILD SUCCESSFUL; F-D10 ContractNumberIndexInitializer partial-unique pattern; 3799 PDF-fail; send=2510 vs webhook=3712 not-connected; auto-index-creation=false test-only workaround. **Orchestrator note for validator (cosmetic):** spawn-contract endpoint is exposed at `/contracts/quotes/{quoteId}/spawn-contract` (nested under the `ContractController` `@RequestMapping("/contracts")` base) vs the plan F-D12's loose wording `POST /quotes/{quoteId}/spawn-contract`. Functionally correct + contract-owned (Phase-C `from-deal` precedent); F.7 `QuoteAcceptedSpawnsSowIT` exercised the real path and is green. Not a defect — note for spec/FE-consumer awareness. |
+| F.10 test-isolation de-splinter + F-D10 entity-annotation removal | done | c3f4bc0 (ledger in-progress) / 164ba91 (code) | compileJava+compileTestJava → BUILD SUCCESSFUL exit 0 (27s); cleanTest test --tests "com.kumouri.kmodigipresbe.contract.*" --rerun-tasks → BUILD SUCCESSFUL 1m50s, 6 tasks EXECUTED (not cached): ContractEntityIndexIT 9/0/0/0; ContractTemplateLifecycleIT 8/0/0/0; ContractLifecycleIT 8/0/0/0; QuoteAcceptedSpawnsSowIT 6/0/0/0; DocumensoSendWireMockIT 3/0/0/0; DocumensoWebhookSignedIT 5/0/0/0; ContractAuditIT 2/0/0/0 — total 41/0/0/0 (same coverage as F.7; all green without @MockBean). Self-check greps: @MockBean/@MockitoBean in contract/ = 0 (only Javadoc); tenant_number_idx in Contract.java = only-in-NOTE; auto-index-creation in contract/ = 0. | FIX 1: @MockBean removed from DocumensoSendWireMockIT + DocumensoWebhookSignedIT; ContractItStorageTestConfig created (putBytes stub mirrors exact thenAnswer ref-shape: "tenants/"+tenantId+"/"+partition+"/"+UUID+"."+suffix); 5 non-storage ITs already had the correct plain shape (no @MockBean, no extra keys) — verified; auto-index-creation=false removed from both WireMock ITs. FIX 2: Contract.java tenant_number_idx @CompoundIndex removed (kept tenant_status_idx + tenant_deal_idx); NOTE added mirroring Invoice.java exactly; ContractNumberIndexInitializer untouched (diff empty). Contract production logic changed = NO. This is the user-chosen #58-proven test-isolation remediation; Opus PASS remains valid. | none |
+| F.11 close S3AsyncClient/S3Presigner on bean destroy | done (correct fix, but INSUFFICIENT for CI) | 9f0e867 | (pending push) | compileJava+compileTestJava → BUILD SUCCESSFUL exit 0 (21s). Authoritative proof = CI re-run on the new head (the leak only manifests at full-suite scale). | **TRUE ROOT CAUSE of the CI MongoTimeout cascade (found after F.10 was proven insufficient — identical 42-fail/all-MongoTimeout/same-onset on run 25994862769):** F.2's `S3FileStorageService` builds an `S3AsyncClient` (AWS SDK v2 — owns a Netty event-loop group + connection pool, `SdkAutoCloseable`) but the class had **NO `close()`/`DisposableBean`** → every cached `@SpringBootTest` context's `FileStorageService` bean leaked Netty threads/FDs/direct-memory **unbounded** across the suite → ~6–7 min into the IT phase the CI runner exhausted, starving the co-located Testcontainers Mongo → uniform `MongoTimeoutException` cascade to the 30-min cap. Phase-F-specific (Phase E/#57/#58/#59 CI was green hours ago — no S3AsyncClient then); F.10-independent (leak is in EVERY context's real bean, not the 2 @MockBean ones — why de-splinter didn't help); a poisoning pattern, not duration. The §6 CI-at-scale gate correctly surfaced a real production resource leak that F.2 impl + orchestrator F.2 verify + the Opus validator all missed (process lesson → friction log). | **Fix:** `S3FileStorageService implements Closeable`; `close()` releases `asyncClient`+`presigner` (both `SdkAutoCloseable`, idempotent/null-safe). `FileStorageConfig` `@Bean` uses default destroy-inference (no `destroyMethod=""`) so Spring auto-invokes `close()` on every context close/evict → unbounded leak → bounded (≤ context-cache-size live, closed on eviction). Prod-correct too (an app must close its S3 client). **Zero storage-semantics/contract-logic change → Opus PASS remains valid.** Orchestrator-direct (≤8 lines, fully root-caused, precedented by the team's TestcontainersConfiguration close-discipline; the F.3-recovery orchestrator-direct precedent). |
+| F.12 CI matrix-shard (durable fix for the shared-Mongo scaling ceiling) | done | d3760e2 (ledger in-progress) / 130ec16 (ci.yml + build.gradle) | user-chosen escalation; zero test/production code change; authoritative proof = the sharded CI run on #60 | ci.yml: single build job → matrix[1..4] + openapi job + ci-gate; build.gradle: shard exclude filter in test{} only (maxParallelForks/heap/useJUnitPlatform unchanged); YAML validated (python yaml.safe_load); gradle config BUILD SUCCESSFUL with -Dtest.shard.total/index; compileTestJava UP-TO-DATE; git diff --stat = 2 files only (ci.yml+build.gradle) | none |
+| F.9 final BE green + PR | BLOCKED (CI) | (PR #60) | PR #60 opened. **Opus validation = PASS/full sign-off (contract code correct).** **CI BLOCKED — but NOT a Phase-F contract defect.** Run 25992837496 (head 06b2d6a) `cancelled` at the ci.yml `timeout-minutes: 30` cap (30m18s). Root-caused from the CI log: a sustained ~22-min cascade (14:05→14:27) of **pre-existing unrelated ITs** (RetentionPurgeIT, MentionFanOutIT, ReportRunnerIT, SequenceEngineIT, HealthScoreIT, KB/SLA/Sync/TenantIsolation/FieldPermission/ExpenseApproval…) all `Caused by: com.mongodb.MongoTimeoutException`. **Contract ITs are NOT in the failure list; ZERO IndexKeySpecsConflict in the log.** ⇒ the shared singleton Testcontainers Mongo became unreachable/saturated across cached @SpringBootTest contexts (the recurring #58-class shared-Mongo CI fragility) — Phase F's added context volume (2 `@MockBean` + WireMock ITs forcing new contexts) is the likely straw that pushed the full suite past both the Mongo's sustainable load and the 30-min budget. Remediation decision pending (test-isolation hardening and/or ci.yml timeout — careful CI-infra change — surfaced to user). | **Separate Opus 4.7 validation: PASS / full sign-off, ZERO blocking** (read the real diff; contract code correct). CI block is infra/test-isolation, not a contract regression. | Opus accepted all 6 deviations; 2 non-blocking recs. **NEW (orchestrator, CI root-cause):** the `Contract.tenant_number_idx` `@CompoundIndex` (F.3/F-D10 key-only) is a latent **E.11-deviation** — `Invoice.java` deliberately OMITS the entity annotation (initializer-only); `Contract.java` keeps a key-only one. NOT the cascade cause (0 IndexKeySpecsConflict in CI) but should be fixed to fully mirror E.11 (remove the entity annotation) as part of remediation. |
 
-## Quartz-store resolution decision (SETTLED at E.2 — before E.4, as required)
-- [ ] `io.fluidsonic.mirror:quartz-mongodb:2.2.0-rc2` resolved + context boots with Mongo store → Mongo store active
-- [x] **E-D5 RAM-FALLBACK ACTIVE.** The coordinate **does resolve** from Maven Central and the
-      Mongo store **does load** (`com.novemberain.quartz.mongodb.MongoDBJobStore` +
-      `CheckinExecutor` start), but it was compiled against Quartz 2.3.2 and Spring Boot
-      3.5.6 manages **Quartz 2.5.0**, which removed `JobDetail.isConcurrentExectionDisallowed()`.
-      Every trigger fire throws `java.lang.NoSuchMethodError` at
-      `com.novemberain.quartz.mongodb.LockManager.lockJob(LockManager.java:31)` →
-      **no Quartz job ever executes under the Mongo store**. This is the plan §9 item 1 /
-      E-D5 documented STOP-and-fallback condition (the plan pre-authorizes the fallback and
-      explicitly does not block on the dependency). Pinning Quartz to 2.3.2 would fight the
-      Boot BOM and risk the 8 shipped @Scheduled/Quartz services (R3); the fluidsonic mirror
-      has no Quartz-2.5-compatible release.
-      - **Fallback:** `kmosf.quartz.store=memory` (default). Dependency intentionally NOT
-        added to build.gradle (non-functional dead weight; would also drag
-        mongodb-driver-sync:4.0.5 onto the classpath). `QuartzConfig` mongo branch + the
-        flag stay wired and ready for the day a Quartz-2.5-compatible quartz-mongodb appears.
-      - **Money-correctness preserved:** durability of "which periods were spawned" lives in
-        the `RecurringInvoiceOccurrence` unique-indexed Mongo ledger + `RecurringInvoice.nextRunAt`
-        cursor (E-D2/E-D3). A stateless RAM-store trigger re-running `runDueOnce()` hourly
-        reconciles from that ledger every tick (bounded catch-up) — the
-        ServiceAgreementSchedulerService model. **`RecurringInvoiceSpawnRestartIT` (E.6) is
-        the durability proof.** `QuartzMongoJobStoreIT` (2/0/0) documents the fallback + that
-        the proof job still fires under the RAM store.
-      - Decision recorded in: `build.gradle`, `application.properties`, this file,
-        `kmo-digipres-be/CLAUDE.md` (E.7), and the plan §10 stub (E.8).
+## RECOVERY LOG (ultraplan §6 Resilience — crash-recovery source of truth)
+- **2026-05-17 — CI BLOCK escalation (F.10+F.11 insufficient; root cause = scaling ceiling, not Phase-F code).** PR #60 CI failed identically THREE times (`06b2d6a` pre-fix, `08f6330` F.10 de-splinter, `9f0e867` F.11 S3-close): **42 FAILED, 100% `MongoTimeoutException`, same pre-existing ITs (RetentionPurgeIT→…→ExpenseApprovalIT), same ~6-7-min onset, cancelled at the ci.yml `timeout-minutes:30` cap** — byte-identical, fully INVARIANT to the two Phase-F fixes. Contract ITs are NOT in the failures (Opus PASS; contract pkg green locally 41/0/0). Proven Phase-F-branch-specific (main/fix-PRs ran green in ~7-10 min as recently as 10:46 today; every Phase-F run 30-min-cancelled) yet NOT a contract-code defect (invariant to F.10/F.11). Conclusion: the **shared-singleton-Testcontainers-Mongo + monolithic single 30-min `./gradlew build` job is at its scaling ceiling**; Phase F's added vertical (new entities/indexes/`ContractNumberIndexInitializer`/beans booted across ~100+ `@SpringBootTest` contexts vs ONE Mongo) is the aggregate straw (Phase E #55 already needed a rerun + ~22 min). Test-isolation hardening (the user-chosen first remedy) is DEFINITIVELY insufficient → the pre-authorized contingency (CI restructure: shard/parallelize + sane timeout) is now triggered; surfaced to the user for the careful CI-infra decision. F.1–F.8 code correct + Opus-signed; F.10 (de-splinter, valid hardening) + F.11 (real S3AsyncClient close, prod-correct) retained — both improve isolation/prod-hygiene though neither alone unblocks CI.
 
-## ESCALATED BLOCKER — ✓ RESOLVED (user-authorized §7 override, E.9–E.11)
+- **2026-05-17 — Chunk-1 implementer crash, orchestrator-direct recovery.** The Sonnet Chunk-1 (F.1–F.3) agent returned a **non-contract report** ("Good. All F.3 files are untracked and ready to stage. Waiting for the test results.") after ~40 min / 116 tool calls — a suspected crash per the §6 no-report⇒assume-crash rule. The orchestrator did NOT trust the summary; reconstructed state from `git log` + this ledger:
+  - F.1 (`9b5c937`) + F.2 (`b5c9abe`) committed + pushed + ledger-closed by the agent (forward-only discipline held — all 5 pre-crash commits pushed, `origin` in sync).
+  - F.3 was uncommitted WIP (entities/repos/initializer/IT untracked) + the unplanned `ContractNumberIndexInitializer` — classified **build-on** after a full conformance review vs F-D2/F-D3 + the proven `InvoiceNumberIndexInitializer` (the deviation is the necessary F-D10 correction above).
+  - Re-validated independently: `compileJava+compileTestJava` exit 0 (F.1+F.2 committed + F.3 WIP); cleared a transient Windows build-lock (orphaned gradle JVMs from the crashed agent's in-flight test run, surgically killed by PID — VS Code LSP + unrelated JVMs untouched); `ContractEntityIndexIT` 9/9 green on a clean process space.
+  - Orchestrator-direct finalization (small/high-judgment remainder per the runbook): committed F.3 (`179bcf1`) + this ledger close. Friction logged per §6 Learn.
+  - **Authoritative re-validation outcome:** the crashed agent's self-reported "F.1/F.2 full-suite 428/0/0/0" is NOT trusted. Orchestrator verified: `compileJava`+`compileTestJava` clean (F.1+F.2+F.3); `ContractEntityIndexIT` `@SpringBootTest` 9/9 green ⇒ the full Spring context boots with F.1's props + F.2's `DocumensoConfig`/`S3FileStorageService` + the 3 new entities/indexes (no context/bean regression); F.1/F.2 are additive-only (Javadoc + event constants + 1 property + an additive interface method). A full local `./gradlew test` was attempted as the Chunk-1 close gate but **timed out at the 25-min `timeout` wrapper (exit 124) — a known local-env limitation (Testcontainers + this machine), 0 failures/0 errors in the partial run, NOT a test failure**. Per the §6 model, **full-suite no-regression is authoritatively re-proven by CI at PR time** (clean runners, no local file-lock/timeout pathology). Frontier deemed adequately re-validated to proceed; CI at F.9 is the scale gate. Chunk size shrunk to 1 sub-phase/turn going forward (the crash lesson).
 
-> **STATUS: RESOLVED.** The user authorized the combined correct fix (overriding
-> plan §7's numbering non-goal as an explicit, recorded scope change — see
-> `kmo-digipres-be/CLAUDE.md` the ✓ RESOLVED bullet). Implemented in E.9
-> (`InvoiceNumberGenerator`, finalize-time `INV-{YYYY}-{NNNN}`), E.10 (assigned at
-> the DRAFT→issued edge in `InvoiceService`, explicit-boolean idempotent), E.11
-> (`tenant_number_idx` migrated to **partial-unique** via the idempotent
-> `InvoiceNumberIndexInitializer`; `@CompoundIndex` removed from `Invoice.java`).
-> Many null-numbered DRAFTs per tenant are now legal ⇒ recurring multi-period
-> one-tick catch-up works; the 2 AC-E3 specs are re-enabled and GREEN (E.12). The
-> money invariants (ledger-insert-FIRST + compensating delete: zero double-bill /
-> orphan / loss-after-success / merged lump) still hold. The original analysis is
-> retained verbatim below for the audit trail.
+## Documenso-payload-format ASSUMPTION (the ultraplan's called-out known unknown — F-D7)
+- Signature header (assumed): `X-Documenso-Signature` — referenced ONLY in DocumensoWebhookController + DocumensoSignatureVerifier.
+- Digest scheme (assumed): HMAC-SHA256 over the raw request body, hex, constant-time vs the header — DocumensoSignatureVerifier is the ONLY place it lives.
+- Payload shape (assumed): {id|eventId, event|type ∈ {document.completed,document.signed}, payload:{documentId, downloadUrl?}} — DocumensoEventAdapter.parse is the ONLY place it is assumed; missing downloadUrl falls back to DocumensoClient.downloadSignedPdf(documentId).
+- Correcting against a real Documenso deployment = a one-method change in each of those (≤3 files). The WireMock stub in DocumensoWebhookSignedIT/DocumensoSendWireMockIT is the single contract coded-to.
 
-**Plan §7 ("recurring-spawned invoices leave invoiceNumber null exactly as
-create/milestone/time paths do") is factually incompatible with the pre-existing
-non-sparse unique index on `Invoice`:**
+## No-live-Documenso boundary (§7) — recorded
+- [ ] Every Documenso interaction WireMock/sandbox; base URL configurable (IntegrationConnection.config[apiBaseUrl] → DocumensoProperties), pointed at WireMock in all tests; no host hardcoded; apiToken a sandbox fake; webhook secret a test secret. Live deployment = a separate human action, never the loop.
 
-`@CompoundIndex(name="tenant_number_idx", def="{'tenantId':1,'invoiceNumber':1}", unique=true)`
-— verified in a running Mongo: `{key:{tenantId:1,invoiceNumber:1}, unique:true}`,
-**NO sparse, NO partialFilterExpression**. Inserting two `invoiceNumber==null`
-invoices for the same tenant → `E11000 duplicate key`. **A tenant can hold at most
-ONE null-invoiceNumber invoice, ever.** Every single-invoice path
-(milestone/time/expense/Square) gets away with one null per test; recurring
-billing is the first design that needs N null-numbered invoices per tenant, so the
-2nd+ recurring period's `invoiceService.create` E11000s on every tick — full
-single-tick catch-up (AC-E3) and the AC-E2 "spawn a 2nd period" cannot work as
-written.
+## Validator (Opus 4.7, separate agent) sign-off — HMAC/legal-signature focus
+**VERDICT: PASS / FULL SIGN-OFF — ZERO blocking findings** (independent Opus 4.7 agent, read the real `origin/main..HEAD` diff, 2026-05-17; did not trust implementer reports/ledger). Sign-off: *"Phase F PR #60 is correct and meets §10/§4/§7/§9 — the HMAC/legal-signature path is constant-time-verified with the stable 3710 contract, ledger-insert-first and explicit-boolean idempotent, tenant-from-path, integrity-preserving (no re-render), and exactly-once via the unmodified existing promotion path; recommend merge once CI green."*
+- [x] switchIfEmpty grep over service/contract/+integration/documenso/ (7 functional hits, all genuine 3705/3707/3712/3716/3708-counter-empty; ZERO create/spawn/process/promote/send) — independently re-run
+- [x] DocumensoWebhookService mirrors StripeWebhookService (constant-time `MessageDigest.isEqual` HMAC-SHA256 raw body `SignatureVerifier:83-99`; explicit-boolean event-id probe `WebhookService:180-192`; ledger-insert-FIRST `:221-240`; duplicate=200-no-op `:184-190`; signature-fail=stable 3710/401 `:149-152`)
+- [x] tenant resolved from path→IntegrationConnection, never payload (`Controller:62-68`, `Service:135,242-244`)
+- [x] signed PDF stored via putBytes exactly-as-served (`S3FileStorageService:131-133` raw `AsyncRequestBody.fromBytes`), not re-rendered, renderedPdfStorageRef≠signedPdfStorageRef, order load-bearing (store→save→promote)
+- [x] SOW→WON+Project = reuse of moveStage+convertFromDeal (`promote() :356-368`); DealCrudService/ProjectService/stripe EMPTY diff vs main; exactly-once via !promotedDealToWon + existsByTenantIdAndDealId
+- [x] Documenso-payload assumption contained to Adapter+Verifier+controller-header & called out (CLAUDE.md/PR) — DocumensoClient parses only its own send-response, never the webhook payload
+- [x] no live Documenso (no host hardcoded, no live token in any fixture, WireMock only)
+- [x] Contract/ContractTemplate Auditable, DocumensoWebhookEvent NOT Auditable; partial-unique tenant_number_idx correct (F-D10 a faithful InvoiceNumberIndexInitializer mirror)
+- AC-F1/F2/F3 all proven non-vacuously (`DocumensoWebhookSignedIT` + `QuoteAcceptedSpawnsSowIT` + `DocumensoSendWireMockIT`); deviations F-D10/3799/2510-vs-3712/auto-index-creation=false/savedLedger-guard/spawn-contract-path all ACCEPTED with reasoning.
 
-The plan §7 ALSO forbids both a numbering change and an `Invoice`
-index/migration, so the implementer cannot resolve this without an out-of-scope
-decision (per the briefing: never improvise around §7 non-goals; STOP + escalate).
-
-**Money-correctness is NOT compromised by what shipped** — the
-`RecurringInvoiceOccurrence` ledger-insert-FIRST + a new compensating delete in
-`doSpawn` (a post-insert `invoiceService.create` failure deletes the just-inserted
-ledger row) guarantee: ZERO double-bill, ZERO orphan/partial ledger rows, ZERO
-merged-lump invoice, the spawned period billed exactly once. The gap is purely
-"the 2nd+ recurring period for a tenant is never billed until the index is
-resolved" (blocked, not corrupted, not lost-after-success, not double-charged).
-
-**Resolution options (for the validator/user — all currently out of the
-implementer's §7 scope):**
-1. Make `tenant_number_idx` a **partial** unique index
-   (`partialFilterExpression: {invoiceNumber: {$type:"string"}}`) — uniqueness still
-   enforced for real numbers; nulls no longer collide. Smallest change; arguably a
-   pre-existing-defect fix; but it IS an index/migration change (§7 non-goal).
-2. Assign recurring-spawned invoices an opaque non-sequential unique discriminator
-   (e.g. `REC-{recurringInvoiceId}-{periodKey}`) into `invoiceNumber` — a "numbering"
-   change (§7 non-goal) but localized to the recurring path.
-3. Re-scope AC-E2/AC-E3 to "one recurring invoice per tenant per cadence" pending a
-   future numbering phase.
-
-Resolution shipped (option 1 + finalize-time numbering, user-authorized): AC-E1…E8
-green; AC-E2 multi-period + AC-E3 full one-tick catch-up specs RE-ENABLED and green
-in `RecurringInvoiceSpawnRestartIT` (the obsolete `currentBehavior_*` blocker
-doc-test was removed); `InvoiceNumberGeneratorIT` proves the numbering + partial
-index.
-
-## Catch-up nondeterminism root-cause — RESOLVED (E.13)
-
-`RecurringInvoiceSpawnRestartIT.manyMissedPeriods` intermittently flipped
-green→red across identical full-suite runs (`was 5`; after the first fix round a
-residual `occurrenceCount was 4, expected 5`). **Conclusively diagnosed as a
-TEST-isolation artifact, NOT a `RecurringInvoiceSpawnService` over-spawn /
-double-bill / lost-period bug.** Evidence:
-
-- The unmodified spec is **deterministically GREEN across ≥5 ISOLATED runs**
-  (`--tests '*RecurringInvoiceSpawnRestartIT' --rerun-tasks`). Per-tick spawn is
-  hard-bounded at `due.stream().sorted().limit(maxCatchup)`; the ledger insert is
-  unique-indexed (`tenant_recurring_period_idx`) + ledger-FIRST.
-- Every failing full-suite run's ledger dump showed THIS template's
-  `RecurringInvoiceOccurrence` rows carrying **distinct** periodKeys mapped 1:1 to
-  invoices — **ZERO double-bill, ZERO merged lump, ZERO loss in every run**. The
-  only variance was the *count* of distinct periods caught up, and one transient
-  row carried a real-wall-clock `spawnedAt` (not this test's fixed clock) —
-  proving a **foreign cross-tenant `runDueOnce()` tick from a cached sibling
-  Spring context** (the shared singleton Testcontainers Mongo;
-  `findAllDueAcrossTenants` is intentionally cross-tenant) advanced THIS
-  template's catch-up by another *legitimate, distinct* period. Not a money error
-  (the unique index forbids re-billing a period).
-- The `occurrenceCount` variant: `RecurringInvoice` is `@Version`-locked and
-  `advanceParent` does a reactive read-modify-write of the *denormalized*
-  `occurrenceCount`; its exact value under interleaved completion is not a
-  guaranteed invariant (no invoice lost — the ledger is exact).
-
-**Money contract intact and proven** (AC-E3 / E-D3: one DRAFT invoice per period,
-no double-bill, no merged lump, no loss, bounded per tick). **Fixes are money-safe,
-ZERO production-code change:** (a) `RecurringInvoiceSpawnRestartIT` now asserts the
-unconditional money invariant on the unique-indexed ledger (every *completed*
-spawn bills its period exactly once: distinct periodKeys ↔ distinct invoice ids ↔
-existing DRAFT $100 invoices) + progress + idempotency + monotonicity — robust to
-a foreign cross-tenant tick; the strict per-tick `≤ max-catchup` bound is covered
-by the ≥5 green ISOLATED runs + `RecurringInvoiceSpawnIdempotencyIT` /
-`InvoiceNumberGeneratorIT`; (b) a fixed `@Primary Clock` (the documented
-`RecurringInvoiceSpawnService` affordance) kills intra-service two-clock-read
-drift; (c) `kmosf.recurring-invoice.spawn-job.enabled=false` in the shared
-`src/test/resources/application.yml` (the `sla-breach-scheduler` precedent; prod
-default unchanged). Two out-of-scope follow-ups were flagged: the
-`occurrenceCount` denormalized-counter RMW race (now **RESOLVED** — see
-"occurrenceCount atomicity follow-up" below), and deeper test-isolation hardening
-for cross-tenant Quartz ticks on the shared Mongo (still open).
-
-**`ServiceAgreementSchedulerIT`** (a PRE-EXISTING Phase-D/home-services
-date-flake, **zero Phase-E linkage** — `git diff origin/main..HEAD -- .../module/`
-is empty) was fixed the in-repo way: a fixed `@Primary Clock` (mirroring
-`ServiceAgreementSchedulerInvalidRruleTest`) + fixed-clock-relative seeds; original
-`FREQ=WEEKLY;COUNT=4` intent and exact assertions preserved. NOT a Phase-E
-behavior change.
-
-## occurrenceCount atomicity follow-up — RESOLVED (`fix/recurring-occurrence-count-atomic`)
-
-> Branch: `fix/recurring-occurrence-count-atomic` (one PR, stacked on the Phase-E
-> branch — Phase E is not yet merged to `main`). Closes the `occurrenceCount`
-> out-of-scope follow-up flagged in the E.13 root-cause section above.
-
-**Root cause.** `RecurringInvoiceSpawnService.advanceParent` did a non-atomic
-reactive read-modify-write of the `@Version`-locked *denormalized*
-`RecurringInvoice.occurrenceCount` (`findByTenantIdAndId` → `setOccurrenceCount(+1)`
-+ cursor sets → `save`), and `publishSpawned` did a *second* independent
-`findByTenantIdAndId` re-read for the `RECURRING_INVOICE_SPAWNED` payload. Two race
-windows ⇒ the operator-visible counter drifted off-by-one under a concurrent spawn
-(a foreign cross-tenant tick on the shared Testcontainers Mongo in tests; in
-production `POST /recurring-invoices/{id}/spawn-now` racing the scheduled tick — the
-job's `@DisallowConcurrentExecution` does not cover `spawn-now`). The authoritative
-unique-indexed `RecurringInvoiceOccurrence` ledger was always exactly correct — only
-the denormalized counter drifted (never money: zero double-bill, zero loss).
-
-**Fix (production: `RecurringInvoiceSpawnService` only).**
-- `advanceParent` is now ONE atomic `ReactiveMongoTemplate.findAndModify` —
-  `$inc occurrenceCount` + `$inc version` + `$set lastRunAt / lastSpawnedInvoiceId
-  / updatedAt` + `$set nextRunAt` (or `nextRunAt=null` + `status=ENDED`),
-  tenant-scoped query, `returnNew(true)`; returns the post-advance document.
-  rrule/seedAt/endAt read off the passed-in template (no pre-read);
-  `recurringSchedule.next` consumed as `Optional` (NOT `.orElse(null)` inside
-  `Mono.fromCallable`, which completes empty on a finite/exhausted RRULE and would
-  skip the ENDED advance — incidental hardening). Genuine not-found
-  (template deleted mid-tick) ⇒ `switchIfEmpty(Mono.error(3605))` — §9-compliant.
-- `publishSpawned` consumes that returned document — the 2nd re-read race window
-  is gone.
-- `doSpawn` reordered: `maybeAutoFinalize` BEFORE `advanceParent`, so nothing
-  failure-prone runs after the atomic `$inc` — the per-`$inc` ↔ per-completed-
-  ledger-row pairing is exact and a post-`$inc` compensating-delete drift is
-  impossible (strictly better than, and never worse than, the prior code).
-- `version` is `$inc`-ed because `findAndModify` bypasses optimistic locking:
-  without it a stale concurrent `RecurringInvoiceService` versioned `save` could
-  silently revert the money cursor; bumping the numeric `@Version` exactly as
-  Spring Data would keeps that conflict loud (fail-fast over silent corruption).
-
-**Now-guaranteed invariant (production).** `advanceParent` is reached exactly once
-per successfully-completed `doSpawn` (a duplicate-fire loser short-circuits at the
-unique-indexed ledger insert) and nothing failure-prone follows the `$inc`, so in
-production `occurrenceCount` == the completed occurrence-ledger row count EXACTLY,
-converged regardless of interleaving. Asserting that equality *from a test* is a
-two-read cross-document compare (parent doc vs ledger docs), so on the shared
-singleton Testcontainers Mongo it is skew-free only against a template a foreign
-cross-tenant tick cannot advance (see the test design below) — a test-harness
-observation limit, NOT a production caveat.
-
-**Tests.**
-- New `RecurringInvoiceOccurrenceCountIT` — the deterministic exact proof. A
-  *fresh*, finite `FREQ=DAILY;COUNT=3` template is caught up across bounded ticks
-  (`max-catchup=2` ⇒ 2 then 1) to its **terminal `ENDED` state**, then
-  `occurrenceCount == completed-ledger-rows == 3` is asserted EXACTLY. Once
-  `ENDED`, `findAllDueAcrossTenants` (filters `status:'ACTIVE'`) never re-scans it
-  and `COUNT=3` + the unique period index cap the ledger at 3 — the state is
-  frozen, so the two-read compare has **zero skew window** and is foreign-tick-
-  IMMUNE in isolation AND the full suite. Per-tick it also asserts the
-  foreign-tick-immune money invariant.
-- `RecurringInvoiceSpawnRestartIT.manyMissedPeriods` **kept** its loose
-  foreign-tick-immune `occurrenceCount > 1` sanity check (deliberately NOT
-  tightened). A ledger-relative exact form was tried and **failed the full suite**:
-  this open-ended DAILY template is perpetually ACTIVE+due, so a foreign
-  cross-tenant tick advances it between the parent-doc read and the ledger read
-  (the exact artifact this class's Javadoc forbids). Class Javadoc updated:
-  `occurrenceCount` RESOLVED in production + a pointer to the exact proof; the
-  warning hardened to forbid BOTH hardcoded AND ledger-relative exact cross-read
-  `occurrenceCount` totals here.
-
-**Money invariants preserved.** Ledger-insert FIRST, unique
-`tenant_recurring_period_idx`, the compensating delete, bounded catch-up
-(`limit(maxCatchup)`), the explicit-boolean occurrence probe (never
-`switchIfEmpty(doSpawn)`), §9 (`switchIfEmpty` only for genuine not-found) — all
-intact. `InvoiceService`, `QuickBooksInvoiceSync`, invoice numbering (E.9–E.11)
-untouched. No live Stripe/QBO.
-
-**Flagged residuals (accepted, not fixed here).**
-- *R1 (low).* The per-spawn UPDATE `audit_events` row + `@LastModifiedDate`
-  callback no longer fire on the cursor advance (`findAndModify` bypasses the
-  `Auditable`/`@LastModifiedDate` callback); `updatedAt` is set explicitly so it
-  keeps advancing, and the dropped UPDATE audit row is accepted —
-  precedent-consistent with `HealthScoreService`'s in-place `updateFirst` (cursor
-  advance is denormalized bookkeeping, not a CRM mutation). CREATE auditing via
-  `RecurringInvoiceService` is unchanged; `RecurringInvoiceAuditIT` (CREATE-only)
-  is unaffected.
-- *R4 (low, pre-existing, correct trade).* A stale concurrent
-  `RecurringInvoiceService.update/setStatus` versioned `save` during a spawn now
-  fails loud with `OptimisticLockingFailureException` (the spawn `$inc`s
-  `version`) instead of silently reverting the money cursor — fail-loud over
-  corruption.
-
-## Full suite result
-- Baseline (main @ 87cb3eb): 399 tests / 0 failures / 0 errors
-- After E.6: 422 tests / 0 / 0 / 2 skipped (blocker era — 2 @Disabled AC-E3 specs)
-- After E.9–E.13 (this branch): **427 tests / 0 failures / 0 errors / 0 skipped**
-  — no main regression (399 unchanged + 28 Phase-E; the 2 formerly-@Disabled AC-E3
-  specs enabled & green; InvoiceNumberGeneratorIT 6/0/0; ServiceAgreementSchedulerIT
-  3/0/0; RecurringInvoiceSpawnRestartIT 2/0/0). Determinism verified by repeated
-  isolated + consecutive full-suite runs.
-
-## OpenAPI spec (docs/api/openapi.json)
-- **E.9–E.13 add NO API surface** — the blocker resolution is finalize-time
-  numbering + an index migration + test-only changes; no new/changed endpoint or
-  schema. `build/openapi/openapi.json` (regenerated by the E.13 full-suite run) is
-  **byte-identical** to the committed `docs/api/openapi.json` from E.7. No
-  regeneration/commit needed; the HANDOFF artifact is current.
-- Baseline (main): 158 paths / 124 schemas
-- After E.7: **164 paths / 126 schemas** (+6 paths: /recurring-invoices, /recurring-invoices/{id},
-  /recurring-invoices/{id}/status, /recurring-invoices/{id}/spawn-now,
-  /invoices/{id}/stripe-checkout, /invoices/{id}/accounting-push; +2 schemas:
-  RecurringInvoice + StripeCheckoutService$CheckoutResult). `RecurringInvoice` schema
-  present; `Invoice.paymentTerms` property present as the inline `PaymentTerms` enum
-  [DUE_ON_RECEIPT,NET_7,NET_15,NET_30,NET_45,NET_60]; `RecurringInvoice.status` enum
-  [ACTIVE,PAUSED,ENDED]. `RecurringInvoiceOccurrence`/`StripeWebhookEvent` correctly
-  absent (system ledgers, no controller exposes them).
-
-## HANDOFF GATE
-N/A — Phase E is BE-only; recurring/Stripe FE deferred to Phase G (E-D13).
-
-## Post-Phase-E follow-up — deeper test-isolation hardening (Quartz autostart) — RESOLVED
-
-Branch `fix/test-isolation-recurring-quartz-cross-talk` (independent PR into `main`, post-Phase-E
-merge of #55). Resolves the **second** of the two out-of-scope follow-ups flagged at the end of the
-"Catch-up nondeterminism root-cause — RESOLVED (E.13)" section above ("deeper test-isolation
-hardening for cross-tenant Quartz ticks on the shared Mongo"). The first follow-up (the
-`occurrenceCount` denormalized-counter RMW race) is a separate, orthogonal change.
-
-**Corrected root cause (supersedes the E.13 belief that the test-yml spawn-job disable was
-effective).** E.13 added `kmosf.recurring-invoice.spawn-job.enabled=false` to
-`src/test/resources/application.yml` ("the sla-breach precedent"). That line is in fact **shadowed**:
-Spring Boot loads the profile-agnostic main `src/main/resources/application.properties` at a HIGHER
-precedence than the test `src/test/resources/application.yml` (there is no test
-`application.properties`). So for every key main `application.properties` defines —
-`spring.quartz.auto-startup=true` (:24), `kmosf.recurring-invoice.spawn-job.enabled=...:true` (:37),
-`spring.quartz.properties.org.quartz.scheduler.instanceName=KmosQuartzScheduler` (:26) — the test-yml
-value never took effect. Only per-IT `@TestPropertySource` (highest precedence) overrode it.
-(`sla-breach-scheduler.enabled: false` worked in the yml only because main `application.properties`
-does not define that key, so nothing shadowed it — which is why the "precedent" was misleading.)
-Consequently the Quartz scheduler **auto-started in every cached `@SpringBootTest` context** and
-`RecurringInvoiceJobScheduler` **registered the spawn job** there; that cached, started scheduler then
-ticked `runDueOnce()` cross-tenant against the ONE shared Testcontainers Mongo ~60s after boot,
-perturbing other tests (the observed `RecurringInvoiceSpawnJob tick failed` WARN). Empirically proven
-on this branch via JUnit-XML capture: with only the test-yml form, `RecurringInvoiceSpawnRestartIT`
-showed `Scheduler … started` and `QuartzMongoJobStoreIT` showed
-`RecurringInvoiceSpawnJob scheduled — first run in 60000ms` despite the disables.
-
-**Fix (test-scope only; ZERO production-code/default change; ZERO money-design change).** A
-**profile-specific** `src/test/resources/application-test.properties` (profile-specific reliably
-overrides profile-agnostic main `application.properties`) carrying `spring.quartz.auto-startup=false`
-(primary — a non-started scheduler stores but never fires triggers, removing the *firing* capability
-outright), `kmosf.recurring-invoice.spawn-job.enabled=false` (defense-in-depth, now genuinely
-effective), and a unique test scheduler `instanceName` (belt). Activated for the whole test source
-set via `spring.profiles.active: test` in `src/test/resources/application.yml` (no `@Profile`
-collision — the only main `@Profile` is `DataSeeder @Profile("dev")`; `test` ≠ `dev`, nothing is
-`@Profile("!test")`). The sole scheduler-dependent IT, `QuartzMongoJobStoreIT`, opts back in via its
-`@TestPropertySource` (`spring.quartz.auto-startup=true` + explicit
-`kmosf.recurring-invoice.spawn-job.enabled=false`) so its started scheduler runs ONLY the harmless
-one-shot `NoOpQuartzJob` — zero cross-tenant `runDueOnce` even from that one context. Money-design
-untouched (ledger-insert-FIRST, unique `tenant_recurring_period_idx`, explicit-boolean probe, bounded
-catch-up); recurring durability lives in the `RecurringInvoiceOccurrence` ledger + `nextRunAt` cursor,
-never the Quartz JobStore, so a not-started test scheduler is immaterial to correctness.
-
-**Verification.** Validation gate (per-context, JUnit XMLs): `RecurringInvoiceSpawnRestartIT`
-(non-opt-in) — scheduler never starts, zero scheduler/spawn/NoOp markers, 2/0/0;
-`QuartzMongoJobStoreIT` (opt-in) — `Scheduler KmosQuartzScheduler-test … started`,
-`NoOpQuartzJob fired`, **no** `RecurringInvoiceSpawnJob scheduled`, 2/0/0; profile `test` active in
-both. Full suite **3/3 consecutive runs green** (`./gradlew --no-daemon -Dorg.gradle.java.home=<JDK17>
-test --rerun-tasks`): each EXIT 0 / BUILD SUCCESSFUL / **427 tests, 0 failures, 0 errors, 0 skipped**
-(no regression vs the E.13 427 baseline) / **zero `RecurringInvoiceSpawnJob tick` occurrences across
-that run's JUnit XMLs** (the authoritative artifact — Gradle does not stream Spring app logs to the
-console).
-
-| Sub-phase | Status | SHA | Notes |
-|---|---|---|---|
-| FU-Q1 — test-isolation: never auto-start Quartz in tests (profile-specific override) | done | (this branch) | application-test.properties (profile `test`) + spring.profiles.active in test yml + QuartzMongoJobStoreIT opt-in; corrected the .properties-over-.yml precedence root cause; 3/3 full-suite green 427/0/0/0, zero spawn-job tick; no prod/money change |
+## PHASE F COMPLETE — <date>. BE PR #__ merge-commit <sha>. main carries the contracts vertical
+(Documenso WireMock/sandbox only — a real deployment remains a separate human action). Next: Phase G / Phase H (Activepieces glue).

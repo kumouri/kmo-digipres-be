@@ -151,6 +151,27 @@ import java.util.UUID;
  *       (owned by {@code Rfc5545RecurringSchedule}); {@code 2300} Invoice not found;
  *       {@code 2510}/{@code 2511} Stripe webhook connection/secret; {@code 2800-2802}
  *       QBO; {@code 3100}/{@code 3101} idempotency.</li>
+ *   <li>{@code 3700-3799} — <em>Phase F</em>: Contracts / Documenso.
+ *       <em>ContractTemplate:</em> {@code 3701} name blank (400); {@code 3702}
+ *       bodyTemplate blank (400); {@code 3705} template not found or inactive (404).
+ *       <em>Contract:</em> {@code 3703} title blank (400); {@code 3704} quote not
+ *       ACCEPTED — cannot spawn SOW (409); {@code 3706} voidReason required when
+ *       voiding (400); {@code 3707} Contract not found (404); {@code 3708} contract
+ *       number generation failed after retry (500, defensive — mirrors {@code 3433}/
+ *       {@code 3640}); {@code 3709} invalid Contract status transition (409).
+ *       <em>Documenso webhook:</em> {@code 3710} webhook HMAC signature invalid (401)
+ *       — the stable AC-F3 errorCode; {@code 3711} invalid tenant id in webhook
+ *       path (400); {@code 3712} Documenso not connected for tenant (404); {@code
+ *       3713} webhookSigningSecret not configured (412); {@code 3714} webhook body
+ *       not JSON (400); {@code 3715} webhook event missing id (400, defensive);
+ *       {@code 3716} no Contract for the Documenso document id (404, defensive);
+ *       {@code 3717} signed-PDF fetch/store failed (502).
+ *       <em>Documenso send:</em> {@code 3720} apiToken not configured (412);
+ *       {@code 3721} Documenso send failed (502). Reused (not re-allocated):
+ *       {@code 1310}/{@code 1311} file storage; {@code 3100}/{@code 3101}
+ *       idempotency; deal/project codes thrown by the reused
+ *       {@code moveStage}/{@code convertFromDeal} services
+ *       ({@code 1400}/{@code 1401}/{@code 3431}/{@code 3432}/{@code 3433}).</li>
  * </ul>
  */
 @Slf4j
