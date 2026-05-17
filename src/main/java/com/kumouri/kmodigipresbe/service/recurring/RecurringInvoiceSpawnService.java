@@ -75,6 +75,16 @@ public class RecurringInvoiceSpawnService {
 
     public static final String SYSTEM_ROLE = "RECURRING_INVOICE_SCHEDULER";
 
+    /**
+     * Smallest step that reliably advances PAST an occurrence given ical4j's
+     * second-granularity {@code getDates} (a sub-second {@code plusMillis(1)} rounds
+     * back to the same second and re-selects the just-processed occurrence). Safe
+     * for every supported recurring-invoice cadence: DAILY/WEEKLY/MONTHLY/etc.
+     * occurrences are ≥ 1 day apart, so a 1-second bump never skips the next one.
+     * (Sub-daily recurring <em>invoicing</em> is not a supported use case.)
+     */
+    private static final java.time.Duration OCCURRENCE_STEP = java.time.Duration.ofSeconds(1);
+
     private final RecurringInvoiceRepository recurringInvoices;
     private final RecurringInvoiceOccurrenceRepository occurrences;
     private final RecurringSchedule recurringSchedule;
@@ -131,12 +141,17 @@ public class RecurringInvoiceSpawnService {
      * ledger is the guarantee). Errors are NOT swallowed here (unlike the tick) —
      * a manual trigger should surface a bad RRULE (1300) etc. to the caller.
      */
-    public Mono<Void> spawnNow(UUID recurringInvoiceId) {
+    public Mono<RecurringInvoice> spawnNow(UUID recurringInvoiceId) {
         return TenantContextHolder.required().flatMap(ctx ->
                 recurringInvoices.findByTenantIdAndId(ctx.tenantId(), recurringInvoiceId)
                         .switchIfEmpty(Mono.error(() -> new DigiPresBeException(
                                 "RecurringInvoice not found", 3605, 404)))
-                        .flatMap(this::spawnDueFor));
+                        .flatMap(ri -> spawnDueFor(ri)
+                                // Return the refreshed parent (advanced cursor) so
+                                // the @IdempotentRoute response has a body to tee
+                                // and the caller sees the new nextRunAt/count.
+                                .then(recurringInvoices.findByTenantIdAndId(
+                                        ctx.tenantId(), recurringInvoiceId))));
     }
 
     /**
@@ -159,13 +174,18 @@ public class RecurringInvoiceSpawnService {
         TenantContext ctx = new TenantContext(ri.getTenantId(), null, Set.of(SYSTEM_ROLE));
         Instant now = clock.instant();
         // Window: occurrences strictly after the last spawned period, up to and
-        // including now. cursorFrom EXCLUDES lastRunAt (already spawned); on the
-        // first run seedAt.minusMillis(1) makes the seed occurrence itself eligible.
-        // ical4j getDates(seed, from, to) is inclusive on both ends, so `to = now`
-        // captures an occurrence exactly at now WITHOUT billing any future period
-        // early (the money-conservative reading; the ledger makes it idempotent).
+        // including now. ical4j getDates(seed, from, to) is inclusive on BOTH ends
+        // at SECOND granularity. So:
+        //  - first run (lastRunAt == null): from = seedAt - 1s makes the seed
+        //    occurrence itself eligible (rounds down, still includes the seed);
+        //  - subsequent runs: from = lastRunAt + OCCURRENCE_STEP EXCLUDES the
+        //    already-spawned lastRunAt period (a bare lastRunAt would be re-included
+        //    by the inclusive `from` and re-emitted — the occurrence ledger is the
+        //    backstop, but the window must not re-offer a spent period).
+        // `to = now` captures an occurrence exactly at now WITHOUT billing any
+        // future period early (the money-conservative reading).
         Instant cursorFrom = ri.getLastRunAt() != null
-                ? ri.getLastRunAt()
+                ? ri.getLastRunAt().plus(OCCURRENCE_STEP)
                 : ri.getSeedAt().minusMillis(1);
 
         return Mono.fromCallable(() ->
@@ -218,6 +238,19 @@ public class RecurringInvoiceSpawnService {
      *   <li>if {@code autoFinalize}, transition the invoice DRAFT→SENT (fires
      *       INVOICE_FINALIZED → the shipped QuickBooksInvoiceSync).</li>
      * </ol>
+     *
+     * <p><strong>Compensating cleanup (money-safety):</strong> the unique-index
+     * exactly-once token is the ledger row, but ledger-insert-FIRST means a
+     * <em>post-insert</em> failure (e.g. {@code invoiceService.create} throwing —
+     * notably the pre-existing non-sparse {@code Invoice.tenant_number_idx}
+     * null-collision when a tenant gets &gt;1 catch-up invoice in one tick) would
+     * otherwise leave an orphan row that permanently blocks the period (the
+     * explicit-boolean probe would skip it forever ⇒ a <em>lost</em> billing
+     * period, not deferred). So if anything after a SUCCESSFUL ledger insert fails,
+     * the just-inserted row is deleted and the error re-raised: the period stays
+     * unspawned and is retried on the next tick (deferred, never lost, never
+     * double-billed). The concurrent-fire {@code DuplicateKeyException} path
+     * (another fire owns the row) is untouched — that row is NOT ours to delete.
      */
     private Mono<Void> doSpawn(RecurringInvoice ri, Instant occ, String periodKey) {
         RecurringInvoiceOccurrence ledger = RecurringInvoiceOccurrence.builder()
@@ -259,21 +292,35 @@ public class RecurringInvoiceSpawnService {
                                         .then(advanceParent(ri, occ, created.getId()))
                                         .then(maybeAutoFinalize(ri, created))
                                         .then(publishSpawned(ri, created, periodKey));
-                            });
+                            })
+                            // Compensating cleanup: a post-ledger-insert failure
+                            // (e.g. invoiceService.create E11000 on the pre-existing
+                            // non-sparse Invoice tenant_number_idx) must NOT leave an
+                            // orphan ledger row that permanently blocks the period.
+                            // Delete the row we inserted, then re-raise so
+                            // spawnDueForSafe logs+skips this tick — the period is
+                            // retried next tick (deferred, never lost/double-billed).
+                            .onErrorResume(err -> occurrences
+                                    .deleteById(savedLedger.getId())
+                                    .onErrorComplete()
+                                    .then(Mono.error(err)));
                 });
     }
 
     /**
      * Advances the parent cursor after a successful spawn: lastRunAt, monotonic
      * lastSpawnedInvoiceId, occurrenceCount++, and the next nextRunAt (first
-     * occurrence strictly after this one — {@code occ.plusMillis(1)} so {@code occ}
-     * itself is excluded). No further occurrence, or endAt reached ⇒ ENDED.
+     * occurrence strictly after this one — {@code occ.plus(OCCURRENCE_STEP)} so
+     * {@code occ} itself is excluded at ical4j's second granularity; a bare
+     * {@code plusMillis(1)} would round back and re-select {@code occ}, freezing
+     * the cursor on the spent period). No further occurrence, or endAt reached ⇒
+     * ENDED.
      */
     private Mono<Void> advanceParent(RecurringInvoice ri, Instant occ, UUID createdInvoiceId) {
         return recurringInvoices.findByTenantIdAndId(ri.getTenantId(), ri.getId())
                 .flatMap(fresh -> Mono.fromCallable(() ->
                                 recurringSchedule.next(fresh.getRrule(), fresh.getSeedAt(),
-                                        occ.plusMillis(1)).orElse(null))
+                                        occ.plus(OCCURRENCE_STEP)).orElse(null))
                         .flatMap(next -> {
                             fresh.setLastRunAt(occ);
                             fresh.setLastSpawnedInvoiceId(createdInvoiceId);

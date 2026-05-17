@@ -86,13 +86,14 @@ public class RecurringInvoiceController {
      * Manual single-template spawn (E-D12). {@code @IdempotentRoute}: a retry with
      * the same {@code Idempotency-Key} replays the original 2xx; the
      * {@code RecurringInvoiceOccurrence} unique ledger additionally guarantees
-     * exactly one invoice per period even without the key. Returns 200 (no body —
-     * the spawned invoice is observable via GET /invoices and the
-     * RECURRING_INVOICE_SPAWNED event).
+     * exactly one invoice per period even without the key. Returns the refreshed
+     * {@link RecurringInvoice} (advanced cursor/count) — a non-empty body is also
+     * required for the {@code @IdempotentRoute} response tee. The spawned invoices
+     * are observable via {@code GET /invoices} + the RECURRING_INVOICE_SPAWNED event.
      */
     @PostMapping("/{id}/spawn-now")
     @IdempotentRoute
-    public Mono<Void> spawnNow(@PathVariable UUID id) {
+    public Mono<RecurringInvoice> spawnNow(@PathVariable UUID id) {
         return spawnService.spawnNow(id);
     }
 }

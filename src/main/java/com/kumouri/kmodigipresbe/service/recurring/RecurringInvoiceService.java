@@ -183,8 +183,11 @@ public class RecurringInvoiceService {
             if (seedChanged) existing.setSeedAt(patch.getSeedAt());
 
             if (ruleChanged || seedChanged) {
+                // Recompute the cursor from the new rrule/seed. If a period was
+                // already spawned, start strictly AFTER it (+1s clears ical4j's
+                // second-granularity inclusive `from`); otherwise from the seed.
                 java.time.Instant cursorFrom = existing.getLastRunAt() != null
-                        ? existing.getLastRunAt()
+                        ? existing.getLastRunAt().plusSeconds(1)
                         : existing.getSeedAt();
                 return Mono.fromCallable(() ->
                                 recurringSchedule.next(existing.getRrule(), existing.getSeedAt(),

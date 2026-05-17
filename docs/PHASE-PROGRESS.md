@@ -12,8 +12,8 @@
 | E.2 — Quartz Mongo JobStore dep + QuartzConfig customizer + properties | done | 15d90d0 | E-D5 RAM-FALLBACK ACTIVE — see decision below; QuartzMongoJobStoreIT 2/0/0 (RAM store, proof job fires) |
 | E.3 — RecurringInvoice + RecurringInvoiceOccurrence + repos | done | 6066774 | E-D2 field tables exact; unique tenant_recurring_period_idx; full test 399/0/0 (entities map clean, index auto-creates) |
 | E.4 — RecurringInvoiceService + RecurringInvoiceSpawnService + Quartz job | done | 69619bc | ledger-insert-FIRST + explicit-boolean probe; self-grep clean (only 3605 not-found switchIfEmpty); full test 399/0/0 |
-| E.5 — StripeWebhookEvent + extended StripeWebhookService + StripeProperties + StripeCheckoutService + controllers | done | (this commit) | event-id idempotency (ledger-first, 200-no-op dup) + INVOICE_PAID; @IdempotentRoute×4; QuickBooksInvoiceSync untouched; self-grep clean; full test 399/0/0 |
-| E.6 — BE ITs AC-E1…AC-E8 | pending | — | — |
+| E.5 — StripeWebhookEvent + extended StripeWebhookService + StripeProperties + StripeCheckoutService + controllers | done | 576b7d3 | event-id idempotency (ledger-first, 200-no-op dup) + INVOICE_PAID; @IdempotentRoute×4; QuickBooksInvoiceSync untouched; self-grep clean; full test 399/0/0 |
+| E.6 — BE ITs AC-E1…AC-E8 | done | (this commit) | full suite 422/0/0 + 2 skipped (399 main, no regression, +23 Phase-E). **BLOCKER: AC-E3 full catch-up blocked by pre-existing non-sparse Invoice tenant_number_idx — see below** |
 | E.7 — BE CLAUDE.md in-PR + .claude/* local + docs/api/openapi.json committed | pending | — | — |
 | E.8 — Final BE green + PR | pending | — | — |
 
@@ -44,9 +44,57 @@
       - Decision recorded in: `build.gradle`, `application.properties`, this file,
         `kmo-digipres-be/CLAUDE.md` (E.7), and the plan §10 stub (E.8).
 
+## ESCALATED BLOCKER (AC-E2 multi / AC-E3 full catch-up) — needs Opus-validator/user decision
+
+**Plan §7 ("recurring-spawned invoices leave invoiceNumber null exactly as
+create/milestone/time paths do") is factually incompatible with the pre-existing
+non-sparse unique index on `Invoice`:**
+
+`@CompoundIndex(name="tenant_number_idx", def="{'tenantId':1,'invoiceNumber':1}", unique=true)`
+— verified in a running Mongo: `{key:{tenantId:1,invoiceNumber:1}, unique:true}`,
+**NO sparse, NO partialFilterExpression**. Inserting two `invoiceNumber==null`
+invoices for the same tenant → `E11000 duplicate key`. **A tenant can hold at most
+ONE null-invoiceNumber invoice, ever.** Every single-invoice path
+(milestone/time/expense/Square) gets away with one null per test; recurring
+billing is the first design that needs N null-numbered invoices per tenant, so the
+2nd+ recurring period's `invoiceService.create` E11000s on every tick — full
+single-tick catch-up (AC-E3) and the AC-E2 "spawn a 2nd period" cannot work as
+written.
+
+The plan §7 ALSO forbids both a numbering change and an `Invoice`
+index/migration, so the implementer cannot resolve this without an out-of-scope
+decision (per the briefing: never improvise around §7 non-goals; STOP + escalate).
+
+**Money-correctness is NOT compromised by what shipped** — the
+`RecurringInvoiceOccurrence` ledger-insert-FIRST + a new compensating delete in
+`doSpawn` (a post-insert `invoiceService.create` failure deletes the just-inserted
+ledger row) guarantee: ZERO double-bill, ZERO orphan/partial ledger rows, ZERO
+merged-lump invoice, the spawned period billed exactly once. The gap is purely
+"the 2nd+ recurring period for a tenant is never billed until the index is
+resolved" (blocked, not corrupted, not lost-after-success, not double-charged).
+
+**Resolution options (for the validator/user — all currently out of the
+implementer's §7 scope):**
+1. Make `tenant_number_idx` a **partial** unique index
+   (`partialFilterExpression: {invoiceNumber: {$type:"string"}}`) — uniqueness still
+   enforced for real numbers; nulls no longer collide. Smallest change; arguably a
+   pre-existing-defect fix; but it IS an index/migration change (§7 non-goal).
+2. Assign recurring-spawned invoices an opaque non-sequential unique discriminator
+   (e.g. `REC-{recurringInvoiceId}-{periodKey}`) into `invoiceNumber` — a "numbering"
+   change (§7 non-goal) but localized to the recurring path.
+3. Re-scope AC-E2/AC-E3 to "one recurring invoice per tenant per cadence" pending a
+   future numbering phase.
+
+Status quo shipped: AC-E1, AC-E4, AC-E5, AC-E6, AC-E7, AC-E8 fully green;
+AC-E2 single-period spawn green; AC-E2 multi-period + AC-E3 full one-tick catch-up
+are `@Disabled` executable specs in `RecurringInvoiceSpawnRestartIT` (enable once
+resolved); `currentBehavior_blockedByTenantNumberIdx_butMoneyInvariantsHold`
+asserts the money invariants that DO hold.
+
 ## Full suite result
 - Baseline (main @ 87cb3eb): 399 tests / 0 failures / 0 errors
-- After E.6: TBD
+- After E.6: **422 tests / 0 failures / 0 errors / 2 skipped** — no main regression
+  (399 unchanged + 23 new Phase-E; 2 skipped = the @Disabled AC-E3 full-catch-up specs)
 
 ## OpenAPI spec (docs/api/openapi.json)
 - Baseline (main): 158 paths / 124 schemas
