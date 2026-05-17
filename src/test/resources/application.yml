@@ -2,3 +2,18 @@ kmosf:
   service-hub:
     sla-breach-scheduler:
       enabled: false
+  recurring-invoice:
+    # Background Quartz RecurringInvoiceSpawnJob OFF by default in tests (mirrors
+    # the sla-breach-scheduler precedent above — same class of bug). Spring caches
+    # ~80 @SpringBootTest contexts that share ONE singleton Testcontainers Mongo;
+    # with the job enabled (production default, matchIfMissing=true) each cached
+    # context's RAM-Quartz trigger fires runDueOnce() cross-tenant against the
+    # SHARED db, so a foreign tick can advance/spawn another test's recurring
+    # template mid-assertion (the RecurringInvoiceSpawnRestartIT 'was 5' flake —
+    # the unique tenant_recurring_period_idx still forbids any double-bill, so this
+    # is a TEST-isolation defect, NOT a money/over-spawn bug). ITs drive spawning
+    # explicitly via runDueOnce()/POST /spawn-now; none rely on the bg trigger. An
+    # IT that needs it can still opt in with its own @TestPropertySource. Does NOT
+    # change the production default.
+    spawn-job:
+      enabled: false

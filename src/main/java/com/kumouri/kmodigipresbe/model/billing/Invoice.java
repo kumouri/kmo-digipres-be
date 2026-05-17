@@ -29,7 +29,17 @@ import java.util.UUID;
 @Document("invoices")
 @CompoundIndex(name = "tenant_status_idx", def = "{ 'tenantId': 1, 'status': 1, 'issuedAt': -1 }")
 @CompoundIndex(name = "tenant_contact_idx", def = "{ 'tenantId': 1, 'contactId': 1 }")
-@CompoundIndex(name = "tenant_number_idx", def = "{ 'tenantId': 1, 'invoiceNumber': 1 }", unique = true)
+// NOTE (Phase E — the user-authorized resolution of the escalated tenant_number_idx
+// blocker): tenant_number_idx is deliberately NOT declared here. A Spring-Data
+// @CompoundIndex cannot express a partialFilterExpression, and the OLD non-sparse
+// non-partial unique index it used to declare was the blocker — it rejected a 2nd
+// invoiceNumber==null invoice per tenant (E11000), breaking recurring catch-up
+// (Phase E) and the latent Phase-C milestone-spawn / Phase-D time/expense-spawn
+// multi-unnumbered-invoice case. The index is now owned end-to-end by
+// InvoiceNumberIndexInitializer as a PARTIAL unique index (unique only when
+// invoiceNumber exists & is non-null) so many null-numbered DRAFTs per tenant are
+// allowed and uniqueness still holds for issued/numbered invoices. Exactly one
+// tenant_number_idx definition exists, and it lives there.
 @Data
 @Builder(toBuilder = true)
 @NoArgsConstructor
@@ -79,6 +89,16 @@ public class Invoice implements Auditable, CustomFieldHost {
 
     private LocalDate issuedAt;
     private LocalDate dueAt;
+
+    /**
+     * Phase E (E-D8) — payment terms driving {@link #dueAt} derivation. Additive and
+     * <strong>nullable</strong>: {@code null} means "unspecified" and is treated as
+     * {@link PaymentTerms#NET_30} only where {@code dueAt} is derived (an explicitly
+     * supplied {@code dueAt} always wins; legacy invoices deserialize this as null
+     * with zero migration — the {@code projectId}-nullable-additive Phase-C precedent).
+     */
+    private PaymentTerms paymentTerms;
+
     private Instant statusChangedAt;
 
     @Builder.Default
@@ -102,4 +122,41 @@ public class Invoice implements Auditable, CustomFieldHost {
     private Instant updatedAt;
 
     public enum Status { DRAFT, SENT, PARTIALLY_PAID, PAID, VOIDED, OVERDUE }
+
+    /**
+     * Phase E (E-D8) — invoice payment terms. The numeric variants encode a
+     * net-days offset from the issue date; {@code DUE_ON_RECEIPT} is offset 0.
+     */
+    public enum PaymentTerms {
+        DUE_ON_RECEIPT(0),
+        NET_7(7),
+        NET_15(15),
+        NET_30(30),
+        NET_45(45),
+        NET_60(60);
+
+        private final int netDays;
+
+        PaymentTerms(int netDays) {
+            this.netDays = netDays;
+        }
+
+        public int netDays() {
+            return netDays;
+        }
+    }
+
+    /**
+     * Phase E (E-D8) — pure derivation of a due date from an issue date and payment
+     * terms. Null-tolerant on both inputs: a null {@code issued} yields null; a null
+     * {@code terms} defaults to {@link PaymentTerms#NET_30} (the "unspecified" rule).
+     * Side-effect-free and total — safe to call from anywhere.
+     */
+    public static LocalDate deriveDueAt(LocalDate issued, PaymentTerms terms) {
+        if (issued == null) {
+            return null;
+        }
+        PaymentTerms effective = terms != null ? terms : PaymentTerms.NET_30;
+        return issued.plusDays(effective.netDays());
+    }
 }
