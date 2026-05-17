@@ -11,7 +11,7 @@
 | Sub-phase | Status | SHA | Build (main base / +G / skip) | Mandated checks | Deviations |
 |---|---|---|---|---|---|
 | G.1 error range 3800-3899 + DomainEventType Phase-G block | done | afde274 | compileJava+compileTestJava → BUILD SUCCESSFUL exit 0 (27s) | 38xx collision grep (src/main minus GlobalErrorHandler) = ZERO hits (no pre-existing 38xx in codebase); DomainEventType new values "invoice.viewedByClient"/"portal.quoteAccepted"/"portal.quoteDeclined" unique (not present anywhere else in src; dotted lowerCamel convention matched); | none |
-| G.2 PortalOwnershipGuard + portal-scoped repo finders | todo |  |  | switchIfEmpty grep; guard reuses resolver; same-404 | |
+| G.2 PortalOwnershipGuard + portal-scoped repo finders | in-progress |  |  | switchIfEmpty grep; guard reuses resolver; same-404 | |
 | G.3 portal projection records + projects/contracts/quotes list services | todo |  |  | switchIfEmpty grep; projections drop tenantId/internal | |
 | G.4 portal controllers + invoice pay + INVOICE_VIEWED_BY_CLIENT | todo |  |  | switchIfEmpty grep; gate-before-checkout; reused-services empty diff | |
 | G.5 additive-nullable magic-link redirectTo (buildLink unchanged) | todo |  |  | buildLink empty diff; additive-nullable; MagicLinkRedeemIT/PortalChainIT green | |
