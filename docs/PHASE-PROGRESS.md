@@ -13,8 +13,8 @@
 | E.3 — RecurringInvoice + RecurringInvoiceOccurrence + repos | done | 6066774 | E-D2 field tables exact; unique tenant_recurring_period_idx; full test 399/0/0 (entities map clean, index auto-creates) |
 | E.4 — RecurringInvoiceService + RecurringInvoiceSpawnService + Quartz job | done | 69619bc | ledger-insert-FIRST + explicit-boolean probe; self-grep clean (only 3605 not-found switchIfEmpty); full test 399/0/0 |
 | E.5 — StripeWebhookEvent + extended StripeWebhookService + StripeProperties + StripeCheckoutService + controllers | done | 576b7d3 | event-id idempotency (ledger-first, 200-no-op dup) + INVOICE_PAID; @IdempotentRoute×4; QuickBooksInvoiceSync untouched; self-grep clean; full test 399/0/0 |
-| E.6 — BE ITs AC-E1…AC-E8 | done | (this commit) | full suite 422/0/0 + 2 skipped (399 main, no regression, +23 Phase-E). **BLOCKER: AC-E3 full catch-up blocked by pre-existing non-sparse Invoice tenant_number_idx — see below** |
-| E.7 — BE CLAUDE.md in-PR + .claude/* local + docs/api/openapi.json committed | pending | — | — |
+| E.6 — BE ITs AC-E1…AC-E8 | done | 019fb3f | full suite 422/0/0 + 2 skipped (399 main, no regression, +23 Phase-E). **BLOCKER: AC-E3 full catch-up blocked by pre-existing non-sparse Invoice tenant_number_idx — see below** |
+| E.7 — BE CLAUDE.md in-PR + .claude/* local + docs/api/openapi.json committed | done | (this commit) | CLAUDE.md Phase E SHIPPED note + blocker; .claude/* local (gitignored); openapi.json 164 paths/126 schemas |
 | E.8 — Final BE green + PR | pending | — | — |
 
 ## Quartz-store resolution decision (SETTLED at E.2 — before E.4, as required)
@@ -96,9 +96,16 @@ asserts the money invariants that DO hold.
 - After E.6: **422 tests / 0 failures / 0 errors / 2 skipped** — no main regression
   (399 unchanged + 23 new Phase-E; 2 skipped = the @Disabled AC-E3 full-catch-up specs)
 
-## OpenAPI spec (docs/api/openapi.json)
+## OpenAPI spec (docs/api/openapi.json) — committed E.7
 - Baseline (main): 158 paths / 124 schemas
-- After E.7: TBD
+- After E.7: **164 paths / 126 schemas** (+6 paths: /recurring-invoices, /recurring-invoices/{id},
+  /recurring-invoices/{id}/status, /recurring-invoices/{id}/spawn-now,
+  /invoices/{id}/stripe-checkout, /invoices/{id}/accounting-push; +2 schemas:
+  RecurringInvoice + StripeCheckoutService$CheckoutResult). `RecurringInvoice` schema
+  present; `Invoice.paymentTerms` property present as the inline `PaymentTerms` enum
+  [DUE_ON_RECEIPT,NET_7,NET_15,NET_30,NET_45,NET_60]; `RecurringInvoice.status` enum
+  [ACTIVE,PAUSED,ENDED]. `RecurringInvoiceOccurrence`/`StripeWebhookEvent` correctly
+  absent (system ledgers, no controller exposes them).
 
 ## HANDOFF GATE
 N/A — Phase E is BE-only; recurring/Stripe FE deferred to Phase G (E-D13).
