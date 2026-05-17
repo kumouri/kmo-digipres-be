@@ -180,6 +180,24 @@ public final class DomainEventType {
     public static final String CONTRACT_VOIDED           = "contract.voided";
     public static final String CONTRACT_TEMPLATE_CREATED = "contractTemplate.created";
 
+    // Phase G — Portal expansion. All are advisory (RuleEngine / webhook fan-out) —
+    // they do NOT drive any core mutation (invoice viewing, quote status transitions,
+    // and activity creation are synchronous + explicit in the portal controllers and
+    // the reused QuoteService / ActivityCrudService).
+    // INVOICE_VIEWED_BY_CLIENT: emitted when a portal user views a specific invoice
+    //   detail (GET /portal/me/invoices/{id}); payload {invoiceId, contactId, viewedByUserId}.
+    //   An Activity(type=NOTE) row is also created via ActivityCrudService (best-effort)
+    //   so the view appears on the contact timeline.
+    // PORTAL_QUOTE_ACCEPTED: emitted after a portal user accepts a SENT quote;
+    //   payload {quoteId, contactId}. The status transition delegates to the unchanged
+    //   QuoteService.setStatus — no contract auto-spawn (Phase F's spawnFromQuote stays
+    //   an explicit, separate, staff/explicit action).
+    // PORTAL_QUOTE_DECLINED: emitted after a portal user declines a SENT quote;
+    //   payload {quoteId, contactId}.
+    public static final String INVOICE_VIEWED_BY_CLIENT = "invoice.viewedByClient";
+    public static final String PORTAL_QUOTE_ACCEPTED    = "portal.quoteAccepted";
+    public static final String PORTAL_QUOTE_DECLINED    = "portal.quoteDeclined";
+
     private DomainEventType() {
     }
 }

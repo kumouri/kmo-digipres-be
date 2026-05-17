@@ -34,6 +34,15 @@ import java.util.UUID;
  * one-time link. Redemption mints the same portal JWT as OAuth and passkey paths.
  * <p>The raw token is only ever in the email body and the {@code /redeem} request.
  * Mongo stores only the SHA-256 hash.
+ *
+ * <p><strong>G.5 deep-link routing:</strong> an optional {@code redirectTo} value may be
+ * supplied at request-time and is persisted on the {@link MagicLinkToken}. It is echoed
+ * back in the {@link RedemptionResult} so the portal FE can route the authenticated
+ * session to the intended page (e.g. {@code /portal/contracts/<id>}) without a second
+ * round-trip. The echoed value is ALWAYS the one persisted at request-time — it is
+ * NEVER read from the redeem request (open-redirect mitigation: §9 #5). When
+ * {@code redirectTo} is {@code null} the behaviour is byte-identical to pre-G.5.
+ * {@link #buildLink} is unmodified.
  */
 @Slf4j
 @Service
@@ -51,11 +60,24 @@ public class MagicLinkService {
     private String fromAddress;
 
     /**
-     * Issues a magic-link token, persists its hash, and emails the raw token to the
-     * supplied email. Always returns successfully whether or not we actually sent
-     * something — we don't leak which emails exist as portal users.
+     * The result of a successful magic-link redemption. Carries the resolved portal
+     * {@link User} and the optional deep-link target that was persisted at request-time
+     * (G.5 — nullable; null means no deep-link was supplied).
      */
-    public Mono<Void> request(Tenant tenant, String email, String linkBaseUrl) {
+    public record RedemptionResult(User user, String redirectTo) {}
+
+    /**
+     * Issues a magic-link token, persists its hash (and the optional {@code redirectTo}
+     * deep-link target), and emails the raw token to the supplied email. Always returns
+     * successfully whether or not we actually sent something — we don't leak which emails
+     * exist as portal users.
+     *
+     * @param linkBaseUrl drives the emailed URL via {@link #buildLink} (unchanged G.5)
+     * @param redirectTo  optional deep-link target to persist on the token so the FE can
+     *                    route post-redeem; may be {@code null}
+     */
+    public Mono<Void> request(Tenant tenant, String email, String linkBaseUrl,
+                              String redirectTo) {
         String normalizedEmail = email == null ? null : email.toLowerCase();
         if (normalizedEmail == null || normalizedEmail.isBlank()) {
             return Mono.error(new DigiPresBeException(
@@ -71,6 +93,7 @@ public class MagicLinkService {
                 .email(normalizedEmail)
                 .tokenHash(hash)
                 .expiresAt(expires)
+                .redirectTo(redirectTo)    // G.5: persisted at request-time; null → legacy
                 .build();
 
         return tokens.save(row)
@@ -86,9 +109,15 @@ public class MagicLinkService {
     /**
      * Redeems a magic-link token: looks up by hash, verifies not-expired and not-used,
      * routes through {@link UserIdentityService#findOrProvision} so the same signup
-     * policy gate fires as the OAuth path. Returns the resolved portal user.
+     * policy gate fires as the OAuth path. Returns a {@link RedemptionResult} carrying
+     * the resolved portal user AND the {@code redirectTo} value persisted at request-time
+     * (G.5 — may be null for tokens issued before G.5 or without a deep-link target).
+     *
+     * <p><strong>Open-redirect mitigation (§9 #5):</strong> the {@code redirectTo} in the
+     * returned result is ALWAYS {@code token.getRedirectTo()} — the value stored when the
+     * token was issued. It is NEVER read from the current redeem request.
      */
-    public Mono<User> redeem(Tenant tenant, String rawToken) {
+    public Mono<RedemptionResult> redeem(Tenant tenant, String rawToken) {
         if (rawToken == null || rawToken.isBlank()) {
             return Mono.error(new DigiPresBeException(
                     "Magic-link token is required", 1241, 400));
@@ -111,12 +140,16 @@ public class MagicLinkService {
                     return tokens.save(row).thenReturn(row);
                 })
                 .flatMap(row -> userIdentityService.findOrProvision(
-                        tenant,
-                        UserIdentity.Provider.MAGIC_LINK,
-                        row.getEmail(),  // sub == email for magic-link
-                        row.getEmail(),
-                        true,  // email is implicitly verified by the receive-link round-trip
-                        row.getEmail()))
+                                tenant,
+                                UserIdentity.Provider.MAGIC_LINK,
+                                row.getEmail(),  // sub == email for magic-link
+                                row.getEmail(),
+                                true,  // email is implicitly verified by the receive-link round-trip
+                                row.getEmail())
+                        // Open-redirect mitigation (§9 #5): redirectTo is ALWAYS the value
+                        // persisted at request-time (token.getRedirectTo()), NEVER from the
+                        // redeem request.
+                        .map(user -> new RedemptionResult(user, row.getRedirectTo())))
                 .contextWrite(TenantContextHolder.write(
                         new TenantContext(tenant.getId(), null, Set.of())));
     }

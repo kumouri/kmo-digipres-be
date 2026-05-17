@@ -82,11 +82,15 @@ class MagicLinkRedeemIT {
                 .contextWrite(TenantContextHolder.write(ctx()))
                 .block();
 
-        var user = magicLinkService.redeem(tenant, raw).block();
-        assertThat(user).isNotNull();
+        // G.5: redeem now returns RedemptionResult(user, redirectTo); unwrap user
+        var result = magicLinkService.redeem(tenant, raw).block();
+        assertThat(result).isNotNull();
+        var user = result.user();
         assertThat(user.getEmail()).isEqualTo("alice@example.com");
         assertThat(user.getPortal()).isEqualTo(
                 com.kumouri.kmodigipresbe.model.user.User.Portal.CLIENT);
+        // No redirectTo was supplied, so it should be null
+        assertThat(result.redirectTo()).isNull();
     }
 
     @Test

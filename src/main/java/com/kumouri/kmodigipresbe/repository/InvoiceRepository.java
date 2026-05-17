@@ -11,6 +11,16 @@ import java.util.UUID;
 public interface InvoiceRepository extends TenantScopedReactiveMongoRepository<Invoice, UUID> {
 
     /**
+     * Tenant-scoped single-entity lookup used by {@code PortalOwnershipGuard}
+     * (Phase G — G-D2). The explicit {@code tenantId} predicate blocks cross-tenant
+     * access at the query level; the ownership predicate in the guard then blocks
+     * cross-contact access. Derived finders require an explicit {@code tenantId}
+     * argument — the {@code TenantScopedReactiveMongoRepository} marker does NOT
+     * auto-scope derived finders (per the {@code PortalInvoicesController} Javadoc).
+     */
+    Mono<Invoice> findByTenantIdAndId(UUID tenantId, UUID id);
+
+    /**
      * Phase 10d — locate the CRM Invoice corresponding to a QBO Invoice id stored
      * in {@code externalRefs.quickbooks}. Used by the QBO inbound payment webhook
      * to resolve which CRM invoice to mark paid. Indexed at runtime via the
