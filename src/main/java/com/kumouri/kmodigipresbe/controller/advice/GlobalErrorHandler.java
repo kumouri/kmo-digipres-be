@@ -143,7 +143,11 @@ import java.util.UUID;
  *       (412 — distinct from the webhook's {@code 2511} missing-signing-secret);
  *       {@code 3621} Stripe checkout session/payment-link creation failed (502).
  *       <em>Accounting-push:</em> {@code 3630} invoice not eligible for accounting push
- *       (409, defensive). Reused (not re-allocated): {@code 1300} invalid RRULE
+ *       (409, defensive).
+ *       <em>Invoice numbering (blocker resolution):</em> {@code 3640} invoice number
+ *       generation failed after retry (500, defensive — should never fire; mirrors the
+ *       Phase-C {@code 3433} project-code-generation guard). Reused (not re-allocated):
+ *       {@code 1300} invalid RRULE
  *       (owned by {@code Rfc5545RecurringSchedule}); {@code 2300} Invoice not found;
  *       {@code 2510}/{@code 2511} Stripe webhook connection/secret; {@code 2800-2802}
  *       QBO; {@code 3100}/{@code 3101} idempotency.</li>
