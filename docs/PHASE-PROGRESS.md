@@ -199,24 +199,35 @@ the denormalized counter drifted (never money: zero double-bill, zero loss).
   silently revert the money cursor; bumping the numeric `@Version` exactly as
   Spring Data would keeps that conflict loud (fail-fast over silent corruption).
 
-**Now-guaranteed invariant.** `advanceParent` is reached exactly once per
-successfully-completed `doSpawn` (a duplicate-fire loser short-circuits at the
-unique-indexed ledger insert) and nothing failure-prone follows the `$inc`, so
-`occurrenceCount` == the completed occurrence-ledger row count EXACTLY, and
-foreign-tick-IMMUNELY (both advanced together by the same atomic per-period
-`$inc` + unique-indexed ledger insert — the same robustness class as the
-per-period money invariant). The former bare `> 1` best-effort sanity check is gone.
+**Now-guaranteed invariant (production).** `advanceParent` is reached exactly once
+per successfully-completed `doSpawn` (a duplicate-fire loser short-circuits at the
+unique-indexed ledger insert) and nothing failure-prone follows the `$inc`, so in
+production `occurrenceCount` == the completed occurrence-ledger row count EXACTLY,
+converged regardless of interleaving. Asserting that equality *from a test* is a
+two-read cross-document compare (parent doc vs ledger docs), so on the shared
+singleton Testcontainers Mongo it is skew-free only against a template a foreign
+cross-tenant tick cannot advance (see the test design below) — a test-harness
+observation limit, NOT a production caveat.
 
 **Tests.**
-- New `RecurringInvoiceOccurrenceCountIT` — a *fresh* template (zero seed offset),
-  multi-period multi-tick catch-up; asserts `occurrenceCount == completed-ledger-
-  rows` exactly at every tick + the per-period money invariant + idempotency.
-- `RecurringInvoiceSpawnRestartIT.manyMissedPeriods` `> 1` → ledger-RELATIVE exact
-  (`occurrenceCount == 1 + completed-ledger-rows`; the +1 is the spec's seeded
-  prior-run offset). Class Javadoc updated: the `occurrenceCount` bullet is
-  RESOLVED; the "no exact running-total" warning refined (hardcoded totals stay
-  forbidden; a ledger-relative exact assertion is the correct foreign-tick-immune
-  tightening).
+- New `RecurringInvoiceOccurrenceCountIT` — the deterministic exact proof. A
+  *fresh*, finite `FREQ=DAILY;COUNT=3` template is caught up across bounded ticks
+  (`max-catchup=2` ⇒ 2 then 1) to its **terminal `ENDED` state**, then
+  `occurrenceCount == completed-ledger-rows == 3` is asserted EXACTLY. Once
+  `ENDED`, `findAllDueAcrossTenants` (filters `status:'ACTIVE'`) never re-scans it
+  and `COUNT=3` + the unique period index cap the ledger at 3 — the state is
+  frozen, so the two-read compare has **zero skew window** and is foreign-tick-
+  IMMUNE in isolation AND the full suite. Per-tick it also asserts the
+  foreign-tick-immune money invariant.
+- `RecurringInvoiceSpawnRestartIT.manyMissedPeriods` **kept** its loose
+  foreign-tick-immune `occurrenceCount > 1` sanity check (deliberately NOT
+  tightened). A ledger-relative exact form was tried and **failed the full suite**:
+  this open-ended DAILY template is perpetually ACTIVE+due, so a foreign
+  cross-tenant tick advances it between the parent-doc read and the ledger read
+  (the exact artifact this class's Javadoc forbids). Class Javadoc updated:
+  `occurrenceCount` RESOLVED in production + a pointer to the exact proof; the
+  warning hardened to forbid BOTH hardcoded AND ledger-relative exact cross-read
+  `occurrenceCount` totals here.
 
 **Money invariants preserved.** Ledger-insert FIRST, unique
 `tenant_recurring_period_idx`, the compensating delete, bounded catch-up
