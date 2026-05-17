@@ -12,9 +12,13 @@ concurrency:
 
 jobs:
   build:
-    name: gradle build
+    name: gradle test (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
 
@@ -28,12 +32,53 @@ jobs:
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v4
 
-      - name: ./gradlew build
-        run: ./gradlew build --no-daemon --stacktrace
+      - name: ./gradlew test (shard ${{ matrix.shard }}/4)
+        run: ./gradlew test -Dtest.shard.index=${{ matrix.shard }} -Dtest.shard.total=4 --no-daemon --stacktrace
+        # Each shard runs in a fresh runner with its own Docker engine => its own
+        # singleton Testcontainers Mongo/Kafka.  The single-forked-JVM invariant
+        # (maxParallelForks=1) is preserved within each shard — shared singletons
+        # remain shared within a job; isolation is across jobs, not JVM forks.
         # Ryuk re-enabled (was TESTCONTAINERS_RYUK_DISABLED=true): with the singleton
         # container pattern there are only ~3 containers total, and Ryuk reaps any
-        # leak so the runner can't be exhausted. Disabling it (no reaper) + per-context
-        # containers was killing the runner once the full IT suite ran.
+        # leak so the runner can't be exhausted.
+
+      - name: Upload test reports (shard ${{ matrix.shard }})
+        # always() so a *cancelled* job still uploads reports (cancellation skips
+        # failure()-gated steps, which hides stack traces needed to diagnose CI failures).
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-shard-${{ matrix.shard }}
+          path: |
+            build/reports/tests/**
+            build/test-results/**
+          if-no-files-found: ignore
+          retention-days: 7
+
+  openapi:
+    name: openapi spec (export + refresh)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Export spec via OpenApiEndpointIT then refresh docs/api/openapi.json
+        run: ./gradlew test --tests "*OpenApiEndpointIT" verifyOpenApi --no-daemon --stacktrace
+        # OpenApiEndpointIT exports build/openapi/openapi.json during the Testcontainers
+        # phase; verifyOpenApi (mustRunAfter 'test') then copies it to docs/api/openapi.json.
+        # Running the --tests filter first in the same Gradle invocation provides the
+        # generated spec before verifyOpenApi's doLast fires.  This keeps spec-gen
+        # deterministic and off the sharded path (each shard would export conflicting specs).
 
       - name: Upload generated OpenAPI spec
         if: always()
@@ -44,16 +89,13 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      - name: Upload test reports
-        # always() (not failure()) so a *cancelled* job still uploads the reports —
-        # cancellation skips failure()-gated steps, which was hiding the full stack
-        # traces needed to diagnose CI failures. Pre-existing; widened during Phase A.
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-reports
-          path: |
-            build/reports/tests/**
-            build/test-results/**
-          if-no-files-found: ignore
-          retention-days: 7
+  ci-gate:
+    name: ci gate (all shards + openapi)
+    needs: [build, openapi]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Verify all jobs passed
+        run: |
+          echo "shards=${{ needs.build.result }} openapi=${{ needs.openapi.result }}"
+          [ "${{ needs.build.result }}" = "success" ] && [ "${{ needs.openapi.result }}" = "success" ]
