@@ -19,6 +19,13 @@ import java.util.UUID;
  * Short-lived single-use token for magic-link sign-in. Persisted with a SHA-256 hash
  * of the issued token; the raw value is only ever in the email body. The
  * {@code expiresAt} field carries a TTL index so Mongo expires stale rows on its own.
+ *
+ * <p>The optional {@code redirectTo} field (G.5 — additive, nullable, default null) records
+ * the deep-link target supplied at <em>request-time</em>. It is echoed back in the redeem
+ * response so the portal FE can route post-login to the intended page (e.g.
+ * {@code /portal/contracts/<id>}). A null value means no deep-link was supplied; legacy
+ * tokens (pre-G.5) deserialise with {@code redirectTo=null} — behaviour is byte-identical
+ * to before the addition.
  */
 @Document("magic_link_tokens")
 @CompoundIndex(
@@ -44,6 +51,14 @@ public class MagicLinkToken implements TenantScoped {
     private Instant expiresAt;
 
     private Instant redeemedAt;
+
+    /**
+     * Optional deep-link target persisted at request-time (G.5). Nullable; null means
+     * no deep-link was requested. The value stored here is echoed verbatim in the
+     * {@code MagicLinkRedemption} response — it is NEVER sourced from the redeem request
+     * (open-redirect mitigation: §9 #5).
+     */
+    private String redirectTo;
 
     @Version
     private Long version;

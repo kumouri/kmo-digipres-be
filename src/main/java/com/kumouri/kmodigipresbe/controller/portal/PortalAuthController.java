@@ -42,7 +42,7 @@ public class PortalAuthController {
                                        ServerWebExchange exchange) {
         return hostTenantResolver.resolve(exchange)
                 .flatMap(tenant -> magicLinkService
-                        .request(tenant, req.email(), req.linkBaseUrl())
+                        .request(tenant, req.email(), req.linkBaseUrl(), req.redirectTo())
                         .contextWrite(TenantContextHolder.write(
                                 new TenantContext(tenant.getId(), null, Set.of()))));
     }
@@ -52,13 +52,17 @@ public class PortalAuthController {
                                                      ServerWebExchange exchange) {
         return hostTenantResolver.resolve(exchange)
                 .flatMap(tenant -> magicLinkService.redeem(tenant, req.token()))
-                .map(user -> {
-                    sessionService.issueSession(user, exchange);
+                .map(result -> {
+                    sessionService.issueSession(result.user(), exchange);
+                    // Open-redirect mitigation (§9 #5): redirectTo is ALWAYS result.redirectTo()
+                    // which is token.getRedirectTo() — the value persisted at request-time.
+                    // It is NEVER read from the current redeem request body.
                     return new MagicLinkRedemption(
-                            user.getId().toString(),
-                            user.getEmail(),
-                            user.getDisplayName(),
-                            user.getRoles());
+                            result.user().getId().toString(),
+                            result.user().getEmail(),
+                            result.user().getDisplayName(),
+                            result.user().getRoles(),
+                            result.redirectTo());
                 });
     }
 
@@ -88,12 +92,29 @@ public class PortalAuthController {
         return Mono.empty();
     }
 
-    public record MagicLinkRequest(@Email @NotBlank String email, String linkBaseUrl) {}
+    /**
+     * Request body for {@code POST /portal/auth/magic-link}.
+     *
+     * <p>{@code linkBaseUrl} controls the URL embedded in the emailed link (unchanged).
+     * {@code redirectTo} (G.5 — additive, nullable) is an optional deep-link target that
+     * is persisted on the token and echoed back in the redeem response so the portal FE
+     * can route post-login. When absent (null) behaviour is byte-identical to pre-G.5.
+     */
+    public record MagicLinkRequest(@Email @NotBlank String email, String linkBaseUrl,
+                                   String redirectTo) {}
 
     public record MagicLinkRedeem(@NotBlank String token) {}
 
+    /**
+     * Response for {@code POST /portal/auth/magic-link/redeem}.
+     *
+     * <p>{@code redirectTo} (G.5 — additive, nullable) echoes the deep-link target that
+     * was supplied and persisted at request-time. It is ALWAYS sourced from the persisted
+     * token field — NEVER from the redeem request body (open-redirect mitigation: §9 #5).
+     * Null means no deep-link was supplied when the token was issued.
+     */
     public record MagicLinkRedemption(String userId, String email, String displayName,
-                                      Set<String> roles) {}
+                                      Set<String> roles, String redirectTo) {}
 
     public record PortalMe(String userId, String tenantId, String email,
                            String displayName, Set<String> roles, String portal) {}
