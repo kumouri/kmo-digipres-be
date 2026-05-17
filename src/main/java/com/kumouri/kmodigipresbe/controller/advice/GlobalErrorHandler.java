@@ -172,6 +172,30 @@ import java.util.UUID;
  *       idempotency; deal/project codes thrown by the reused
  *       {@code moveStage}/{@code convertFromDeal} services
  *       ({@code 1400}/{@code 1401}/{@code 3431}/{@code 3432}/{@code 3433}).</li>
+ *   <li>{@code 3800-3899} — <em>Phase G</em>: Portal expansion.
+ *       <em>Portal ownership / scoping (new ownership gates — the deliberate same-404
+ *       confidentiality choice: not-found and not-owned return the SAME errorCode so a
+ *       portal user cannot distinguish "entity exists but isn't yours" from "no such
+ *       entity" — no enumeration oracle):</em>
+ *       {@code 3801} invoice not found or not owned by the caller's contact/company (404);
+ *       {@code 3802} quote not found or not owned (404);
+ *       {@code 3803} project not found or not owned (404);
+ *       {@code 3804} contract not found or not owned (404);
+ *       {@code 3805} portal quote status transition not permitted — only
+ *       {@code SENT→ACCEPTED} or {@code SENT→DECLINED} from the portal (409);
+ *       {@code 3806} contract signed PDF not available — contract is not in SIGNED
+ *       status or {@code signedPdfStorageRef} is absent (409);
+ *       {@code 3807} project file not found or not accessible under the portal access
+ *       policy (404, defensive — the presign-download {@code 1311} foreign-tenant
+ *       rejection is the storage-layer backstop). Reserved for future portal growth:
+ *       {@code 3808-3899}.
+ *       Reused (NOT re-allocated): {@code 1250}/{@code 1251}/{@code 1252}
+ *       (existing {@code PortalLinkedContactResolver} codes — surfaced unchanged);
+ *       {@code 2200} Quote not found; {@code 2300} Invoice not found;
+ *       {@code 2510}/{@code 3620}/{@code 3621} Stripe not connected / apiKey missing /
+ *       checkout failed (thrown by the reused {@code StripeCheckoutService});
+ *       {@code 1310}/{@code 1311} file storage (reused {@code FileStorageService});
+ *       {@code 3100}/{@code 3101} idempotency middleware.</li>
  * </ul>
  */
 @Slf4j
