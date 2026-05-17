@@ -2,10 +2,13 @@ package com.kumouri.kmodigipresbe.service.storage;
 
 import com.kumouri.kmodigipresbe.config.FileStorageProperties;
 import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
-import lombok.RequiredArgsConstructor;
+import reactor.core.publisher.Mono;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.core.async.AsyncRequestBody;
 import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.s3.S3AsyncClient;
+import software.amazon.awssdk.services.s3.S3AsyncClientBuilder;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
@@ -22,35 +25,58 @@ import java.util.UUID;
  *
  * <p>Presigning is a synchronous hash + signature (no network IO), safe to call
  * directly from a reactive handler.
+ *
+ * <h2>Server-side byte store (Phase F — F-D8)</h2>
+ * {@link #putBytes} uses an {@link S3AsyncClient} built alongside the existing
+ * {@link S3Presigner} in {@link #create} with identical region/endpoint/credentials
+ * config so AWS S3, Cloudflare R2, and MinIO all keep working. {@code S3AsyncClient}
+ * is in the already-present {@code software.amazon.awssdk:s3} artifact — no new
+ * dependency. The call is non-blocking (the SDK returns a
+ * {@link java.util.concurrent.CompletableFuture} backed by the SDK's
+ * non-blocking Netty HTTP client); wrapping in {@code Mono.fromFuture} keeps
+ * everything on the reactive event loop without a {@code boundedElastic} hop.
  */
-@RequiredArgsConstructor
 public class S3FileStorageService implements FileStorageService {
 
     private final S3Presigner presigner;
+    private final S3AsyncClient asyncClient;
     private final FileStorageProperties props;
 
+    S3FileStorageService(S3Presigner presigner, S3AsyncClient asyncClient,
+                         FileStorageProperties props) {
+        this.presigner = presigner;
+        this.asyncClient = asyncClient;
+        this.props = props;
+    }
+
     public static S3FileStorageService create(FileStorageProperties props) {
-        S3Presigner.Builder builder = S3Presigner.builder()
-                .region(Region.of(props.region()));
-        if (props.endpoint() != null && !props.endpoint().isBlank()) {
-            builder.endpointOverride(URI.create(props.endpoint()));
-        }
+        // Shared credential + region/endpoint config for both the presigner and the
+        // async client so all three S3-compatible targets (AWS, R2, MinIO) work.
+        Region region = Region.of(props.region());
+        StaticCredentialsProvider creds = null;
         if (props.accessKey() != null && !props.accessKey().isBlank()) {
-            builder.credentialsProvider(StaticCredentialsProvider.create(
-                    AwsBasicCredentials.create(props.accessKey(), props.secretKey())));
+            creds = StaticCredentialsProvider.create(
+                    AwsBasicCredentials.create(props.accessKey(), props.secretKey()));
         }
-        return new S3FileStorageService(builder.build(), props);
+        URI endpointOverride = (props.endpoint() != null && !props.endpoint().isBlank())
+                ? URI.create(props.endpoint()) : null;
+
+        S3Presigner.Builder presignerBuilder = S3Presigner.builder().region(region);
+        if (endpointOverride != null) presignerBuilder.endpointOverride(endpointOverride);
+        if (creds != null) presignerBuilder.credentialsProvider(creds);
+
+        S3AsyncClientBuilder asyncBuilder = S3AsyncClient.builder().region(region);
+        if (endpointOverride != null) asyncBuilder.endpointOverride(endpointOverride);
+        if (creds != null) asyncBuilder.credentialsProvider(creds);
+
+        return new S3FileStorageService(presignerBuilder.build(), asyncBuilder.build(), props);
     }
 
     @Override
     public Presigned presignUpload(UUID tenantId, String partition, String contentType,
                                    String suffix, Duration ttl) {
         requireBucket();
-        String key = String.format("tenants/%s/%s/%s%s",
-                tenantId,
-                partition == null ? "misc" : partition,
-                UUID.randomUUID(),
-                suffix == null || suffix.isBlank() ? "" : "." + suffix);
+        String key = buildKey(tenantId, partition, suffix);
         PutObjectRequest put = PutObjectRequest.builder()
                 .bucket(props.bucket())
                 .key(key)
@@ -81,6 +107,40 @@ public class S3FileStorageService implements FileStorageService {
                 .getObjectRequest(get)
                 .build();
         return presigner.presignGetObject(req).url().toString();
+    }
+
+    /**
+     * Server-side byte store (Phase F — F-D8). Stores {@code bytes} directly in
+     * S3-compatible storage using the non-blocking {@link S3AsyncClient}.
+     * Returns the storage ref (key) on success.
+     *
+     * <p>Legal-integrity note: no transformation is applied to {@code bytes} —
+     * the signed PDF is stored exactly as received from Documenso.
+     */
+    @Override
+    public Mono<String> putBytes(UUID tenantId, String partition, byte[] bytes,
+                                 String contentType, String suffix) {
+        requireBucket();
+        String key = buildKey(tenantId, partition, suffix);
+        PutObjectRequest put = PutObjectRequest.builder()
+                .bucket(props.bucket())
+                .key(key)
+                .contentType(contentType)
+                .contentLength((long) bytes.length)
+                .build();
+        return Mono.fromFuture(() ->
+                asyncClient.putObject(put, AsyncRequestBody.fromBytes(bytes))
+        ).thenReturn(key);
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    private String buildKey(UUID tenantId, String partition, String suffix) {
+        return String.format("tenants/%s/%s/%s%s",
+                tenantId,
+                partition == null ? "misc" : partition,
+                UUID.randomUUID(),
+                suffix == null || suffix.isBlank() ? "" : "." + suffix);
     }
 
     private void requireBucket() {

@@ -1,5 +1,7 @@
 package com.kumouri.kmodigipresbe.service.storage;
 
+import reactor.core.publisher.Mono;
+
 import java.time.Duration;
 import java.util.UUID;
 
@@ -12,6 +14,12 @@ import java.util.UUID;
  * <p>Used by every subsystem that needs to upload binary files — field-service
  * captures (Phase 3), quote PDFs (Phase 7), generic attachments (Phase 7), and
  * any later module.
+ *
+ * <h2>Server-side byte store (Phase F — F-D8)</h2>
+ * {@link #putBytes} is a narrowly-scoped addition for the signed-PDF-to-S3
+ * integrity path: the Documenso webhook receives a signed legal document
+ * server-side (the FE never sees those bytes) and must persist them intact.
+ * The presign-only contract for all other paths is unchanged.
  */
 public interface FileStorageService {
 
@@ -29,6 +37,21 @@ public interface FileStorageService {
      * don't start with this tenant's prefix.
      */
     String presignDownload(UUID tenantId, String storageRef, Duration ttl);
+
+    /**
+     * Server-side byte store (Phase F — F-D8). Stores {@code bytes} directly in
+     * S3-compatible storage under {@code tenants/<tenantId>/<partition>/<uuid>.<suffix>}
+     * and returns the storage ref (key). The caller is responsible for supplying
+     * exactly the bytes to store — no transformation is applied (legal-integrity
+     * invariant: the signed PDF is stored exactly as received from Documenso,
+     * never re-rendered).
+     *
+     * <p>Returns a {@link Mono} that emits the storage ref on success or errors
+     * with a {@link com.kumouri.kmodigipresbe.exceptions.DigiPresBeException}
+     * ({@code 1310}/503) if the bucket is not configured.
+     */
+    Mono<String> putBytes(UUID tenantId, String partition, byte[] bytes,
+                          String contentType, String suffix);
 
     record Presigned(String url, String storageRef, String method) {
     }
