@@ -1,3 +1,16 @@
+# The 'test' Spring profile is active for the ENTIRE test source set. The
+# effective test-only overrides live in application-test.properties — a
+# PROFILE-SPECIFIC file reliably overrides the profile-agnostic main
+# src/main/resources/application.properties, whereas a plain test application.yml
+# does NOT (Spring Boot loads .properties at higher precedence than .yml, so main
+# application.properties wins for every key it defines — empirically: the spawn
+# job was still scheduled and the scheduler still started despite the test-yml
+# disables below). Nothing in main config sets spring.profiles, so this stands.
+# Per-IT @TestPropertySource still outranks the profile file (the lone scheduler
+# opt-in, QuartzMongoJobStoreIT, uses that).
+spring:
+  profiles:
+    active: test
 kmosf:
   service-hub:
     sla-breach-scheduler:
