@@ -19,6 +19,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient
 @Import(TestcontainersConfiguration.class)
@@ -70,16 +72,19 @@ class AuthSmokeIT {
                 .expectStatus().isOk()
                 .expectBody(Map.class).returnResult().getResponseBody();
         String token = (String) loginBody.get("token");
+        assertEquals("Smoke", loginBody.get("tenantName"));
 
         web.get().uri("/contacts")
                 .header("Authorization", "Bearer " + token)
                 .exchange()
                 .expectStatus().isOk();
 
-        web.get().uri("/auth/me")
+        Map<?, ?> meBody = web.get().uri("/auth/me")
                 .header("Authorization", "Bearer " + token)
                 .exchange()
-                .expectStatus().isOk();
+                .expectStatus().isOk()
+                .expectBody(Map.class).returnResult().getResponseBody();
+        assertEquals("Smoke", meBody.get("tenantName"));
     }
 
     @Test

@@ -5,6 +5,7 @@ import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
 import com.kumouri.kmodigipresbe.model.request.LoginRequest;
 import com.kumouri.kmodigipresbe.model.request.LoginResponse;
 import com.kumouri.kmodigipresbe.model.user.User;
+import com.kumouri.kmodigipresbe.repository.TenantRepository;
 import com.kumouri.kmodigipresbe.repository.UserRepository;
 import com.kumouri.kmodigipresbe.service.AuthService;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
@@ -24,6 +25,7 @@ public class AuthController {
 
     private final AuthService authService;
     private final UserRepository users;
+    private final TenantRepository tenants;
     private final AuthModeProperties authModeProperties;
 
     /**
@@ -54,7 +56,16 @@ public class AuthController {
                         return Mono.error(new DigiPresBeException(
                                 "No user id in token", 1022, 401));
                     }
-                    return users.findById(ctx.userId());
+                    // Enrich /auth/me with the tenant's business name (non-persisted
+                    // projection). Empty/absent tenant → leave tenantName null and
+                    // still return the user. No switchIfEmpty (repo §9 invariant).
+                    return users.findById(ctx.userId())
+                            .flatMap(user -> tenants.findById(user.getTenantId())
+                                    .map(t -> {
+                                        user.setTenantName(t.getDisplayName());
+                                        return user;
+                                    })
+                                    .defaultIfEmpty(user));
                 });
     }
 
