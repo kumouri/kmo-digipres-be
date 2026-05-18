@@ -41,6 +41,21 @@ public class Meeting implements TenantScoped {
     private UUID organizerContactId;
     private Set<UUID> attendeeContactIds;
 
+    /**
+     * Cal.com booking uid — the projection key used by {@code CalComWebhookService}
+     * to upsert/cancel this Meeting in response to a verified Cal.com webhook (Phase H
+     * — H.2 / H-D2 source-of-truth ADR).
+     *
+     * <p>Additive-nullable: legacy Meeting documents deserialize this as {@code null}
+     * (the Phase-E {@code paymentTerms} precedent — no {@code @Builder.Default}; null
+     * means "not sourced from Cal.com").
+     *
+     * <p>Sparse index: the index covers only documents where the field is present (the
+     * overwhelming majority of Meeting rows pre-Cal.com will not carry this field).
+     */
+    @Indexed(sparse = true)
+    private String calComBookingUid;
+
     @Version
     private Long version;
 
