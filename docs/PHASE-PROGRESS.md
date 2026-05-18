@@ -11,7 +11,7 @@
 | Sub-phase | Status | SHA | Build (main base / +H / skip) | Mandated checks | Deviations |
 |---|---|---|---|---|---|
 | H.1 error range 3900-3999 + DomainEventType Phase-H block | done | f54b418 | compileJava+compileTestJava → BUILD SUCCESSFUL true-exit 0 (31s) | no error-code collision: grep \b39\d\d\b over src/main confirms only the new GlobalErrorHandler Javadoc (lines 199-218); CALCOM_BOOKING_SYNCED/CANCELLED unique — not present elsewhere in src; advisory only; Postmark-bounce reuses EMAIL_BOUNCED/EMAIL_SPAM; Activepieces seed + portal-Zitadel add no new event | none |
-| H.2 Cal.com webhook + client + Meeting source-of-truth projection | todo |  |  | switchIfEmpty grep; verify-before-effect + tenant-from-path; Meeting/MeetingCrudService/BookingService empty/additive diff | |
+| H.2 Cal.com webhook + client + Meeting source-of-truth projection | in-progress |  |  | switchIfEmpty grep; verify-before-effect + tenant-from-path; Meeting/MeetingCrudService/BookingService empty/additive diff | |
 | H.3 IMAP inbound poll-source → unchanged InboundEmailService | todo |  |  | switchIfEmpty grep; default-OFF; Message-ID idempotent; InboundEmailService empty diff | |
 | H.4 Postmark bounce/spam routing (in-place) | todo |  |  | switchIfEmpty grep; PostmarkAuthVerifier empty diff; reuse EMAIL_BOUNCED/EMAIL_SPAM, no new event/controller | |
 | H.5 Activepieces webhook-subscription seed | todo |  |  | switchIfEmpty grep (explicit-boolean seed idempotency); WebhookDeliveryService/WebhookSubscription empty diff; R8 read-only token | |
