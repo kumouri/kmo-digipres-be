@@ -10,6 +10,9 @@ import com.kumouri.kmodigipresbe.integration.IntegrationConnection;
 import com.kumouri.kmodigipresbe.integration.IntegrationConnectionRepository;
 import com.kumouri.kmodigipresbe.model.communication.EmailEngagement;
 import com.kumouri.kmodigipresbe.model.communication.EmailEngagementEvent;
+import com.kumouri.kmodigipresbe.model.contact.Contact;
+import com.kumouri.kmodigipresbe.model.contact.EmailDeliverabilityStatus;
+import com.kumouri.kmodigipresbe.repository.ContactRepository;
 import com.kumouri.kmodigipresbe.repository.EmailEngagementRepository;
 import com.kumouri.kmodigipresbe.tenancy.TenantContext;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
@@ -56,6 +59,7 @@ public class PostmarkWebhookService {
     private final ObjectMapper objectMapper;
     private final IntegrationConnectionRepository connections;
     private final EmailEngagementRepository engagements;
+    private final ContactRepository contacts;
     private final DomainEventPublisher events;
 
     public Mono<Void> handle(UUID tenantId, String authHeader, String rawBody) {
@@ -104,6 +108,15 @@ public class PostmarkWebhookService {
 
         Map<String, Object> payloadMap = jsonToMap(body);
 
+        // Phase H.4 — Bounce and SpamComplaint get explicit-boolean idempotency
+        // on (tenantId, messageId, event) + contact deliverability flag update.
+        // Delivery/Open/Click fall through the existing engagement-save path below,
+        // byte-unchanged.
+        if (event == EmailEngagementEvent.BOUNCE || event == EmailEngagementEvent.SPAM) {
+            return processDeliverabilityEvent(
+                    tenantId, messageId, recipient, eventAt, contactId, payloadMap, event);
+        }
+
         EmailEngagement entity = EmailEngagement.builder()
                 .contactId(contactId)
                 .messageId(messageId)
@@ -126,6 +139,108 @@ public class PostmarkWebhookService {
                         domainEventTypeOf(event), tenantId, saved.getId(), domainPayload)))
                 .then()
                 .contextWrite(TenantContextHolder.write(synthetic));
+    }
+
+    /**
+     * Phase H.4 — Handles {@code Bounce} and {@code SpamComplaint} RecordTypes.
+     *
+     * <p>Idempotency: explicit-boolean probe on {@code (tenantId, messageId, event)}.
+     * NEVER {@code switchIfEmpty(process)} — per §9 of the Phase-H plan. A duplicate
+     * delivery returns a 200 no-op (zero second effect).
+     *
+     * <p>On first delivery: saves the engagement record, marks the matched Contact's
+     * {@link com.kumouri.kmodigipresbe.model.contact.Contact#emailDeliverability}
+     * (additive-nullable, advisory), and emits the already-existing
+     * {@link DomainEventType#EMAIL_BOUNCED} or {@link DomainEventType#EMAIL_SPAM}.
+     * The contact lookup is best-effort — if the recipient address resolves no
+     * Contact the engagement is still recorded and the event is still emitted.
+     */
+    private Mono<Void> processDeliverabilityEvent(
+            UUID tenantId,
+            String messageId,
+            String recipient,
+            Instant eventAt,
+            UUID contactId,
+            Map<String, Object> payloadMap,
+            EmailEngagementEvent event) {
+
+        TenantContext synthetic = new TenantContext(
+                tenantId, null, Set.of("INTEGRATION_POSTMARK"));
+
+        // Explicit-boolean idempotency probe on (tenantId, messageId, event).
+        // NEVER switchIfEmpty(process) — the §9 invariant.
+        Mono<Boolean> seenProbe = messageId != null
+                ? engagements.findFirstByTenantIdAndMessageIdAndEvent(tenantId, messageId, event)
+                        .map(existing -> true)
+                        .defaultIfEmpty(false)
+                : Mono.just(false);
+
+        return seenProbe.flatMap(seen -> {
+            if (seen) {
+                log.debug("Postmark {} duplicate (messageId={}), 200 no-op", event, messageId);
+                return Mono.empty();
+            }
+            return recordDeliverabilityAndPublish(
+                    tenantId, messageId, recipient, eventAt, contactId, payloadMap, event);
+        }).contextWrite(TenantContextHolder.write(synthetic));
+    }
+
+    private Mono<Void> recordDeliverabilityAndPublish(
+            UUID tenantId,
+            String messageId,
+            String recipient,
+            Instant eventAt,
+            UUID contactId,
+            Map<String, Object> payloadMap,
+            EmailEngagementEvent event) {
+
+        EmailEngagement entity = EmailEngagement.builder()
+                .contactId(contactId)
+                .messageId(messageId)
+                .event(event)
+                .eventAt(eventAt != null ? eventAt : Instant.now())
+                .recipient(recipient)
+                .payload(payloadMap)
+                .build();
+
+        Map<String, Object> domainPayload = new HashMap<>();
+        domainPayload.put("messageId", messageId);
+        domainPayload.put("recipient", recipient);
+        if (contactId != null) domainPayload.put("contactId", contactId.toString());
+        domainPayload.put("event", event.name());
+
+        EmailDeliverabilityStatus deliverabilityStatus = event == EmailEngagementEvent.BOUNCE
+                ? EmailDeliverabilityStatus.BOUNCED
+                : EmailDeliverabilityStatus.SPAM_COMPLAINED;
+
+        // Resolve the contact for the deliverability flag: prefer the contactId
+        // from the Postmark metadata (round-tripped at send time), fall back to
+        // reverse-lookup by recipient address. Best-effort — a null or unresolvable
+        // contact does not block engagement recording or event emission.
+        Mono<UUID> resolvedContactId = contactId != null
+                ? Mono.just(contactId)
+                : (recipient != null
+                        ? contacts.findByTenantAndEmailAddress(tenantId, recipient)
+                                .next()
+                                .map(Contact::getId)
+                        : Mono.empty());
+
+        Mono<Void> flagUpdate = resolvedContactId
+                .flatMap(cid -> contacts.findByTenantIdAndId(tenantId, cid)
+                        .flatMap(contact -> {
+                            contact.setEmailDeliverability(deliverabilityStatus);
+                            return contacts.save(contact);
+                        }))
+                .then();
+
+        return engagements.save(entity)
+                .doOnNext(saved -> events.publish(DomainEvent.of(
+                        domainEventTypeOf(event), tenantId, saved.getId(), domainPayload)))
+                .then(flagUpdate.onErrorResume(ex -> {
+                    log.warn("Postmark bounce/spam contact flag update failed (messageId={}, event={}): {}",
+                            messageId, event, ex.getMessage());
+                    return Mono.empty();
+                }));
     }
 
     private static EmailEngagementEvent mapRecordType(String recordType) {
