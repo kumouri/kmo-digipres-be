@@ -33,6 +33,15 @@ import java.util.Set;
  * deposits it in an {@code HttpOnly} cookie, and 302s back to the FE.
  * <p>The tenant ID is read back out of the signed OAuth {@code state} parameter — the
  * Authentication object does not carry tenant context.
+ *
+ * <p><strong>H.6 — Zitadel dispatch (additive):</strong> when
+ * {@code registrationId == "zitadel"} the request is delegated to
+ * {@link PortalZitadelSuccessHandler} which reuses the A2 identity components
+ * ({@link com.kumouri.kmodigipresbe.tenancy.ZitadelClaimTenantResolver},
+ * {@link com.kumouri.kmodigipresbe.tenancy.ZitadelOrgTenantCache},
+ * {@link com.kumouri.kmodigipresbe.tenancy.RoleClaimMapper},
+ * {@link com.kumouri.kmodigipresbe.tenancy.ZitadelJustInTimeUserProvisioner}) verbatim.
+ * The Google/Microsoft branches below are byte-identical to their pre-H.6 state.
  */
 @Slf4j
 @Component
@@ -44,6 +53,8 @@ public class PortalOAuthAuthenticationSuccessHandler implements ServerAuthentica
     private final JwtTokenService jwtTokenService;
     private final OAuthStateCodec stateCodec;
     private final PortalProperties portalProperties;
+    // H.6 — injected collaborator for Zitadel portal logins; not called for Google/Microsoft.
+    private final PortalZitadelSuccessHandler portalZitadelSuccessHandler;
 
     @Override
     public Mono<Void> onAuthenticationSuccess(WebFilterExchange webFilterExchange,
@@ -53,6 +64,15 @@ public class PortalOAuthAuthenticationSuccessHandler implements ServerAuthentica
                     "Unexpected authentication type for portal OAuth success handler",
                     1230, 500));
         }
+
+        // H.6 — opt-in Zitadel portal dispatch (additive; Google/Microsoft path unchanged below).
+        // Non-opted tenants (zitadelOrgId == null) never reach this branch because they do not
+        // initiate the zitadel OIDC flow — their local magic-link/passkey path is byte-identical.
+        if ("zitadel".equals(oauthToken.getAuthorizedClientRegistrationId())) {
+            return portalZitadelSuccessHandler.onAuthenticationSuccess(
+                    webFilterExchange, authentication);
+        }
+
         String state = webFilterExchange.getExchange().getRequest().getQueryParams().getFirst("state");
         java.util.UUID tenantId;
         try {
