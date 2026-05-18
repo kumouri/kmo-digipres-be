@@ -198,6 +198,22 @@ public final class DomainEventType {
     public static final String PORTAL_QUOTE_ACCEPTED    = "portal.quoteAccepted";
     public static final String PORTAL_QUOTE_DECLINED    = "portal.quoteDeclined";
 
+    // Phase H — External-integrations glue. All are advisory (RuleEngine / webhook
+    // fan-out) — they do NOT drive any core mutation; the Cal.com reconcile (H.2)
+    // performs the Meeting projection upsert + Activity(MEETING) creation synchronously
+    // and explicitly inside CalComWebhookService. Postmark-bounce routing (H.4) reuses
+    // the existing EMAIL_BOUNCED / EMAIL_SPAM constants above (no new event).
+    // The Activepieces subscription seed (H.5) and portal Zitadel federation (H.6)
+    // add no new domain event.
+    // CALCOM_BOOKING_SYNCED: emitted after a signature-verified Cal.com booking webhook
+    //   reconciles a Meeting projection (created or rescheduled); payload
+    //   {calComBookingUid, meetingId, contactId (nullable if unresolved)}.
+    // CALCOM_BOOKING_CANCELLED: emitted after a verified Cal.com booking-cancelled
+    //   webhook marks the Meeting projection cancelled; payload
+    //   {calComBookingUid, meetingId}.
+    public static final String CALCOM_BOOKING_SYNCED    = "calcom.bookingSynced";
+    public static final String CALCOM_BOOKING_CANCELLED = "calcom.bookingCancelled";
+
     private DomainEventType() {
     }
 }
