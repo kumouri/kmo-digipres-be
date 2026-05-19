@@ -196,6 +196,29 @@ import java.util.UUID;
  *       checkout failed (thrown by the reused {@code StripeCheckoutService});
  *       {@code 1310}/{@code 1311} file storage (reused {@code FileStorageService});
  *       {@code 3100}/{@code 3101} idempotency middleware.</li>
+ *   <li>{@code 3900-3999} — <em>Phase H</em>: External-integrations glue.
+ *       <em>Cal.com webhook:</em> {@code 3900} webhook HMAC signature invalid (401);
+ *       {@code 3901} Cal.com not connected for the tenant (404 — the cross-integration
+ *       not-connected convention; {@code 2510} is the documented cross-integration
+ *       fallback code reused on the send/client path); {@code 3902} webhook body not
+ *       JSON or missing event id (400); {@code 3903} Cal.com booking references no
+ *       resolvable contact (advisory-skip, logged — not a hard error).
+ *       <em>IMAP inbound poller:</em> {@code 3910} IMAP poll connection/auth failure
+ *       (502, logged, poller-internal — never surfaced to an HTTP client); {@code 3911}
+ *       IMAP message unparseable (skipped, logged).
+ *       <em>Activepieces seed:</em> {@code 3920} Activepieces seed target URL invalid
+ *       (400); {@code 3921} Activepieces seed not permitted — module disabled (403/404).
+ *       <em>Portal Zitadel federation (opt-in per {@code Tenant.zitadelOrgId}):</em>
+ *       {@code 3930} portal Zitadel federation not enabled for this tenant —
+ *       {@code zitadelOrgId == null} (404, same-as-not-found confidentiality posture);
+ *       {@code 3931} portal Zitadel callback state/nonce invalid (401).
+ *       Reserved for future glue growth: {@code 3940-3999}.
+ *       Reused (NOT re-allocated): {@code 2510} (provider-not-connected cross-integration
+ *       convention, used by Stripe/Documenso send paths — the Cal.com webhook uses the
+ *       Phase-H-local {@code 3901}; {@code 2510} is the documented cross-integration
+ *       fallback); {@code 3100}/{@code 3101} (idempotency middleware);
+ *       {@code 3300-3303} (A2 Zitadel runtime claim/login failures — surfaced unchanged
+ *       on the portal-federation path).</li>
  * </ul>
  */
 @Slf4j

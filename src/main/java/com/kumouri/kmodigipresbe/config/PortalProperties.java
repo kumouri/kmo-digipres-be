@@ -32,7 +32,7 @@ public record PortalProperties(
             long challengeTtlSeconds) {
     }
 
-    public record Oauth(Provider google, Provider microsoft) {
+    public record Oauth(Provider google, Provider microsoft, Provider zitadel) {
         public record Provider(String clientId, String clientSecret, String issuerUri) {
             public boolean enabled() {
                 return clientId != null && !clientId.isBlank()

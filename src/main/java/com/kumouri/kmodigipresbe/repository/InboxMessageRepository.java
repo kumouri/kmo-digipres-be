@@ -15,6 +15,14 @@ public interface InboxMessageRepository
 
     Flux<InboxMessage> findAllByTenantIdAndContactId(UUID tenantId, UUID contactId);
 
+    /**
+     * IMAP-poller idempotency probe (Phase H.3). Returns the first message with
+     * the given RFC-822 Message-ID for a tenant; used with
+     * {@code .map(x -> true).defaultIfEmpty(false)} to build an explicit-boolean
+     * skip branch — never {@code switchIfEmpty(ingest)}.
+     */
+    Mono<InboxMessage> findFirstByTenantIdAndMessageId(UUID tenantId, String messageId);
+
     Flux<InboxMessage> findAllByTenantIdAndCreatedAtBefore(UUID tenantId, Instant cutoff);
 
     Mono<Void> deleteByTenantIdAndId(UUID tenantId, UUID id);

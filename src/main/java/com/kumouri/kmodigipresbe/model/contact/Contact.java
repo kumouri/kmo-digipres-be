@@ -81,6 +81,15 @@ public class Contact implements Auditable, CustomFieldHost {
      */
     private FirstTouch firstTouch;
 
+    /**
+     * Deliverability signal from inbound Postmark bounce/spam webhooks (Phase H.4).
+     * Null until the first bounce or spam-complaint webhook arrives for this contact.
+     * Advisory only — suppression policy is a downstream automation concern.
+     * Additive-nullable: no {@code @Builder.Default}; legacy contacts deserialize
+     * {@code emailDeliverability=null} with no behavioural change.
+     */
+    private EmailDeliverabilityStatus emailDeliverability;
+
     @Version
     private Long version;
 

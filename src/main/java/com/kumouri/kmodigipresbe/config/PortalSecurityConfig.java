@@ -100,10 +100,17 @@ public class PortalSecurityConfig {
      * Indicator bean exposed by {@link OAuthClientRegistrationConfig}. Used to decide
      * whether the chain should wire {@code oauth2Login()} at all — when no providers
      * have credentials configured the configurer is omitted entirely.
+     *
+     * <p>{@code zitadelEnabled} is added by H.6. The Zitadel portal registration is
+     * present when {@code kmosf.portal.oauth.zitadel.*} is configured; the per-tenant
+     * opt-in ({@code Tenant.zitadelOrgId != null}) is enforced in
+     * {@link com.kumouri.kmodigipresbe.service.portal.PortalZitadelSuccessHandler},
+     * not at the registration level.
      */
-    public record OAuthRegistrationsSummary(boolean googleEnabled, boolean microsoftEnabled) {
+    public record OAuthRegistrationsSummary(boolean googleEnabled, boolean microsoftEnabled,
+                                             boolean zitadelEnabled) {
         public boolean anyEnabled() {
-            return googleEnabled || microsoftEnabled;
+            return googleEnabled || microsoftEnabled || zitadelEnabled;
         }
     }
 }

@@ -10,6 +10,7 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.annotation.Version;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
@@ -31,7 +32,13 @@ public class InboxMessage implements Auditable {
     private UUID tenantId;
     private UUID threadId;
 
-    /** RFC 5322 Message-ID header. */
+    /**
+     * RFC 5322 Message-ID header. Used for IMAP-poller idempotency (Phase H.3):
+     * a message whose Message-ID is already recorded is skipped. Nullable for
+     * backward-compatibility with messages ingested before H.3 (additive-only —
+     * the Phase-E {@code paymentTerms} precedent; no {@code @Builder.Default}).
+     */
+    @Indexed(sparse = true)
     private String messageId;
 
     private String from;

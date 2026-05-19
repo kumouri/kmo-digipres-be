@@ -59,6 +59,14 @@ public class OAuthClientRegistrationConfig {
             registrations.add(microsoftRegistration(props.oauth().microsoft()));
             log.info("OAuth provider 'microsoft' is configured for the client portal.");
         }
+        // H.6 — Zitadel portal OIDC registration: opt-in per tenant via Tenant.zitadelOrgId.
+        // The registration is created when portal Zitadel credentials are configured;
+        // the per-tenant opt-in gate (3930) is enforced in PortalZitadelSuccessHandler.
+        if (props.oauth() != null && props.oauth().zitadel() != null
+                && props.oauth().zitadel().enabled()) {
+            registrations.add(zitadelPortalRegistration(props.oauth().zitadel()));
+            log.info("OAuth provider 'zitadel' is configured for the client portal (opt-in per tenant via Tenant.zitadelOrgId).");
+        }
         if (registrations.isEmpty()) {
             log.info("No OAuth providers configured; portal will offer magic-link + passkey only.");
             // InMemoryReactiveClientRegistrationRepository's constructor rejects an empty
@@ -76,7 +84,10 @@ public class OAuthClientRegistrationConfig {
                 && props.oauth().google().enabled();
         boolean microsoft = props.oauth() != null && props.oauth().microsoft() != null
                 && props.oauth().microsoft().enabled();
-        return new OAuthRegistrationsSummary(google, microsoft);
+        // H.6 — Zitadel is opt-in per tenant; registration presence is the config gate.
+        boolean zitadel = props.oauth() != null && props.oauth().zitadel() != null
+                && props.oauth().zitadel().enabled();
+        return new OAuthRegistrationsSummary(google, microsoft, zitadel);
     }
 
     /**
@@ -125,6 +136,39 @@ public class OAuthClientRegistrationConfig {
                 .scope("openid", "email", "profile")
                 .userNameAttributeName("sub")
                 .clientName("Microsoft")
+                .build();
+    }
+
+    /**
+     * Zitadel portal OIDC registration (H.6 — opt-in per tenant via
+     * {@code Tenant.zitadelOrgId}).
+     *
+     * <p>The issuerUri is taken from {@code kmosf.portal.oauth.zitadel.issuer-uri}
+     * (configurable; no host hardcoded — WireMock in tests). The Zitadel discovery
+     * endpoint at {@code <issuerUri>/.well-known/openid-configuration} is used to
+     * auto-populate the authorization + token + JWKS endpoints.
+     *
+     * <p><strong>Per-tenant opt-in gate:</strong> a portal user whose tenant has
+     * {@code Tenant.zitadelOrgId == null} is rejected with error 3930 by
+     * {@link com.kumouri.kmodigipresbe.service.portal.PortalZitadelSuccessHandler}
+     * before any identity data is written. The non-opted local (magic-link/passkey)
+     * path is unchanged — this registration only fires for {@code /portal/auth/oauth2/*
+     * /zitadel} requests.
+     */
+    private ClientRegistration zitadelPortalRegistration(PortalProperties.Oauth.Provider props) {
+        String issuer = props.issuerUri() != null && !props.issuerUri().isBlank()
+                ? props.issuerUri()
+                : "https://zitadel.internal.invalid"; // non-routable default; override in production
+        return ClientRegistrations.fromIssuerLocation(issuer)
+                .registrationId("zitadel")
+                .clientId(props.clientId())
+                .clientSecret(props.clientSecret())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_POST)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri("{baseUrl}/portal/auth/oauth2/callback/{registrationId}")
+                .scope("openid", "email", "profile")
+                .userNameAttributeName("sub")
+                .clientName("Zitadel")
                 .build();
     }
 
