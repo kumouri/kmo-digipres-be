@@ -38,6 +38,7 @@ public class WorkOrderService {
     private final JobSiteRepository jobSites;
     private final ContactRepository contacts;
     private final DomainEventPublisher events;
+    private final WorkOrderNumberGenerator numbers;
 
     public Flux<WorkOrder> findAll() {
         return workOrders.findAll();
@@ -51,8 +52,15 @@ public class WorkOrderService {
 
     public Mono<WorkOrder> create(WorkOrder toCreate) {
         toCreate.setId(null);
+        toCreate.setWorkOrderNumber(null); // server-assigned; never taken from the request body
         if (toCreate.getStatus() == null) toCreate.setStatus(WorkOrderStatus.DRAFT);
-        return workOrders.save(toCreate);
+        return TenantContextHolder.required()
+                .flatMap(ctx -> numbers.next(ctx.tenantId()))
+                .map(number -> {
+                    toCreate.setWorkOrderNumber(number);
+                    return toCreate;
+                })
+                .flatMap(workOrders::save);
     }
 
     public Mono<WorkOrder> update(UUID id, WorkOrder patch) {
@@ -64,6 +72,7 @@ public class WorkOrderService {
             if (patch.getScheduledEnd() != null) existing.setScheduledEnd(patch.getScheduledEnd());
             if (patch.getTechnicianUserId() != null) existing.setTechnicianUserId(patch.getTechnicianUserId());
             if (patch.getServiceType() != null) existing.setServiceType(patch.getServiceType());
+            if (patch.getTitle() != null) existing.setTitle(patch.getTitle());
             if (patch.getRecurrenceRule() != null) existing.setRecurrenceRule(patch.getRecurrenceRule());
             if (patch.getNotes() != null) existing.setNotes(patch.getNotes());
             if (patch.getCustomFields() != null) existing.setCustomFields(patch.getCustomFields());

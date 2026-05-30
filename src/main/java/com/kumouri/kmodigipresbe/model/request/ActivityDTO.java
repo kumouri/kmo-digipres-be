@@ -22,6 +22,13 @@ public class ActivityDTO {
     private ActivityDirection direction;
     private SubjectType subjectType;
     private UUID subjectId;
+    /**
+     * Read-only: the resolved display name of the subject (Contact displayName,
+     * Company name, Deal title, or WorkOrder title/number). Populated by
+     * {@code ActivitySubjectResolver} on the list/get read paths; ignored on
+     * create/update.
+     */
+    private String subjectName;
     private String summary;
     private String body;
     private Instant occurredAt;

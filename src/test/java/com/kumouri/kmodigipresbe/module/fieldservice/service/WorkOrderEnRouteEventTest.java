@@ -10,6 +10,7 @@ import com.kumouri.kmodigipresbe.module.fieldservice.model.WorkOrder;
 import com.kumouri.kmodigipresbe.module.fieldservice.model.WorkOrderStatus;
 import com.kumouri.kmodigipresbe.module.fieldservice.repository.JobSiteRepository;
 import com.kumouri.kmodigipresbe.module.fieldservice.repository.WorkOrderRepository;
+import com.kumouri.kmodigipresbe.module.fieldservice.service.WorkOrderNumberGenerator;
 import com.kumouri.kmodigipresbe.repository.ActivityRepository;
 import com.kumouri.kmodigipresbe.repository.ContactRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -61,8 +62,9 @@ class WorkOrderEnRouteEventTest {
         events = mock(DomainEventPublisher.class);
         ActivityRepository activities = mock(ActivityRepository.class);
         RecurrenceExpansionService recurrence = mock(RecurrenceExpansionService.class);
+        WorkOrderNumberGenerator numbers = mock(WorkOrderNumberGenerator.class);
         service = new WorkOrderService(
-                workOrders, activities, recurrence, jobSites, contacts, events);
+                workOrders, activities, recurrence, jobSites, contacts, events, numbers);
     }
 
     @Test

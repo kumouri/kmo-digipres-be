@@ -36,6 +36,22 @@ public class WorkOrder implements Auditable, CustomFieldHost {
 
     private UUID tenantId;
 
+    /**
+     * Human-readable work-order number, {@code YYYY-MM-{seq:04}} (e.g.
+     * {@code "2026-05-0001"}). Per-(tenant, calendar-month), assigned by
+     * {@link com.kumouri.kmodigipresbe.module.fieldservice.service.WorkOrderNumberGenerator}
+     * at create time and immutable thereafter. Null on legacy work orders
+     * created before numbering was introduced.
+     */
+    private String workOrderNumber;
+
+    /**
+     * Optional human title/label for the work order. When present it is the
+     * preferred display name (e.g. on an activity's subject); otherwise
+     * {@link #workOrderNumber} is used.
+     */
+    private String title;
+
     private UUID jobSiteId;
 
     @Builder.Default

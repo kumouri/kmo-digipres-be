@@ -10,6 +10,7 @@ import com.kumouri.kmodigipresbe.module.fieldservice.repository.WorkOrderReposit
 import com.kumouri.kmodigipresbe.module.fieldservice.service.CaptureService;
 import com.kumouri.kmodigipresbe.module.fieldservice.service.JobSiteService;
 import com.kumouri.kmodigipresbe.module.fieldservice.service.RecurrenceExpansionService;
+import com.kumouri.kmodigipresbe.module.fieldservice.service.WorkOrderNumberGenerator;
 import com.kumouri.kmodigipresbe.module.fieldservice.service.WorkOrderService;
 import com.kumouri.kmodigipresbe.repository.ActivityRepository;
 import com.kumouri.kmodigipresbe.repository.ContactRepository;
@@ -19,6 +20,7 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.data.mongodb.core.ReactiveMongoOperations;
+import org.springframework.data.mongodb.core.ReactiveMongoTemplate;
 
 import java.util.List;
 
@@ -54,13 +56,20 @@ public class FieldServiceAutoConfiguration {
     }
 
     @Bean
+    public WorkOrderNumberGenerator workOrderNumberGenerator(ReactiveMongoTemplate mongoTemplate) {
+        return new WorkOrderNumberGenerator(mongoTemplate);
+    }
+
+    @Bean
     public WorkOrderService workOrderService(WorkOrderRepository workOrders,
                                              ActivityRepository activities,
                                              RecurrenceExpansionService recurrence,
                                              JobSiteRepository jobSites,
                                              ContactRepository contacts,
-                                             DomainEventPublisher events) {
-        return new WorkOrderService(workOrders, activities, recurrence, jobSites, contacts, events);
+                                             DomainEventPublisher events,
+                                             WorkOrderNumberGenerator workOrderNumberGenerator) {
+        return new WorkOrderService(workOrders, activities, recurrence, jobSites, contacts, events,
+                workOrderNumberGenerator);
     }
 
     @Bean
