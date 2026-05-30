@@ -2,6 +2,7 @@ package com.kumouri.kmodigipresbe.controller;
 
 import com.kumouri.kmodigipresbe.model.request.ActivityDTO;
 import com.kumouri.kmodigipresbe.service.ActivityCrudService;
+import com.kumouri.kmodigipresbe.service.ActivitySubjectResolver;
 import com.kumouri.kmodigipresbe.util.RequestMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -26,15 +27,28 @@ public class ActivityController {
 
     private final ActivityCrudService service;
     private final RequestMapper mapper;
+    private final ActivitySubjectResolver subjects;
 
     @GetMapping
     public Flux<ActivityDTO> list() {
-        return service.findAll().map(mapper::toActivityDTO);
+        return service.findAll().map(mapper::toActivityDTO)
+                .flatMapSequential(this::withSubjectName);
     }
 
     @GetMapping("/{id}")
     public Mono<ActivityDTO> get(@PathVariable UUID id) {
-        return service.findById(id).map(mapper::toActivityDTO);
+        return service.findById(id).map(mapper::toActivityDTO)
+                .flatMap(this::withSubjectName);
+    }
+
+    /** Enrich a mapped DTO with the resolved subject display name (id fallback handled by the FE). */
+    private Mono<ActivityDTO> withSubjectName(ActivityDTO dto) {
+        return subjects.resolveName(dto.getSubjectType(), dto.getSubjectId())
+                .map(name -> {
+                    dto.setSubjectName(name);
+                    return dto;
+                })
+                .defaultIfEmpty(dto);
     }
 
     @PostMapping
