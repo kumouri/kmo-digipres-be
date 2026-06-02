@@ -234,6 +234,20 @@ import java.util.UUID;
  *       cross-integration convention); {@code 2530-2532} (Twilio SMS recipient/send/secret —
  *       surfaced unchanged by the reused {@code TwilioSmsService} on the notify + auto-ack
  *       paths); {@code 1300} Activity-not-found (the reused {@code ActivityCrudService}).</li>
+ *   <li>{@code 4100-4199} — <em>Phase J</em>: Contractor / time-management vertical.
+ *       <em>Project assignment:</em> {@code 4101} Project not found for assignment (404);
+ *       {@code 4102} userId required (400) / User not found (404); {@code 4106} assignment
+ *       not found (404).
+ *       <em>Team directory:</em> {@code 4102} email required (400, shared user-identity
+ *       code); {@code 4103} displayName required (400); {@code 4104} a team member with
+ *       this email already exists (409); {@code 4105} unknown user status (400);
+ *       {@code 4140} team member not found (404).
+ *       <em>Reserved for later sub-phases:</em> {@code 4120} time exists but none approved
+ *       (timesheet billing gate); {@code 4130-4135} contractor scoping (self-resolver,
+ *       not-assigned / not-owned, cross-user write, denyRole); {@code 4150-4151} timesheet
+ *       submit/approve transitions + reject-reason. Reused (NOT re-allocated):
+ *       {@code 1800} RoleGuard ADMIN-required (team + assignment endpoints);
+ *       {@code 3100}/{@code 3101} idempotency middleware (assignment POST).</li>
  * </ul>
  */
 @Slf4j

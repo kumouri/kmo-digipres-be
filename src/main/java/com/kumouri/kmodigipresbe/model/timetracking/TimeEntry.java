@@ -51,7 +51,8 @@ import java.util.UUID;
         @CompoundIndex(name = "tenant_user_started_idx", def = "{'tenantId':1,'userId':1,'startedAt':-1}"),
         @CompoundIndex(name = "tenant_project_idx",      def = "{'tenantId':1,'projectId':1}"),
         @CompoundIndex(name = "tenant_task_idx",         def = "{'tenantId':1,'taskId':1}"),
-        @CompoundIndex(name = "tenant_billing_idx",      def = "{'tenantId':1,'billingStatus':1}")
+        @CompoundIndex(name = "tenant_billing_idx",      def = "{'tenantId':1,'billingStatus':1}"),
+        @CompoundIndex(name = "tenant_timesheet_idx",    def = "{'tenantId':1,'timesheetId':1}")
 })
 @Data
 @Builder(toBuilder = true)
@@ -139,6 +140,29 @@ public class TimeEntry implements Auditable {
      * invoice aggregation (D-D6a).
      */
     private UUID splitGroupId;
+
+    /**
+     * (Phase J) Nullable contractor cost/pay rate captured at log time, symmetric with
+     * {@link #rateAmount} (the BILL rate). Resolved from the {@code ProjectAssignment}
+     * cost override or {@code User.defaultCostRate} at create / timer-start. Drives
+     * payout + margin; null on legacy and non-contractor entries.
+     */
+    private BigDecimal costRateAmount;
+
+    /**
+     * (Phase J) Nullable FK to the {@code Timesheet} period this entry belongs to. Set
+     * via find-or-create-open-period at log time; each midnight-split segment resolves
+     * its own period from its own {@code startedAt}.
+     */
+    private UUID timesheetId;
+
+    /**
+     * (Phase J) Approval gate for invoicing/payout. Flipped {@code true} only when the
+     * owning {@code Timesheet} is APPROVED (single writer), back to {@code false} on
+     * reject/reopen. invoice-from-time and the payout rollup both filter on this.
+     */
+    @Builder.Default
+    private boolean approved = false;
 
     @Version
     private Long version;
