@@ -84,6 +84,7 @@ public class TwilioVoicemailService {
     private final IntegrationConnectionRepository connections;
     private final TwilioVoicemailEventRepository voicemailEvents;
     private final VoicemailTranscriptionSource transcriptionSource;
+    private final VoicemailExtractionService extractionService;
     private final DomainEventPublisher events;
 
     private final String greeting;
@@ -93,6 +94,7 @@ public class TwilioVoicemailService {
             IntegrationConnectionRepository connections,
             TwilioVoicemailEventRepository voicemailEvents,
             VoicemailTranscriptionSource transcriptionSource,
+            VoicemailExtractionService extractionService,
             DomainEventPublisher events,
             @Value("${kmosf.voicemail.greeting:Thank you for calling. Please leave a message "
                     + "with your name, address, and a description of your problem after the "
@@ -101,6 +103,7 @@ public class TwilioVoicemailService {
         this.connections = connections;
         this.voicemailEvents = voicemailEvents;
         this.transcriptionSource = transcriptionSource;
+        this.extractionService = extractionService;
         this.events = events;
         this.greeting = greeting;
         this.recordMaxLengthSeconds = recordMaxLengthSeconds;
@@ -255,15 +258,41 @@ public class TwilioVoicemailService {
     }
 
     /**
-     * Consumes the transcript and (sub-phases 1.3/1.4) extracts structured fields,
-     * find-or-creates the caller Contact, logs an {@code Activity(CALL, INBOUND)}, and
-     * notifies Rob + auto-acks the caller. For 1.2 this is a logged no-op beyond the ledger.
+     * Extracts structured lead fields from the transcript (best-effort — an AI budget/upstream
+     * failure must NOT drop the lead; plan §8), then (sub-phase 1.4) find-or-creates the caller
+     * Contact, logs an {@code Activity(CALL, INBOUND)}, and notifies Rob + auto-acks the caller.
+     *
+     * <p>The extraction is wrapped in {@code onErrorResume(VoicemailExtraction.empty())}: a
+     * {@code 1200} budget-exhausted or {@code 1202} upstream error degrades to an empty
+     * extraction so the lead is still created from the raw transcript + recording.
      */
     private Mono<Void> handleTranscript(UUID tenantId, VoicemailCallbackParams params,
                                         VoicemailTranscription transcript,
                                         TwilioVoicemailEvent savedLedger) {
-        log.debug("Twilio voicemail CallSid {} for tenant {}: transcript source={}, hasText={}",
-                params.callSid(), tenantId, transcript.source(), transcript.hasText());
+        return extractionService.extract(transcript.text())
+                .onErrorResume(e -> {
+                    log.warn("Twilio voicemail CallSid {} for tenant {}: extraction failed "
+                            + "(best-effort, using empty): {}", params.callSid(), tenantId,
+                            e.getMessage());
+                    return Mono.just(VoicemailExtraction.empty());
+                })
+                .flatMap(extraction -> createLeadAndNotify(
+                        tenantId, params, transcript, extraction, savedLedger));
+    }
+
+    /**
+     * Sub-phase 1.4 fills this in: find-or-create Contact by caller phone → log
+     * {@code Activity(CALL, INBOUND)} with the transcript + extracted summary → best-effort
+     * notify Rob + auto-ack caller → publish {@code VOICEMAIL_LEAD_CREATED}. For 1.3 it is a
+     * logged no-op (the extraction is computed + recorded above).
+     */
+    private Mono<Void> createLeadAndNotify(UUID tenantId, VoicemailCallbackParams params,
+                                           VoicemailTranscription transcript,
+                                           VoicemailExtraction extraction,
+                                           TwilioVoicemailEvent savedLedger) {
+        log.debug("Twilio voicemail CallSid {} for tenant {}: extracted '{}' (transcript "
+                        + "source={}, hasText={})", params.callSid(), tenantId,
+                extraction.toSummaryLine(), transcript.source(), transcript.hasText());
         return Mono.empty();
     }
 
