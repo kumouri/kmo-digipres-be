@@ -219,6 +219,20 @@ import java.util.UUID;
  *       fallback); {@code 3100}/{@code 3101} (idempotency middleware);
  *       {@code 3300-3303} (A2 Zitadel runtime claim/login failures — surfaced unchanged
  *       on the portal-federation path).</li>
+ *   <li>{@code 4000-4099} — <em>Phase J</em>: Contractor / time-management vertical.
+ *       <em>Project assignment:</em> {@code 4001} Project not found for assignment (404);
+ *       {@code 4002} userId required (400) / User not found (404); {@code 4006} assignment
+ *       not found (404).
+ *       <em>Team directory:</em> {@code 4002} email required (400, shared user-identity
+ *       code); {@code 4003} displayName required (400); {@code 4004} a team member with
+ *       this email already exists (409); {@code 4005} unknown user status (400);
+ *       {@code 4040} team member not found (404).
+ *       <em>Reserved for later sub-phases:</em> {@code 4020} time exists but none approved
+ *       (timesheet billing gate); {@code 4030-4035} contractor scoping (self-resolver,
+ *       not-assigned / not-owned, cross-user write, denyRole); {@code 4050-4051} timesheet
+ *       submit/approve transitions + reject-reason. Reused (NOT re-allocated):
+ *       {@code 1800} RoleGuard ADMIN-required (team + assignment endpoints);
+ *       {@code 3100}/{@code 3101} idempotency middleware (assignment POST).</li>
  * </ul>
  */
 @Slf4j

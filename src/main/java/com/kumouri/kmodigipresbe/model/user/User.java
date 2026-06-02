@@ -13,6 +13,7 @@ import org.springframework.data.annotation.Version;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.mapping.Document;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
@@ -60,6 +61,20 @@ public class User implements Auditable {
     // Null for STAFF users and for CLIENT users not yet stamped with a Contact link.
     // No index: we always traverse user→contact, never the reverse.
     private UUID contactId;
+
+    /**
+     * (Phase J) Nullable default client bill rate for this user, applied when a
+     * {@code ProjectAssignment} carries no {@code billRateOverride} (rate-resolution
+     * order). Hourly amount.
+     */
+    private BigDecimal defaultBillRate;
+
+    /**
+     * (Phase J) Nullable default contractor cost/pay rate, applied when a
+     * {@code ProjectAssignment} carries no {@code costRateOverride}. Hourly amount;
+     * drives the {@code TimeEntry.costRateAmount} stamp and the payout rollup.
+     */
+    private BigDecimal defaultCostRate;
 
     // Non-persisted projection of the owning Tenant's displayName, populated on
     // /auth/me (and mirrored on the login response) so the FE can show the

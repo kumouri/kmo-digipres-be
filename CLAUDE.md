@@ -101,6 +101,22 @@ Key design decisions (H-D1 through H-D11, plan §3):
 - **No-live-external boundary (§7 — the headline hard line).** Cal.com/IMAP/Mailcow/Activepieces/Postmark/Zitadel = WireMock/sandbox/stub/`.invalid`-default throughout; configurable base URLs; default-OFF pollers; no host hardcoded; no live token/charge/deployment anywhere in the implementation loop. Wiring a live external system is a separate human action — never the loop.
 - **BE-only; no FE this phase (H-D11).** Track-1 loop **PAUSES after Phase H** — Phase I (per-tenant deployment automation) is deferred per ultraplan D13 until the first paying client is funded. Do not start Phase I.
 
+**Phase J — contractor / time-management vertical (IN PROGRESS — J1 SHIPPED this PR; J2–J4 follow).** Adds employee/contractor management on top of the shipped Project (Phase C) + Time-and-Expenses (Phase D) verticals so KMOSF can bring on 1099 teammates: a staff/contractor directory, project assignment with per-assignment bill/cost rates, contractor-scoped access, and submit→approve timesheets gating invoicing/payout. Driving plan: `~/.claude/plans/i-ve-stumbled-across-a-ancient-micali.md` (slug `contractor-time-mgmt`). New packages `model/contractor`, `repository/contractor`, `service/contractor`, `controller/contractor` (symmetric with Phase C/D). Error range **4000–4099** (`GlobalErrorHandler` Javadoc table). Module gate `kmosf.modules.contractor.enabled` (matchIfMissing=true).
+
+Sub-phase **J1** (this PR — data model, directory, assignment, rate stamping):
+
+- **`ProjectAssignment`** (`@Document("project_assignments")`, `Auditable`): the (project × user) join — `billRateOverride`/`costRateOverride`, free-text `role`, soft-delete `active`. Unique `(tenantId, projectId, userId)` makes assignment idempotent (201 first / 200 repeat, the `convertFromDeal` precedent; a soft-deleted row reactivates). A standalone doc (not an array on `Project`) because "list my assigned projects" is the highest-frequency contractor authz query.
+- **`Timesheet`** (`@Document("timesheets")`, `Auditable`): per-(user, ISO-week) period, `status OPEN→SUBMITTED→APPROVED|REJECTED`. Created in J1; the submit/approve lifecycle + the `TimeEntry.approved` invoicing gate land in **J3**. Unique `(tenantId, userId, periodStart)`.
+- **`User`** (additive nullable): `defaultBillRate`, `defaultCostRate`. New role token **`CONTRACTOR`** (a contractor is `roles={STAFF,CONTRACTOR}` — `STAFF` keeps them on the staff security chain, `CONTRACTOR` is the J2 scoping marker; zero auth-infra change — roles already flow through the JWT).
+- **`TimeEntry`** (additive nullable): `costRateAmount` (cost rate, symmetric with the existing bill `rateAmount`), `timesheetId` (FK to the period), `approved` (the J3 invoicing gate, default false) + index `tenant_timesheet_idx`.
+- **Rate + period stamping** (`TimeEntryService.create`/`startTimer`/`stopTimer`/`update`): rates resolve once on the body (explicit body → `ProjectAssignment` override → `User` default → null; a null bill still uses the existing invoice-time `defaultRateAmount` fallback, a null cost is surfaced by the J4 payout report); the period is found-or-created **per split segment** (reuses `TimeSplitService.resolveZone` so the Mon–Sun week boundary aligns with the midnight-split boundary — a week-straddling session lands its halves in two periods). Explicit-boolean find-or-create (never `switchIfEmpty(create)`); unique-index `DuplicateKey` backstop.
+- **`TeamController`** (`/team`, ADMIN): staff/contractor directory CRUD + invite — the first user-management surface (users were otherwise created only by `TenantBootstrapService` + portal invite). Returns `TeamMemberView` projections (no `passwordHash` leak). `CONTRACTOR` implies `STAFF`; password ⇒ ACTIVE else INVITED.
+- **`ProjectAssignmentController`** (`/projects/{projectId}/assignments`, ADMIN, `@IdempotentRoute` on assign): list / assign (idempotent) / update-rates / soft-delete.
+- **Advisory events** (`DomainEventType` Phase-J block): `PROJECT_ASSIGNED`, `PROJECT_UNASSIGNED` — non-driving.
+- **§9 honored:** every conditional-create is explicit-boolean; `switchIfEmpty` only for genuine not-found (4001/4006/4040).
+
+Sub-phases **J2** (contractor scoped access — `/me/contractor/**` + `RoleGuard.denyRole`, codes 4030–4035), **J3** (timesheet submit/approve + approved-only invoicing gate, codes 4020/4050/4051), **J4** (payout + margin report) follow as separate PRs per the driving plan.
+
 ## On-demand reference files
 
 When running, building, or testing locally, read `.claude/commands.md`.

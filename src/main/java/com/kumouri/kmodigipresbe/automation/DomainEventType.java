@@ -214,6 +214,16 @@ public final class DomainEventType {
     public static final String CALCOM_BOOKING_SYNCED    = "calcom.bookingSynced";
     public static final String CALCOM_BOOKING_CANCELLED = "calcom.bookingCancelled";
 
+    // Phase J — Contractor / time-management vertical. All advisory (RuleEngine / webhook
+    // fan-out) — they do NOT drive any core mutation (assignment, rate stamping, timesheet
+    // approval, and invoicing are synchronous + explicit in the contractor services).
+    // PROJECT_ASSIGNED: emitted by ProjectAssignmentService.assign on a fresh assignment;
+    //   payload {projectId, userId}.
+    // PROJECT_UNASSIGNED: emitted by ProjectAssignmentService.unassign (soft-delete);
+    //   payload {projectId, userId}.
+    public static final String PROJECT_ASSIGNED   = "project.assigned";
+    public static final String PROJECT_UNASSIGNED = "project.unassigned";
+
     private DomainEventType() {
     }
 }

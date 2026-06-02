@@ -2,6 +2,7 @@ package com.kumouri.kmodigipresbe.repository;
 
 import com.kumouri.kmodigipresbe.model.user.User;
 import com.kumouri.kmodigipresbe.tenancy.TenantScopedReactiveMongoRepository;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.UUID;
@@ -32,4 +33,7 @@ public interface UserRepository extends TenantScopedReactiveMongoRepository<User
      * returned and the others are ignored.
      */
     Mono<User> findFirstByTenantIdAndEmailStartingWith(UUID tenantId, String prefix);
+
+    /** Phase J — staff / contractor directory listing (excludes portal CLIENT users). */
+    Flux<User> findAllByTenantIdAndPortal(UUID tenantId, User.Portal portal);
 }
