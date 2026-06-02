@@ -214,6 +214,18 @@ public final class DomainEventType {
     public static final String CALCOM_BOOKING_SYNCED    = "calcom.bookingSynced";
     public static final String CALCOM_BOOKING_CANCELLED = "calcom.bookingCancelled";
 
+    // Phase 1 (NMM AI intake) — voicemail-to-lead pipeline. All are advisory (RuleEngine /
+    // webhook fan-out) — they do NOT drive any core mutation; the voicemail reconcile
+    // (Feature A) performs the Contact find-or-create + Activity(CALL) creation +
+    // notify-Rob/auto-ack-caller dispatch synchronously and explicitly inside
+    // TwilioVoicemailService, gated by the ledger-insert-FIRST idempotency.
+    // VOICEMAIL_RECEIVED: emitted after a signature-verified Twilio transcription callback
+    //   is ledgered (one row per CallSid); payload {callSid, fromNumber, transcriptionStatus}.
+    // VOICEMAIL_LEAD_CREATED: emitted after the Contact is found-or-created and the
+    //   Activity(CALL, INBOUND) is logged; payload {callSid, contactId, activityId}.
+    public static final String VOICEMAIL_RECEIVED     = "voicemail.received";
+    public static final String VOICEMAIL_LEAD_CREATED = "voicemail.leadCreated";
+
     private DomainEventType() {
     }
 }

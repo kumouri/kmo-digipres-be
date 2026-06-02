@@ -219,6 +219,21 @@ import java.util.UUID;
  *       fallback); {@code 3100}/{@code 3101} (idempotency middleware);
  *       {@code 3300-3303} (A2 Zitadel runtime claim/login failures — surfaced unchanged
  *       on the portal-federation path).</li>
+ *   <li>{@code 4000-4099} — <em>Phase 1 (NMM AI intake)</em>: voicemail-to-lead pipeline.
+ *       <em>Twilio voice/voicemail webhook:</em> {@code 4000} Twilio request signature
+ *       (X-Twilio-Signature) invalid (401 — the stable AC errorCode; mirrors the Cal.com
+ *       {@code 3900} sig-invalid posture); {@code 4001} Twilio not connected for the tenant
+ *       (404 — the Phase-1-local not-connected code; {@code 2510} remains the documented
+ *       cross-integration fallback); {@code 4002} webhook params malformed or missing the
+ *       {@code CallSid} dedupe key (400, defensive — a duplicate CallSid is acknowledged
+ *       200, not an error); {@code 4003} invalid tenant id in the webhook path (400).
+ *       Reserved for future intake-channel growth: {@code 4004-4099}.
+ *       Reused (NOT re-allocated): {@code 1200-1203} (AI budget gate + Anthropic call
+ *       failure + missing-key — surfaced unchanged by the new {@code VoicemailExtractionService},
+ *       which mirrors {@code AnthropicAiAssistService}); {@code 2510} (provider-not-connected
+ *       cross-integration convention); {@code 2530-2532} (Twilio SMS recipient/send/secret —
+ *       surfaced unchanged by the reused {@code TwilioSmsService} on the notify + auto-ack
+ *       paths); {@code 1300} Activity-not-found (the reused {@code ActivityCrudService}).</li>
  * </ul>
  */
 @Slf4j
