@@ -36,6 +36,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.reactive.function.BodyInserters;
 import reactor.core.Disposable;
 import reactor.core.publisher.Mono;
 
@@ -106,7 +107,7 @@ class TwilioVoicemailIT {
     private static final String AUTH_TOKEN = "twilio_test_authtoken_phase1";
     private static final String ANTHROPIC_API_KEY = "sk-ant-test-phase1-fake";
     private static final String FORWARDED_HOST = "api-demo.kmosolutionsfoundry.test";
-    private static final String BASE_PATH = "/api/v1";
+    private static final String BASE_PATH = "";
     private static final String CALLER = "+16185550199";
     private static final String BUSINESS_NUMBER = "+16185550100";
     private static final String NOTIFY_EMAIL = "rob@nomomole.test";
@@ -275,7 +276,7 @@ class TwilioVoicemailIT {
                 .header("X-Forwarded-Host", FORWARDED_HOST)
                 .header("X-Twilio-Signature", signature != null ? signature : "")
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                .bodyValue(form)
+                .body(BodyInserters.fromFormData(form))
                 .exchange();
     }
 
@@ -440,7 +441,7 @@ class TwilioVoicemailIT {
                 .header("X-Forwarded-Host", FORWARDED_HOST)
                 .header("X-Twilio-Signature", sig)
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                .bodyValue(form)
+                .body(BodyInserters.fromFormData(form))
                 .exchange()
                 .expectStatus().isOk()
                 .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_XML)
@@ -469,7 +470,7 @@ class TwilioVoicemailIT {
                 .header("X-Forwarded-Host", FORWARDED_HOST)
                 .header("X-Twilio-Signature", "bad")
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                .bodyValue(form)
+                .body(BodyInserters.fromFormData(form))
                 .exchange()
                 .expectStatus().isEqualTo(401)
                 .expectBody().jsonPath("$.errorCode").isEqualTo(4000);

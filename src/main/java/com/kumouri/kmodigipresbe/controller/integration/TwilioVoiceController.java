@@ -6,10 +6,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -60,7 +58,6 @@ public class TwilioVoiceController {
     public Mono<ResponseEntity<String>> voice(
             @PathVariable String tenantId,
             @RequestHeader(name = "X-Twilio-Signature", required = false) String signature,
-            @RequestBody(required = false) MultiValueMap<String, String> form,
             ServerWebExchange exchange) {
         UUID parsed;
         try {
@@ -70,7 +67,8 @@ public class TwilioVoiceController {
                     "Invalid tenant id in Twilio voice webhook path", 4003, 400));
         }
         String fullUrl = TwilioVoicemailController.reconstructFullUrl(exchange);
-        return voicemail.handleVoice(parsed, signature, fullUrl, form)
+        return exchange.getFormData()
+                .flatMap(form -> voicemail.handleVoice(parsed, signature, fullUrl, form))
                 .map(twiml -> ResponseEntity.ok()
                         .contentType(MediaType.APPLICATION_XML)
                         .body(twiml));

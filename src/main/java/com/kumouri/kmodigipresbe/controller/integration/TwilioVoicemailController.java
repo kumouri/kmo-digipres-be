@@ -6,10 +6,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.server.reactive.ServerHttpRequest;
-import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -59,7 +57,6 @@ public class TwilioVoicemailController {
     public Mono<Void> voicemail(
             @PathVariable String tenantId,
             @RequestHeader(name = "X-Twilio-Signature", required = false) String signature,
-            @RequestBody(required = false) MultiValueMap<String, String> form,
             ServerWebExchange exchange) {
         UUID parsed;
         try {
@@ -69,7 +66,10 @@ public class TwilioVoicemailController {
                     "Invalid tenant id in Twilio voicemail webhook path", 4003, 400));
         }
         String fullUrl = reconstructFullUrl(exchange);
-        return voicemail.handleVoicemail(parsed, signature, fullUrl, form);
+        // Read the application/x-www-form-urlencoded body via the exchange — the canonical WebFlux
+        // form-webhook approach, robust against the @RequestBody MultiValueMap 415 binding gap.
+        return exchange.getFormData()
+                .flatMap(form -> voicemail.handleVoicemail(parsed, signature, fullUrl, form));
     }
 
     /**
