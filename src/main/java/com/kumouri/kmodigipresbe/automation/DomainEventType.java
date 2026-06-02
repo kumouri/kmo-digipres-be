@@ -226,6 +226,20 @@ public final class DomainEventType {
     public static final String VOICEMAIL_RECEIVED     = "voicemail.received";
     public static final String VOICEMAIL_LEAD_CREATED = "voicemail.leadCreated";
 
+    // Phase 2 (NMM AI intake) — "is this a mole?" photo-triage pipeline (Feature B). All are
+    // advisory (RuleEngine / webhook fan-out) — they do NOT drive any core mutation; the photo
+    // triage performs the Attachment store + MoleVisionService classify + Contact find-or-create
+    // + Activity(NOTE) creation + notify-Rob dispatch synchronously and explicitly inside
+    // MoleTriageService. There is no idempotency ledger (a public classify is intentionally
+    // re-invocable — the ServiceRequestWidgetController precedent), so neither event is
+    // dedupe-gated.
+    // MOLE_PHOTO_CLASSIFIED: emitted after a stored homeowner photo is classified by the vision
+    //   model; payload {classification, confidence, attachmentId, aboveThreshold}.
+    // MOLE_LEAD_CREATED: emitted after the Contact is found-or-created and the Activity(NOTE) is
+    //   logged; payload {classification, confidence, contactId, activityId, attachmentId}.
+    public static final String MOLE_PHOTO_CLASSIFIED = "mole.photoClassified";
+    public static final String MOLE_LEAD_CREATED     = "mole.leadCreated";
+
     private DomainEventType() {
     }
 }

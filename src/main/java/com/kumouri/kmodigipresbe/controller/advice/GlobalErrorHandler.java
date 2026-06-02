@@ -234,6 +234,21 @@ import java.util.UUID;
  *       cross-integration convention); {@code 2530-2532} (Twilio SMS recipient/send/secret —
  *       surfaced unchanged by the reused {@code TwilioSmsService} on the notify + auto-ack
  *       paths); {@code 1300} Activity-not-found (the reused {@code ActivityCrudService}).</li>
+ *   <li>{@code 4010-4039} — <em>Phase 2 (NMM AI intake)</em>: "is this a mole?" photo-triage
+ *       pipeline (Feature B). <em>Public photo-intake widget:</em> {@code 4010} widget token type
+ *       mismatch (the token's {@code widgetType} claim is not {@code "mole-triage"}, 401 — mirrors
+ *       the home-services {@code 2700} widget-type-mismatch posture; the generic token-rejection
+ *       codes {@code 1600-1603} from {@code PublicWidgetTokenService} are surfaced unchanged for
+ *       missing/malformed/bad-signature/expired tokens); {@code 4011} no image part in the
+ *       multipart submission (400); {@code 4012} unsupported image media type — only
+ *       {@code image/jpeg|png|webp|gif} are accepted (415). Reserved for future photo-triage
+ *       growth: {@code 4013-4039}. Reused (NOT re-allocated): {@code 1200-1203} (AI budget gate +
+ *       Anthropic call failure + missing-key — surfaced unchanged by the new
+ *       {@code MoleVisionService}, which mirrors {@code AnthropicAiAssistService}); {@code 1310}/
+ *       {@code 1311} (file storage — surfaced unchanged by the reused {@code FileStorageService}
+ *       on the {@code putBytes} store path); {@code 2530-2532} (Twilio SMS recipient/send/secret —
+ *       surfaced unchanged by the reused {@code TwilioSmsService} on the notify path);
+ *       {@code 1300} Activity-not-found (the reused {@code ActivityCrudService}).</li>
  * </ul>
  */
 @Slf4j
