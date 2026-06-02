@@ -7,8 +7,22 @@ import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
 import com.kumouri.kmodigipresbe.integration.IntegrationConnection;
 import com.kumouri.kmodigipresbe.integration.IntegrationConnectionRepository;
 import com.kumouri.kmodigipresbe.integration.twilio.TwilioSmsService;
+import com.kumouri.kmodigipresbe.model.activity.Activity;
+import com.kumouri.kmodigipresbe.model.activity.ActivityDirection;
+import com.kumouri.kmodigipresbe.model.activity.ActivityType;
+import com.kumouri.kmodigipresbe.model.activity.SubjectType;
+import com.kumouri.kmodigipresbe.model.contact.Contact;
+import com.kumouri.kmodigipresbe.model.contact.ContactType;
+import com.kumouri.kmodigipresbe.model.contact.EmailContact;
+import com.kumouri.kmodigipresbe.model.contact.PhoneContact;
+import com.kumouri.kmodigipresbe.model.contact.PhoneNumber;
 import com.kumouri.kmodigipresbe.model.integration.TwilioVoicemailEvent;
+import com.kumouri.kmodigipresbe.model.request.SingleEmailCommunicationRequest;
+import com.kumouri.kmodigipresbe.model.request.SmsCommunicationRequest;
+import com.kumouri.kmodigipresbe.repository.ContactRepository;
 import com.kumouri.kmodigipresbe.repository.twilio.TwilioVoicemailEventRepository;
+import com.kumouri.kmodigipresbe.service.ActivityCrudService;
+import com.kumouri.kmodigipresbe.service.EmailService;
 import com.kumouri.kmodigipresbe.tenancy.TenantContext;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
 import lombok.extern.slf4j.Slf4j;
@@ -21,7 +35,9 @@ import org.springframework.web.util.HtmlUtils;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -85,28 +101,47 @@ public class TwilioVoicemailService {
     private final TwilioVoicemailEventRepository voicemailEvents;
     private final VoicemailTranscriptionSource transcriptionSource;
     private final VoicemailExtractionService extractionService;
+    private final ContactRepository contacts;
+    private final ActivityCrudService activityCrudService;
+    private final EmailService emailService;
+    private final TwilioSmsService twilioSmsService;
     private final DomainEventPublisher events;
 
     private final String greeting;
     private final int recordMaxLengthSeconds;
+    private final String autoAckMessage;
+    private final String notifyFromAddress;
 
     public TwilioVoicemailService(
             IntegrationConnectionRepository connections,
             TwilioVoicemailEventRepository voicemailEvents,
             VoicemailTranscriptionSource transcriptionSource,
             VoicemailExtractionService extractionService,
+            ContactRepository contacts,
+            ActivityCrudService activityCrudService,
+            EmailService emailService,
+            TwilioSmsService twilioSmsService,
             DomainEventPublisher events,
             @Value("${kmosf.voicemail.greeting:Thank you for calling. Please leave a message "
                     + "with your name, address, and a description of your problem after the "
                     + "beep, and we will call you back.}") String greeting,
-            @Value("${kmosf.voicemail.record-max-length-seconds:120}") int recordMaxLengthSeconds) {
+            @Value("${kmosf.voicemail.record-max-length-seconds:120}") int recordMaxLengthSeconds,
+            @Value("${kmosf.voicemail.auto-ack-message:Thanks for calling — we got your "
+                    + "message and will call you back.}") String autoAckMessage,
+            @Value("${kmosf.mail.smtp.username:}") String notifyFromAddress) {
         this.connections = connections;
         this.voicemailEvents = voicemailEvents;
         this.transcriptionSource = transcriptionSource;
         this.extractionService = extractionService;
+        this.contacts = contacts;
+        this.activityCrudService = activityCrudService;
+        this.emailService = emailService;
+        this.twilioSmsService = twilioSmsService;
         this.events = events;
         this.greeting = greeting;
         this.recordMaxLengthSeconds = recordMaxLengthSeconds;
+        this.autoAckMessage = autoAckMessage;
+        this.notifyFromAddress = notifyFromAddress;
     }
 
     // -------------------------------------------------------------------------
@@ -149,7 +184,7 @@ public class TwilioVoicemailService {
     public Mono<Void> handleVoicemail(UUID tenantId, String signatureHeader, String fullUrl,
                                       MultiValueMap<String, String> form) {
         return verifiedConnection(tenantId, signatureHeader, fullUrl, form)
-                .flatMap(conn -> process(tenantId, VoicemailCallbackParams.parse(form)));
+                .flatMap(conn -> process(tenantId, conn, VoicemailCallbackParams.parse(form)));
     }
 
     /**
@@ -184,7 +219,8 @@ public class TwilioVoicemailService {
                 });
     }
 
-    private Mono<Void> process(UUID tenantId, VoicemailCallbackParams params) {
+    private Mono<Void> process(UUID tenantId, IntegrationConnection conn,
+                               VoicemailCallbackParams params) {
         String callSid = params.callSid();
         if (callSid == null || callSid.isBlank()) {
             // Defensive: without a CallSid we cannot dedupe — reject (400).
@@ -204,7 +240,7 @@ public class TwilioVoicemailService {
                                 + "— 200 no-op", callSid, tenantId);
                         return Mono.empty();
                     }
-                    return processAndRecord(tenantId, params);
+                    return processAndRecord(tenantId, conn, params);
                 });
     }
 
@@ -216,10 +252,11 @@ public class TwilioVoicemailService {
      * so a concurrent re-delivery's second insert hits the unique {@code tenant_callsid_idx} →
      * {@code DuplicateKeyException} → {@code Mono.empty()} = zero second effect.
      *
-     * <p>Sub-phases 1.3/1.4 extend the post-ledger body with extraction + lead + Activity +
-     * notify; for now it ledgers, transcribes, and emits the advisory {@code VOICEMAIL_RECEIVED}.
+     * <p>After the ledger insert, under the synthetic context: transcribe → extract → lead +
+     * Activity → notify, and emit the advisory {@code VOICEMAIL_RECEIVED}.
      */
-    private Mono<Void> processAndRecord(UUID tenantId, VoicemailCallbackParams params) {
+    private Mono<Void> processAndRecord(UUID tenantId, IntegrationConnection conn,
+                                        VoicemailCallbackParams params) {
         String callSid = params.callSid();
 
         TwilioVoicemailEvent ledger = TwilioVoicemailEvent.builder()
@@ -248,7 +285,8 @@ public class TwilioVoicemailService {
                     }
                     emitVoicemailReceived(tenantId, params);
                     return transcriptionSource.transcribe(params)
-                            .flatMap(transcript -> handleTranscript(tenantId, params, transcript, savedLedger))
+                            .flatMap(transcript ->
+                                    handleTranscript(tenantId, conn, params, transcript, savedLedger))
                             .then();
                 });
 
@@ -266,7 +304,8 @@ public class TwilioVoicemailService {
      * {@code 1200} budget-exhausted or {@code 1202} upstream error degrades to an empty
      * extraction so the lead is still created from the raw transcript + recording.
      */
-    private Mono<Void> handleTranscript(UUID tenantId, VoicemailCallbackParams params,
+    private Mono<Void> handleTranscript(UUID tenantId, IntegrationConnection conn,
+                                        VoicemailCallbackParams params,
                                         VoicemailTranscription transcript,
                                         TwilioVoicemailEvent savedLedger) {
         return extractionService.extract(transcript.text())
@@ -277,23 +316,202 @@ public class TwilioVoicemailService {
                     return Mono.just(VoicemailExtraction.empty());
                 })
                 .flatMap(extraction -> createLeadAndNotify(
-                        tenantId, params, transcript, extraction, savedLedger));
+                        tenantId, conn, params, transcript, extraction, savedLedger));
     }
 
     /**
-     * Sub-phase 1.4 fills this in: find-or-create Contact by caller phone → log
-     * {@code Activity(CALL, INBOUND)} with the transcript + extracted summary → best-effort
-     * notify Rob + auto-ack caller → publish {@code VOICEMAIL_LEAD_CREATED}. For 1.3 it is a
-     * logged no-op (the extraction is computed + recorded above).
+     * The lead path: find-or-create a Contact by the caller phone ({@code From}) → log an
+     * {@code Activity(CALL, INBOUND, subjectType=CONTACT)} via the <strong>unchanged</strong>
+     * {@code ActivityCrudService.create} with the transcript as body + the extracted summary →
+     * best-effort notify Rob (email + SMS, target from per-tenant
+     * {@code IntegrationConnection.config}) + auto-ack the caller (SMS) → back-fill the ledger
+     * with the resolved contact/activity ids → publish {@code VOICEMAIL_LEAD_CREATED}.
+     *
+     * <p>Contact find-or-create uses an <strong>explicit-boolean branch</strong> (not
+     * {@code switchIfEmpty(create)}) so the only {@code switchIfEmpty} in this package stays the
+     * genuine not-connected one (§9). Notify + auto-ack are best-effort
+     * ({@code onErrorResume}) — a send failure must NOT fail the ingest (the lead + Activity are
+     * already durable; plan §8). All running under the synthetic {@code TenantContext} set by
+     * {@link #processAndRecord}.
      */
-    private Mono<Void> createLeadAndNotify(UUID tenantId, VoicemailCallbackParams params,
+    private Mono<Void> createLeadAndNotify(UUID tenantId, IntegrationConnection conn,
+                                           VoicemailCallbackParams params,
                                            VoicemailTranscription transcript,
                                            VoicemailExtraction extraction,
                                            TwilioVoicemailEvent savedLedger) {
-        log.debug("Twilio voicemail CallSid {} for tenant {}: extracted '{}' (transcript "
-                        + "source={}, hasText={})", params.callSid(), tenantId,
-                extraction.toSummaryLine(), transcript.source(), transcript.hasText());
-        return Mono.empty();
+        return findOrCreateContact(tenantId, params, extraction)
+                .flatMap(contact -> logCallActivity(tenantId, contact, params, transcript, extraction)
+                        .flatMap(activity -> {
+                            savedLedger.setResolvedContactId(contact.getId());
+                            savedLedger.setCreatedActivityId(activity.getId());
+                            return voicemailEvents.save(savedLedger).thenReturn(activity);
+                        })
+                        .flatMap(activity -> notifyRob(conn, params, extraction)
+                                .then(autoAckCaller(params))
+                                .then(Mono.fromRunnable(() ->
+                                        emitVoicemailLeadCreated(tenantId, params, contact, activity)))))
+                .then();
+    }
+
+    /**
+     * Find-or-create the caller Contact by phone, explicit-boolean (never
+     * {@code switchIfEmpty(create)}). An existing contact is returned untouched (we don't
+     * rewrite staff-curated data from an inbound call — the ServiceRequest-widget precedent).
+     */
+    private Mono<Contact> findOrCreateContact(UUID tenantId, VoicemailCallbackParams params,
+                                              VoicemailExtraction extraction) {
+        String from = params.from();
+        if (from == null || from.isBlank()) {
+            // No caller-ID number — create an anonymous contact so the lead is never dropped.
+            return contacts.save(buildContact(null, extraction));
+        }
+        return contacts.findByTenantAndPhoneNumber(tenantId, from)
+                .next()
+                .map(java.util.Optional::of)
+                .defaultIfEmpty(java.util.Optional.empty())
+                .flatMap(existing -> existing.isPresent()
+                        ? Mono.just(existing.get())
+                        : contacts.save(buildContact(from, extraction)));
+    }
+
+    private Contact buildContact(String fromPhone, VoicemailExtraction extraction) {
+        String name = extraction.name() != null && !extraction.name().isBlank()
+                ? extraction.name().trim() : null;
+        String displayName = name != null
+                ? name
+                : (fromPhone != null ? "Voicemail caller " + fromPhone : "Voicemail caller");
+        List<PhoneNumber> phones = new ArrayList<>();
+        if (fromPhone != null && !fromPhone.isBlank()) {
+            phones.add(PhoneNumber.builder().number(fromPhone).label("voicemail").build());
+        }
+        return Contact.builder()
+                .type(ContactType.PERSON)
+                .firstName(name)
+                .displayName(displayName)
+                .phones(phones)
+                .tags(Set.of("voicemail-lead"))
+                .build();
+    }
+
+    /**
+     * Logs the inbound call via the UNCHANGED {@code ActivityCrudService.create}: summary = the
+     * extracted one-liner, body = the raw transcript (so Rob can always verify), payload =
+     * {callSid, recordingUrl, extracted fields}.
+     */
+    private Mono<Activity> logCallActivity(UUID tenantId, Contact contact,
+                                           VoicemailCallbackParams params,
+                                           VoicemailTranscription transcript,
+                                           VoicemailExtraction extraction) {
+        Map<String, Object> payload = new HashMap<>();
+        if (params.callSid() != null) payload.put("callSid", params.callSid());
+        if (params.recordingSid() != null) payload.put("recordingSid", params.recordingSid());
+        if (params.recordingUrl() != null) payload.put("recordingUrl", params.recordingUrl());
+        if (params.from() != null) payload.put("fromNumber", params.from());
+        Map<String, Object> extractedJson = new HashMap<>();
+        if (extraction.name() != null) extractedJson.put("name", extraction.name());
+        if (extraction.phone() != null) extractedJson.put("phone", extraction.phone());
+        if (extraction.address() != null) extractedJson.put("address", extraction.address());
+        if (extraction.problem() != null) extractedJson.put("problem", extraction.problem());
+        if (extraction.urgency() != null) extractedJson.put("urgency", extraction.urgency());
+        extractedJson.put("callbackRequested", extraction.callbackRequested());
+        payload.put("extractedJson", extractedJson);
+        payload.put("transcriptionSource", transcript.source().name());
+
+        Activity activity = Activity.builder()
+                .tenantId(tenantId)
+                .type(ActivityType.CALL)
+                .direction(ActivityDirection.INBOUND)
+                .subjectType(SubjectType.CONTACT)
+                .subjectId(contact.getId())
+                .summary(extraction.toSummaryLine())
+                .body(transcript.hasText() ? transcript.text() : "(no transcript)")
+                .payload(payload)
+                .build();
+        return activityCrudService.create(activity);
+    }
+
+    /**
+     * Best-effort notify Rob — email + SMS — to the per-tenant targets in
+     * {@code IntegrationConnection.config} ({@code notifyEmail} / {@code notifyPhone}); NOT
+     * hardcoded. A missing target or a send failure is swallowed ({@code onErrorResume}) so the
+     * already-durable lead is never lost.
+     */
+    private Mono<Void> notifyRob(IntegrationConnection conn, VoicemailCallbackParams params,
+                                 VoicemailExtraction extraction) {
+        Map<String, String> config = conn.getConfig() == null ? Map.of() : conn.getConfig();
+        String notifyEmail = config.get("notifyEmail");
+        String notifyPhone = config.get("notifyPhone");
+        String callbackNumber = params.from() != null ? params.from() : "(unknown)";
+        String summary = extraction.toSummaryLine();
+
+        Mono<Void> emailMono = Mono.empty();
+        if (notifyEmail != null && !notifyEmail.isBlank()
+                && notifyFromAddress != null && !notifyFromAddress.isBlank()) {
+            String bodyHtml = "<p>" + HtmlUtils.htmlEscape(summary) + "</p>"
+                    + "<p>Callback number: " + HtmlUtils.htmlEscape(callbackNumber) + "</p>";
+            SingleEmailCommunicationRequest emailReq = SingleEmailCommunicationRequest.builder()
+                    .from(new EmailContact(notifyFromAddress))
+                    .to(new EmailContact(notifyEmail))
+                    .subject("New voicemail lead — " + callbackNumber)
+                    .body(bodyHtml)
+                    .build();
+            emailMono = emailService.sendSingleEmail(emailReq)
+                    .onErrorResume(e -> {
+                        log.warn("Voicemail notify-email failed (best-effort, ignored): {}",
+                                e.getMessage());
+                        return Mono.just(false);
+                    })
+                    .then();
+        }
+
+        Mono<Void> smsMono = Mono.empty();
+        if (notifyPhone != null && !notifyPhone.isBlank()) {
+            SmsCommunicationRequest smsReq = SmsCommunicationRequest.builder()
+                    .to(new PhoneContact(notifyPhone))
+                    .body(summary + " Callback: " + callbackNumber)
+                    .build();
+            smsMono = twilioSmsService.sendSms(smsReq)
+                    .onErrorResume(e -> {
+                        log.warn("Voicemail notify-SMS failed (best-effort, ignored): {}",
+                                e.getMessage());
+                        return Mono.just(false);
+                    })
+                    .then();
+        }
+        return emailMono.then(smsMono);
+    }
+
+    /**
+     * Best-effort auto-acknowledgement SMS back to the caller ({@code From}) via the existing
+     * {@code TwilioSmsService}. Swallowed on failure — never fails the ingest.
+     */
+    private Mono<Void> autoAckCaller(VoicemailCallbackParams params) {
+        String from = params.from();
+        if (from == null || from.isBlank()) {
+            return Mono.empty();
+        }
+        SmsCommunicationRequest ack = SmsCommunicationRequest.builder()
+                .to(new PhoneContact(from))
+                .body(autoAckMessage)
+                .build();
+        return twilioSmsService.sendSms(ack)
+                .onErrorResume(e -> {
+                    log.warn("Voicemail caller auto-ack SMS failed (best-effort, ignored): {}",
+                            e.getMessage());
+                    return Mono.just(false);
+                })
+                .then();
+    }
+
+    private void emitVoicemailLeadCreated(UUID tenantId, VoicemailCallbackParams params,
+                                          Contact contact, Activity activity) {
+        Map<String, Object> payload = new HashMap<>();
+        if (params.callSid() != null) payload.put("callSid", params.callSid());
+        if (contact.getId() != null) payload.put("contactId", contact.getId().toString());
+        if (activity.getId() != null) payload.put("activityId", activity.getId().toString());
+        events.publish(DomainEvent.of(
+                DomainEventType.VOICEMAIL_LEAD_CREATED, tenantId,
+                contact.getId() != null ? contact.getId() : UUID.randomUUID(), payload));
     }
 
     private void emitVoicemailReceived(UUID tenantId, VoicemailCallbackParams params) {
