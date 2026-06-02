@@ -64,8 +64,27 @@ public class InvoiceService {
                 .flatMap(this::withBalance);
     }
 
+    /**
+     * Create an invoice. This is the DRAFT-creation seam: it deliberately neither
+     * assigns an invoice number nor emits {@link DomainEventType#INVOICE_FINALIZED} —
+     * only the first DRAFT→issued transition does (via {@link #setStatus}, the
+     * {@link #recordPayment} auto-advance, or the explicit {@link #createFromQuote}
+     * seam). Accepting a born-issued status here would persist an
+     * issued-but-unnumbered, un-finalized invoice (no number, no QBO push), breaking
+     * the "issued ⇒ numbered" invariant the transition paths uphold. So a non-DRAFT
+     * status is rejected (2301/400); issue an invoice via
+     * {@code POST /invoices/{id}/status} (or convert an accepted quote via
+     * {@code POST /invoices/from-quote/{quoteId}}). A null status is the unset case
+     * and is normalized to DRAFT — {@code create} always persists a clean DRAFT.
+     */
     public Mono<Invoice> create(Invoice toCreate) {
+        if (toCreate.getStatus() != null && toCreate.getStatus() != Invoice.Status.DRAFT) {
+            return Mono.error(new DigiPresBeException(
+                    "Invoice must be created as DRAFT; issue it via POST /invoices/{id}/status",
+                    2301, 400));
+        }
         toCreate.setId(null);
+        toCreate.setStatus(Invoice.Status.DRAFT);
         toCreate.setStatusChangedAt(Instant.now());
         recomputeTotalsFromLines(toCreate);
         return invoices.save(toCreate);
