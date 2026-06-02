@@ -30,4 +30,19 @@ public interface ContactRepository extends TenantScopedReactiveMongoRepository<C
      */
     @Query("{ 'tenantId': ?0, $or: [ { 'emails.email': ?1 }, { 'emails.email.address': ?1 } ] }")
     Flux<Contact> findByTenantAndEmailAddress(UUID tenantId, String emailAddress);
+
+    /**
+     * Look up contacts by tenant + a phone-channel number. The path is
+     * {@code phones.number} (the {@link com.kumouri.kmodigipresbe.model.contact.PhoneNumber}
+     * record's {@code number} field). Used by the Phase 1 voicemail-to-lead pipeline to
+     * find-or-create a Contact keyed on the caller's Twilio {@code From} number.
+     *
+     * <p>Strictly additive (new finder) — the existing email finder and all
+     * {@code ContactCrudService} behaviour are unchanged. An explicit {@code @Query} is
+     * used (rather than a derived method name) for symmetry with the email finder and to
+     * carry the explicit {@code tenantId} predicate ({@code TenantScopedReactiveMongoRepository}
+     * does NOT auto-scope derived finders).
+     */
+    @Query("{ 'tenantId': ?0, 'phones.number': ?1 }")
+    Flux<Contact> findByTenantAndPhoneNumber(UUID tenantId, String phoneNumber);
 }
