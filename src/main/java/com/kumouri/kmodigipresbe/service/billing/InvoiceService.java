@@ -81,6 +81,16 @@ public class InvoiceService {
                         "Quote not found", 2310, 404)))
                 .flatMap(q -> {
                     Invoice inv = Invoice.builder()
+                            // Inherit the source quote's tenant. The quote is loaded
+                            // through the tenant-scoped repo, so q.getTenantId() is the
+                            // current context tenant — stamping it here gives
+                            // assignNumberIfIssued → InvoiceNumberGenerator.next a
+                            // non-null tenantId BEFORE persist (createFromQuote issues
+                            // directly as SENT, so it numbers in-memory; unlike setStatus
+                            // it never loaded a tenant-stamped record first). The
+                            // TenantStampingCallback then confirms the match on save
+                            // (quote.tenantId == context tenant ⇒ no foreign-tenant 1003).
+                            .tenantId(q.getTenantId())
                             .quoteId(q.getId())
                             .dealId(q.getDealId())
                             .contactId(q.getContactId())
