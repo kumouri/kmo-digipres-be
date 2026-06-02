@@ -195,7 +195,7 @@ class ProjectAssignmentCrudIT {
     }
 
     @Test
-    void assignToMissingProjectReturns404With4001() {
+    void assignToMissingProjectReturns404With4101() {
         web.post().uri("/projects/{p}/assignments", UUID.randomUUID())
                 .header("Authorization", adminToken)
                 .header("Idempotency-Key", UUID.randomUUID().toString())
@@ -203,6 +203,6 @@ class ProjectAssignmentCrudIT {
                 .bodyValue(body())
                 .exchange()
                 .expectStatus().isNotFound()
-                .expectBody().jsonPath("$.errorCode").isEqualTo(4001);
+                .expectBody().jsonPath("$.errorCode").isEqualTo(4101);
     }
 }

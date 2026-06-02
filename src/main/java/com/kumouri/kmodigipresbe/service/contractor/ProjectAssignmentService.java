@@ -46,13 +46,13 @@ public class ProjectAssignmentService {
         return TenantContextHolder.required().flatMap(ctx -> {
             UUID userId = body.getUserId();
             if (userId == null) {
-                return Mono.error(new DigiPresBeException("userId is required", 4002, 400));
+                return Mono.error(new DigiPresBeException("userId is required", 4102, 400));
             }
             return projects.findByTenantIdAndId(ctx.tenantId(), projectId)
-                    .switchIfEmpty(Mono.error(() -> new DigiPresBeException("Project not found", 4001, 404)))
+                    .switchIfEmpty(Mono.error(() -> new DigiPresBeException("Project not found", 4101, 404)))
                     .flatMap(project -> users.findById(userId)
                             .filter(u -> ctx.tenantId().equals(u.getTenantId()))
-                            .switchIfEmpty(Mono.error(() -> new DigiPresBeException("User not found", 4002, 404)))
+                            .switchIfEmpty(Mono.error(() -> new DigiPresBeException("User not found", 4102, 404)))
                             .flatMap(user -> assignments
                                     .findFirstByTenantIdAndProjectIdAndUserId(ctx.tenantId(), projectId, userId)
                                     .map(Optional::of).defaultIfEmpty(Optional.empty())
@@ -117,7 +117,7 @@ public class ProjectAssignmentService {
         return TenantContextHolder.required()
                 .flatMap(ctx -> assignments.findByTenantIdAndId(ctx.tenantId(), id))
                 .filter(a -> projectId.equals(a.getProjectId()))
-                .switchIfEmpty(Mono.error(() -> new DigiPresBeException("Assignment not found", 4006, 404)));
+                .switchIfEmpty(Mono.error(() -> new DigiPresBeException("Assignment not found", 4106, 404)));
     }
 
     /** Carries the assignment plus whether it was freshly created (controller → 201 vs 200). */

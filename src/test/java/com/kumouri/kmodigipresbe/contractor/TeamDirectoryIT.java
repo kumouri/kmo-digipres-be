@@ -27,7 +27,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Phase J — team / contractor directory: ADMIN-only create / list, contractor role implies
- * STAFF, INVITED-by-default (no password), passwordHash never leaks, duplicate email → 4004.
+ * STAFF, INVITED-by-default (no password), passwordHash never leaks, duplicate email → 4104.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient
@@ -134,7 +134,7 @@ class TeamDirectoryIT {
     }
 
     @Test
-    void duplicateEmailReturns409With4004() {
+    void duplicateEmailReturns409With4104() {
         String body = """
                 {"email":"dupe@tm.test","displayName":"Dupe","roles":["CONTRACTOR"]}
                 """;
@@ -145,6 +145,6 @@ class TeamDirectoryIT {
         web.post().uri("/team").header("Authorization", adminToken)
                 .contentType(MediaType.APPLICATION_JSON).bodyValue(body)
                 .exchange().expectStatus().isEqualTo(409)
-                .expectBody().jsonPath("$.errorCode").isEqualTo(4004);
+                .expectBody().jsonPath("$.errorCode").isEqualTo(4104);
     }
 }

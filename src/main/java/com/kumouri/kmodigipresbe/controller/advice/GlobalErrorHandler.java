@@ -219,17 +219,32 @@ import java.util.UUID;
  *       fallback); {@code 3100}/{@code 3101} (idempotency middleware);
  *       {@code 3300-3303} (A2 Zitadel runtime claim/login failures — surfaced unchanged
  *       on the portal-federation path).</li>
- *   <li>{@code 4000-4099} — <em>Phase J</em>: Contractor / time-management vertical.
- *       <em>Project assignment:</em> {@code 4001} Project not found for assignment (404);
- *       {@code 4002} userId required (400) / User not found (404); {@code 4006} assignment
+ *   <li>{@code 4000-4099} — <em>Phase 1 (NMM AI intake)</em>: voicemail-to-lead pipeline.
+ *       <em>Twilio voice/voicemail webhook:</em> {@code 4000} Twilio request signature
+ *       (X-Twilio-Signature) invalid (401 — the stable AC errorCode; mirrors the Cal.com
+ *       {@code 3900} sig-invalid posture); {@code 4001} Twilio not connected for the tenant
+ *       (404 — the Phase-1-local not-connected code; {@code 2510} remains the documented
+ *       cross-integration fallback); {@code 4002} webhook params malformed or missing the
+ *       {@code CallSid} dedupe key (400, defensive — a duplicate CallSid is acknowledged
+ *       200, not an error); {@code 4003} invalid tenant id in the webhook path (400).
+ *       Reserved for future intake-channel growth: {@code 4004-4099}.
+ *       Reused (NOT re-allocated): {@code 1200-1203} (AI budget gate + Anthropic call
+ *       failure + missing-key — surfaced unchanged by the new {@code VoicemailExtractionService},
+ *       which mirrors {@code AnthropicAiAssistService}); {@code 2510} (provider-not-connected
+ *       cross-integration convention); {@code 2530-2532} (Twilio SMS recipient/send/secret —
+ *       surfaced unchanged by the reused {@code TwilioSmsService} on the notify + auto-ack
+ *       paths); {@code 1300} Activity-not-found (the reused {@code ActivityCrudService}).</li>
+ *   <li>{@code 4100-4199} — <em>Phase J</em>: Contractor / time-management vertical.
+ *       <em>Project assignment:</em> {@code 4101} Project not found for assignment (404);
+ *       {@code 4102} userId required (400) / User not found (404); {@code 4106} assignment
  *       not found (404).
- *       <em>Team directory:</em> {@code 4002} email required (400, shared user-identity
- *       code); {@code 4003} displayName required (400); {@code 4004} a team member with
- *       this email already exists (409); {@code 4005} unknown user status (400);
- *       {@code 4040} team member not found (404).
- *       <em>Reserved for later sub-phases:</em> {@code 4020} time exists but none approved
- *       (timesheet billing gate); {@code 4030-4035} contractor scoping (self-resolver,
- *       not-assigned / not-owned, cross-user write, denyRole); {@code 4050-4051} timesheet
+ *       <em>Team directory:</em> {@code 4102} email required (400, shared user-identity
+ *       code); {@code 4103} displayName required (400); {@code 4104} a team member with
+ *       this email already exists (409); {@code 4105} unknown user status (400);
+ *       {@code 4140} team member not found (404).
+ *       <em>Reserved for later sub-phases:</em> {@code 4120} time exists but none approved
+ *       (timesheet billing gate); {@code 4130-4135} contractor scoping (self-resolver,
+ *       not-assigned / not-owned, cross-user write, denyRole); {@code 4150-4151} timesheet
  *       submit/approve transitions + reject-reason. Reused (NOT re-allocated):
  *       {@code 1800} RoleGuard ADMIN-required (team + assignment endpoints);
  *       {@code 3100}/{@code 3101} idempotency middleware (assignment POST).</li>

@@ -43,10 +43,10 @@ public class TeamService {
     public Mono<TeamMemberView> create(TeamMemberRequest req) {
         return TenantContextHolder.required().flatMap(ctx -> {
             if (req.email() == null || req.email().isBlank()) {
-                return Mono.error(new DigiPresBeException("Email is required", 4002, 400));
+                return Mono.error(new DigiPresBeException("Email is required", 4102, 400));
             }
             if (req.displayName() == null || req.displayName().isBlank()) {
-                return Mono.error(new DigiPresBeException("Display name is required", 4003, 400));
+                return Mono.error(new DigiPresBeException("Display name is required", 4103, 400));
             }
             boolean hasPassword = req.password() != null && !req.password().isBlank();
             User.UserStatus status = req.status() != null
@@ -66,7 +66,7 @@ public class TeamService {
                     .build();
             return users.save(u)
                     .onErrorMap(DuplicateKeyException.class, ex -> new DigiPresBeException(
-                            "A team member with this email already exists", 4004, 409))
+                            "A team member with this email already exists", 4104, 409))
                     .map(TeamMemberView::from);
         });
     }
@@ -107,7 +107,7 @@ public class TeamService {
                 .flatMap(ctx -> users.findById(id)
                         .filter(u -> ctx.tenantId().equals(u.getTenantId())
                                 && u.getPortal() == User.Portal.STAFF))
-                .switchIfEmpty(Mono.error(() -> new DigiPresBeException("Team member not found", 4040, 404)));
+                .switchIfEmpty(Mono.error(() -> new DigiPresBeException("Team member not found", 4140, 404)));
     }
 
     private Set<String> sanitizeRoles(Set<String> requested) {
@@ -130,7 +130,7 @@ public class TeamService {
         try {
             return User.UserStatus.valueOf(status);
         } catch (IllegalArgumentException ex) {
-            throw new DigiPresBeException("Unknown status: " + status, 4005, 400);
+            throw new DigiPresBeException("Unknown status: " + status, 4105, 400);
         }
     }
 }
