@@ -249,14 +249,38 @@ import java.util.UUID;
  *       codes {@code 1600-1603} from {@code PublicWidgetTokenService} are surfaced unchanged for
  *       missing/malformed/bad-signature/expired tokens); {@code 4011} no image part in the
  *       multipart submission (400); {@code 4012} unsupported image media type — only
- *       {@code image/jpeg|png|webp|gif} are accepted (415). Reserved for future photo-triage
- *       growth: {@code 4013-4039}. Reused (NOT re-allocated): {@code 1200-1203} (AI budget gate +
+ *       {@code image/jpeg|png|webp|gif} are accepted (415). Carved out of the reserved
+ *       photo-triage-growth range: {@code 4013-4029} are now <em>Phase 3</em> (the tripwire IS
+ *       photo-triage growth — see below); {@code 4030-4039} remain reserved. Reused (NOT
+ *       re-allocated): {@code 1200-1203} (AI budget gate +
  *       Anthropic call failure + missing-key — surfaced unchanged by the new
  *       {@code MoleVisionService}, which mirrors {@code AnthropicAiAssistService}); {@code 1310}/
  *       {@code 1311} (file storage — surfaced unchanged by the reused {@code FileStorageService}
  *       on the {@code putBytes} store path); {@code 2530-2532} (Twilio SMS recipient/send/secret —
  *       surfaced unchanged by the reused {@code TwilioSmsService} on the notify path);
  *       {@code 1300} Activity-not-found (the reused {@code ActivityCrudService}).</li>
+ *   <li>{@code 4013-4029} — <em>Phase 3 (NMM AI intake)</em>: coverage-window automation — the B2
+ *       re-activity tripwire + the coverage-window check-in nudge. A sub-block carved from
+ *       Phase-2's reserved {@code 4013-4039} photo-triage-growth range (the tripwire IS
+ *       photo-triage growth). <em>Mole-tripwire public report endpoint:</em> {@code 4013} tripwire
+ *       token type mismatch (the token's {@code widgetType} claim is not {@code "mole-tripwire"},
+ *       401 — mirrors the Phase-2 {@code 4010} / home-services {@code 2700} widget-type-mismatch
+ *       posture); {@code 4014} no image part in the multipart tripwire submission (400);
+ *       {@code 4015} unsupported image media type — only {@code image/jpeg|png|webp|gif} are
+ *       accepted (415); {@code 4016} the tripwire token's Project no longer exists for the tenant
+ *       (404, defensive — a deleted Project after a token was issued). Reserved for future
+ *       coverage-window growth: {@code 4017-4029}. Reused (NOT re-allocated): {@code 1600-1603}
+ *       (generic tripwire-token rejections — missing/malformed/bad-signature/expired — surfaced
+ *       unchanged by the new {@code MoleTripwireTokenService}, which mirrors
+ *       {@code PublicWidgetTokenService}'s HMAC scheme); {@code 1200-1203} (AI budget gate +
+ *       Anthropic call failure + missing-key — surfaced unchanged by the reused
+ *       {@code MoleVisionService}); {@code 1310}/{@code 1311} (file storage — reused
+ *       {@code FileStorageService} {@code putBytes}); {@code 2530-2532} (Twilio SMS — reused
+ *       {@code TwilioSmsService} on the notify + nudge paths); {@code 1300} Activity-not-found
+ *       (reused {@code ActivityCrudService}); {@code 3410}/{@code 3411} Milestone not-found /
+ *       name-blank (the UNCHANGED {@code MilestoneService.create} surfaces these on the
+ *       re-treatment-Milestone path); {@code 1800} RoleGuard ADMIN-required (the admin
+ *       tripwire-token issuance endpoint).</li>
  *   <li>{@code 4100-4199} — <em>Phase J</em>: Contractor / time-management vertical.
  *       <em>Project assignment:</em> {@code 4101} Project not found for assignment (404);
  *       {@code 4102} userId required (400) / User not found (404); {@code 4106} assignment
