@@ -3,6 +3,7 @@ package com.kumouri.kmodigipresbe.controller;
 import com.kumouri.kmodigipresbe.model.request.DealDTO;
 import com.kumouri.kmodigipresbe.model.request.MoveStageRequest;
 import com.kumouri.kmodigipresbe.service.DealCrudService;
+import com.kumouri.kmodigipresbe.tenancy.RoleGuard;
 import com.kumouri.kmodigipresbe.util.RequestMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -28,9 +29,14 @@ public class DealController {
     private final DealCrudService service;
     private final RequestMapper mapper;
 
+    /**
+     * Broad reader (the sales pipeline) — {@code RoleGuard.denyRole("CONTRACTOR")} (Phase J —
+     * J2) keeps a contractor entirely out of deals/pipeline (→ 4135). Plain STAFF
+     * (non-contractor) employees are unaffected.
+     */
     @GetMapping
     public Flux<DealDTO> list() {
-        return service.findAll().map(mapper::toDealDTO);
+        return RoleGuard.denyRole("CONTRACTOR").thenMany(service.findAll().map(mapper::toDealDTO));
     }
 
     @GetMapping("/{id}")

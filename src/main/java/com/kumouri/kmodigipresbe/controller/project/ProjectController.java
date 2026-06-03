@@ -45,9 +45,15 @@ public class ProjectController {
 
     private final ProjectService service;
 
+    /**
+     * Broad reader (every project in the tenant) — {@code RoleGuard.denyRole("CONTRACTOR")}
+     * (Phase J — J2) pushes a contractor onto their assignment-scoped
+     * {@code GET /me/contractor/projects} (→ 4135). Plain STAFF (non-contractor) employees
+     * are unaffected.
+     */
     @GetMapping
     public Flux<Project> list() {
-        return service.findAll();
+        return RoleGuard.denyRole("CONTRACTOR").thenMany(service.findAll());
     }
 
     @GetMapping("/{id}")
