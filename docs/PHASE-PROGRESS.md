@@ -67,7 +67,28 @@ is untouched.
 | SP2 — `GbpApiClient` 401→refresh+retry-once + `4034` + GlobalErrorHandler Javadoc | done | (see git log) | compileJava OK | both callFetch + callPostReply; review/reply logic untouched |
 | SP3 — `GbpTokenRefreshIT` + `GbpTokenServiceTest` + CLAUDE.md note | done | (see git log) | test GREEN | 401-then-200 + persisted-token + refresh-fail→4034 |
 
-## Test result
+## Test result — BUILD SUCCESSFUL
 
-`./gradlew cleanTest test --tests "*Gbp*" --tests "*OpenApiEndpointIT" verifyOpenApi` — see PR body
-for BUILD SUCCESSFUL + per-class counts (incl. the new `GbpTokenRefreshIT`).
+`./gradlew cleanTest test --tests "*Gbp*" --tests "*OpenApiEndpointIT" verifyOpenApi` (Docker up):
+
+| Class | tests | failures | errors | skipped |
+|---|---|---|---|---|
+| `GbpTokenRefreshIT` (NEW) | 3 | 0 | 0 | 0 |
+| `GbpTokenServiceTest` (NEW, no-Docker) | 5 | 0 | 0 | 0 |
+| `GbpReplyDraftServiceIT` | 4 | 0 | 0 | 0 |
+| `GbpReviewPollerIT` | 2 | 0 | 0 | 0 |
+| `GbpReviewReplyAdminIT` | 6 | 0 | 0 | 0 |
+| `OpenApiEndpointIT` | 2 | 0 | 0 | 0 |
+
+`verifyOpenApi`: `docs/api/openapi.json already matches the generated spec. OK.` (no endpoint
+changed — this is an internal auth-path change).
+
+§9 grep over the new/changed GBP code: the only operational `switchIfEmpty` is the pre-existing
+genuine not-found `GbpApiClient.resolveConnection`; `GbpTokenService` has none.
+
+Reused-cores empty-diff vs `origin/main` (verified `git diff origin/main`, 0 lines each):
+`IntegrationConnection`(+`Repository`+`Service`), `GbpReviewPoller`, `GbpReplyDraftService`,
+`GbpReviewReplyAdminService`, `VoicemailExtractionService`, `MoleVisionService`,
+`AnthropicAiAssistService`. Changed files (6): `GbpProperties`, `GbpTokenService` (new),
+`GbpApiClient`, `GlobalErrorHandler` (Javadoc), `application.properties`, this ledger — plus the
+2 new test classes + the CLAUDE.md GBP note.
