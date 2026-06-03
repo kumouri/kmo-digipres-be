@@ -284,6 +284,20 @@ public final class DomainEventType {
     public static final String RETREATMENT_MILESTONE_CREATED = "mole.retreatmentMilestoneCreated";
     public static final String COVERAGE_NUDGE_SENT          = "coverage.nudgeSent";
 
+    // NMM GBP review-reply automation — Google Business Profile review-reply pipeline. Both are
+    // advisory (RuleEngine / webhook fan-out) — they do NOT drive any core mutation; the
+    // default-OFF GbpReviewPoller performs the GbpReviewReply ledger-insert-FIRST + GbpReplyDraftService
+    // draft + notify-Rob dispatch synchronously and explicitly inside the poll cycle, gated by the
+    // explicit-boolean review-id idempotency probe, and the optional auto-post / the admin
+    // approve-and-post endpoint perform the GbpApiClient.postReply synchronously.
+    // GBP_REVIEW_REPLY_DRAFTED: emitted after a NEW review is ledgered and an on-brand reply is
+    //   drafted (status DRAFTED); payload {reviewId, rating, reviewReplyId, autoPost}.
+    // GBP_REVIEW_REPLY_POSTED: emitted after the (optionally edited) reply is posted back to Google
+    //   (status POSTED) — by the optional poller auto-post OR the admin approve-and-post endpoint;
+    //   payload {reviewId, reviewReplyId}.
+    public static final String GBP_REVIEW_REPLY_DRAFTED = "gbp.reviewReplyDrafted";
+    public static final String GBP_REVIEW_REPLY_POSTED  = "gbp.reviewReplyPosted";
+
     private DomainEventType() {
     }
 }

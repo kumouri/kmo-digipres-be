@@ -281,6 +281,22 @@ import java.util.UUID;
  *       name-blank (the UNCHANGED {@code MilestoneService.create} surfaces these on the
  *       re-treatment-Milestone path); {@code 1800} RoleGuard ADMIN-required (the admin
  *       tripwire-token issuance endpoint).</li>
+ *   <li>{@code 4030-4049} — <em>NMM GBP review-reply automation</em>: Google Business Profile
+ *       review-reply pipeline (claims the {@code 4030-4039} block Phase 2 reserved, extended to
+ *       {@code 4049}). <em>GBP API client:</em> {@code 4030} Google Business Profile not connected
+ *       for the tenant — no {@code IntegrationConnection(provider="google-business")} (404, the
+ *       Phase-local not-connected code; {@code 2510} remains the documented cross-integration
+ *       fallback); {@code 4031} GBP API fetch-reviews / post-reply call failed (502 — a non-2xx or
+ *       downstream throwable, after the Resilience4j retry/breaker). <em>Admin approve/post
+ *       surface:</em> {@code 4032} review-reply draft not found for the tenant (404);
+ *       {@code 4033} review-reply is not in {@code DRAFTED} status — cannot post/skip an already
+ *       POSTED/SKIPPED draft (409, defensive). Reserved for future review-automation growth:
+ *       {@code 4034-4049}. Reused (NOT re-allocated): {@code 1200-1203} (AI budget gate +
+ *       Anthropic call failure + missing-key — surfaced unchanged by the new
+ *       {@code GbpReplyDraftService}, which mirrors {@code AnthropicAiAssistService}); {@code 2530-2532}
+ *       (Twilio SMS recipient/send/secret — surfaced unchanged by the reused {@code TwilioSmsService}
+ *       on the notify path); {@code 1300} Activity-not-found (reused {@code ActivityCrudService}, if
+ *       ever surfaced); {@code 1800} RoleGuard ADMIN-required (the admin list/post/skip endpoints).</li>
  *   <li>{@code 4100-4199} — <em>Phase J</em>: Contractor / time-management vertical.
  *       <em>Project assignment:</em> {@code 4101} Project not found for assignment (404);
  *       {@code 4102} userId required (400) / User not found (404); {@code 4106} assignment
