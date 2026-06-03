@@ -50,4 +50,13 @@ public interface TimeEntryRepository extends TenantScopedReactiveMongoRepository
      * the period's lifecycle transition.
      */
     Flux<TimeEntry> findAllByTenantIdAndTimesheetId(UUID tenantId, UUID timesheetId);
+
+    /**
+     * (Phase J — J4) The approved entries for a user in a {@code [from, to]} window — the
+     * payout/margin rollup source ({@code PayoutReportService}). Only approved time counts
+     * (consistent with the J3 invoicing gate). Backed by the leading
+     * {@code tenant_user_started_idx} (the {@code (tenantId, userId, startedAt)} prefix).
+     */
+    Flux<TimeEntry> findAllByTenantIdAndUserIdAndApprovedTrueAndStartedAtBetween(
+            UUID tenantId, UUID userId, Instant from, Instant to);
 }
