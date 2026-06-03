@@ -50,6 +50,14 @@ import java.util.UUID;
  *       audit codes were shifted to 1800-1899 to avoid renumbering merged code.</li>
  *   <li>{@code 1900-1999} — Phase 6 automation (WorkflowRule 1900, WebhookSubscription
  *       1910). The plan's original AI slot would have collided here too.</li>
+ *   <li>{@code 2200-2399} — <em>Phase 7</em>: Quotes + Invoices (core billing).
+ *       {@code 2200} Quote not found (404); {@code 2201} quote PDF storageRef not owned
+ *       by tenant (403); {@code 2300} Invoice not found (404); {@code 2301} invoice must
+ *       be created as DRAFT — a non-DRAFT status on {@code POST /invoices} is rejected
+ *       (400) because {@code create} is the DRAFT seam (it neither numbers nor emits
+ *       {@code INVOICE_FINALIZED}); issue via {@code POST /invoices/{id}/status};
+ *       {@code 2310} source quote not found on {@code POST /invoices/from-quote/{quoteId}}
+ *       (404).</li>
  *   <li>{@code 2700-2799} — <em>Phase 10</em>: home-services. 10c equipment
  *       {@code 2730} not-found (admin delete falls through to the shared
  *       {@code RoleGuard} 1800 in the Phase 9a audit/compliance range). 10e
@@ -249,6 +257,20 @@ import java.util.UUID;
  *       on the {@code putBytes} store path); {@code 2530-2532} (Twilio SMS recipient/send/secret —
  *       surfaced unchanged by the reused {@code TwilioSmsService} on the notify path);
  *       {@code 1300} Activity-not-found (the reused {@code ActivityCrudService}).</li>
+ *   <li>{@code 4100-4199} — <em>Phase J</em>: Contractor / time-management vertical.
+ *       <em>Project assignment:</em> {@code 4101} Project not found for assignment (404);
+ *       {@code 4102} userId required (400) / User not found (404); {@code 4106} assignment
+ *       not found (404).
+ *       <em>Team directory:</em> {@code 4102} email required (400, shared user-identity
+ *       code); {@code 4103} displayName required (400); {@code 4104} a team member with
+ *       this email already exists (409); {@code 4105} unknown user status (400);
+ *       {@code 4140} team member not found (404).
+ *       <em>Reserved for later sub-phases:</em> {@code 4120} time exists but none approved
+ *       (timesheet billing gate); {@code 4130-4135} contractor scoping (self-resolver,
+ *       not-assigned / not-owned, cross-user write, denyRole); {@code 4150-4151} timesheet
+ *       submit/approve transitions + reject-reason. Reused (NOT re-allocated):
+ *       {@code 1800} RoleGuard ADMIN-required (team + assignment endpoints);
+ *       {@code 3100}/{@code 3101} idempotency middleware (assignment POST).</li>
  * </ul>
  */
 @Slf4j

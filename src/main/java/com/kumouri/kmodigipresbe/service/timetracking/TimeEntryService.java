@@ -5,22 +5,33 @@ import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
 import com.kumouri.kmodigipresbe.automation.DomainEventType;
 import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
 import com.kumouri.kmodigipresbe.model.billing.Invoice;
+import com.kumouri.kmodigipresbe.model.contractor.ProjectAssignment;
+import com.kumouri.kmodigipresbe.model.contractor.Timesheet;
 import com.kumouri.kmodigipresbe.model.quote.LineItem;
 import com.kumouri.kmodigipresbe.model.timetracking.TimeEntry;
 import com.kumouri.kmodigipresbe.model.timetracking.TimeEntry.BillingStatus;
 import com.kumouri.kmodigipresbe.model.timetracking.TimeEntry.TimeEntrySource;
+import com.kumouri.kmodigipresbe.model.user.User;
+import com.kumouri.kmodigipresbe.repository.UserRepository;
+import com.kumouri.kmodigipresbe.repository.contractor.ProjectAssignmentRepository;
+import com.kumouri.kmodigipresbe.repository.contractor.TimesheetRepository;
 import com.kumouri.kmodigipresbe.repository.project.ProjectRepository;
 import com.kumouri.kmodigipresbe.repository.timetracking.TimeEntryRepository;
 import com.kumouri.kmodigipresbe.service.billing.InvoiceService;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.DayOfWeek;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -51,6 +62,9 @@ public class TimeEntryService {
 
     private final TimeEntryRepository timeEntries;
     private final ProjectRepository projects;
+    private final ProjectAssignmentRepository assignments;
+    private final TimesheetRepository timesheets;
+    private final UserRepository users;
     private final InvoiceService invoiceService;
     private final TimeSplitService splitter;
     private final DomainEventPublisher events;
@@ -115,29 +129,39 @@ public class TimeEntryService {
             body.setBillingStatus(BillingStatus.UNBILLED);
             body.setInvoicedInvoiceId(null);
             body.setSplitGroupId(null);
+            body.setApproved(false);
 
-            if (body.getEndedAt() != null) {
-                // Closed manual entry — run the split
-                List<TimeEntry> segments = splitter.split(body, zoneId);
-                if (segments.size() == 1) {
-                    return timeEntries.save(segments.get(0))
-                            .flatMap(saved -> publishLogged(ctx.tenantId(), saved).thenReturn(saved));
-                } else {
-                    return timeEntries.saveAll(segments).collectList()
-                            .flatMap(saved -> {
-                                // Return the first segment; publish for each
-                                for (TimeEntry seg : saved) {
-                                    publishLogged(ctx.tenantId(), seg).subscribe();
+            // (Phase J) Resolve+stamp bill and cost rates once on the body (the same rates
+            // apply to every split segment), then run the D-D3 split, then give each segment
+            // its own Timesheet period (split-aware — a week-boundary session lands its
+            // halves in two periods).
+            return resolveRates(ctx.tenantId(), body).flatMap(rated -> {
+                if (rated.getEndedAt() != null) {
+                    // Closed manual entry — run the split, then assign per-segment periods
+                    List<TimeEntry> segments = splitter.split(rated, zoneId);
+                    return Flux.fromIterable(segments)
+                            .concatMap(seg -> assignPeriod(ctx.tenantId(), seg, zoneId))
+                            .collectList()
+                            .flatMap(prepared -> {
+                                if (prepared.size() == 1) {
+                                    return timeEntries.save(prepared.get(0))
+                                            .flatMap(saved -> publishLogged(ctx.tenantId(), saved).thenReturn(saved));
                                 }
-                                return Mono.just(saved.get(0));
+                                return timeEntries.saveAll(prepared).collectList()
+                                        .flatMap(saved -> {
+                                            // Return the first segment; publish for each
+                                            for (TimeEntry seg : saved) {
+                                                publishLogged(ctx.tenantId(), seg).subscribe();
+                                            }
+                                            return Mono.just(saved.get(0));
+                                        });
                             });
                 }
-            } else {
-                // Open entry (running timer via manual create — allowed)
-                body.setDurationSeconds(0L);
-                return timeEntries.save(body)
+                // Open entry (running timer via manual create — allowed); no period until stopped
+                rated.setDurationSeconds(0L);
+                return timeEntries.save(rated)
                         .flatMap(saved -> publishLogged(ctx.tenantId(), saved).thenReturn(saved));
-            }
+            });
         });
     }
 
@@ -155,6 +179,7 @@ public class TimeEntryService {
             if (patch.getProjectId() != null)   existing.setProjectId(patch.getProjectId());
             if (patch.getTaskId() != null)       existing.setTaskId(patch.getTaskId());
             if (patch.getRateAmount() != null)   existing.setRateAmount(patch.getRateAmount());
+            if (patch.getCostRateAmount() != null) existing.setCostRateAmount(patch.getCostRateAmount());
             if (patch.isBillable() != existing.isBillable()) existing.setBillable(patch.isBillable());
 
             boolean timesChanged = false;
@@ -171,13 +196,16 @@ public class TimeEntryService {
             }
 
             if (timesChanged && existing.getEndedAt() != null) {
-                // Re-run the split when times changed on a closed entry
+                // Re-run the split when times changed on a closed entry, re-assigning each
+                // segment's Timesheet period (startedAt may have moved across a week boundary).
+                UUID tenantId = existing.getTenantId();
                 List<TimeEntry> segments = splitter.split(existing, zoneId);
-                if (segments.size() == 1) {
-                    return timeEntries.save(segments.get(0));
-                } else {
-                    return timeEntries.saveAll(segments).next();
-                }
+                return Flux.fromIterable(segments)
+                        .concatMap(seg -> assignPeriod(tenantId, seg, zoneId))
+                        .collectList()
+                        .flatMap(prepared -> prepared.size() == 1
+                                ? timeEntries.save(prepared.get(0))
+                                : timeEntries.saveAll(prepared).next());
             }
             return timeEntries.save(existing);
         });
@@ -223,16 +251,19 @@ public class TimeEntryService {
                         body.setBillingStatus(BillingStatus.UNBILLED);
                         body.setInvoicedInvoiceId(null);
                         body.setSplitGroupId(null);
+                        body.setApproved(false);
                         if (body.getStartedAt() == null) {
                             body.setStartedAt(Instant.now());
                         }
-                        return timeEntries.save(body)
+                        // (Phase J) Stamp bill+cost rates at timer-start (log time). A running
+                        // entry gets no Timesheet period until it is stopped + split.
+                        return resolveRates(ctx.tenantId(), body).flatMap(rated -> timeEntries.save(rated)
                                 .flatMap(saved -> {
                                     events.publish(DomainEvent.of(
                                             DomainEventType.TIMER_STARTED, ctx.tenantId(), saved.getId(),
                                             Map.of("userId", userId.toString())));
                                     return Mono.just(saved);
-                                });
+                                }));
                     });
         });
     }
@@ -275,28 +306,32 @@ public class TimeEntryService {
                 r.setEndedAt(stopAt);
 
                 List<TimeEntry> segments = splitter.split(r, zoneId);
-                if (segments.size() == 1) {
-                    Instant finalStopAt = stopAt;
-                    return timeEntries.save(segments.get(0))
-                            .flatMap(saved -> {
-                                events.publish(DomainEvent.of(
-                                        DomainEventType.TIMER_STOPPED, ctx.tenantId(), saved.getId(),
-                                        Map.of("userId", effectiveUserId.toString(),
-                                                "durationSeconds", saved.getDurationSeconds())));
-                                return Mono.just(List.of(saved));
-                            });
-                } else {
-                    return timeEntries.saveAll(segments).collectList()
-                            .flatMap(saved -> {
-                                UUID groupId = saved.get(0).getSplitGroupId();
-                                events.publish(DomainEvent.of(
-                                        DomainEventType.TIMER_STOPPED, ctx.tenantId(), saved.get(0).getId(),
-                                        Map.of("userId", effectiveUserId.toString(),
-                                                "splitGroupId", groupId != null ? groupId.toString() : "",
-                                                "segmentCount", saved.size())));
-                                return Mono.just(saved);
-                            });
-                }
+                // (Phase J) Assign each segment its own Timesheet period before saving.
+                return Flux.fromIterable(segments)
+                        .concatMap(seg -> assignPeriod(ctx.tenantId(), seg, zoneId))
+                        .collectList()
+                        .flatMap(prepared -> {
+                            if (prepared.size() == 1) {
+                                return timeEntries.save(prepared.get(0))
+                                        .flatMap(saved -> {
+                                            events.publish(DomainEvent.of(
+                                                    DomainEventType.TIMER_STOPPED, ctx.tenantId(), saved.getId(),
+                                                    Map.of("userId", effectiveUserId.toString(),
+                                                            "durationSeconds", saved.getDurationSeconds())));
+                                            return Mono.just(List.of(saved));
+                                        });
+                            }
+                            return timeEntries.saveAll(prepared).collectList()
+                                    .flatMap(saved -> {
+                                        UUID groupId = saved.get(0).getSplitGroupId();
+                                        events.publish(DomainEvent.of(
+                                                DomainEventType.TIMER_STOPPED, ctx.tenantId(), saved.get(0).getId(),
+                                                Map.of("userId", effectiveUserId.toString(),
+                                                        "splitGroupId", groupId != null ? groupId.toString() : "",
+                                                        "segmentCount", saved.size())));
+                                        return Mono.just(saved);
+                                    });
+                        });
             });
         });
     }
@@ -428,6 +463,92 @@ public class TimeEntryService {
         events.publish(DomainEvent.of(DomainEventType.TIME_ENTRY_LOGGED, tenantId, saved.getId(),
                 Map.of("userId", saved.getUserId().toString())));
         return Mono.empty();
+    }
+
+    /**
+     * (Phase J) Resolves and stamps the bill rate ({@code rateAmount}) and contractor cost
+     * rate ({@code costRateAmount}) at log time. For each rate the first non-null wins:
+     * an explicit value already on the entry → the {@code ProjectAssignment} override
+     * (when the entry is project-scoped) → the {@code User} default. A bill rate left null
+     * still falls through to the invoice-time {@code defaultRateAmount} fallback; a null
+     * cost rate is surfaced (never silently zeroed) by the payout report.
+     */
+    private Mono<TimeEntry> resolveRates(UUID tenantId, TimeEntry entry) {
+        if (entry.getRateAmount() != null && entry.getCostRateAmount() != null) {
+            return Mono.just(entry);
+        }
+        UUID userId = entry.getUserId();
+        UUID projectId = entry.getProjectId();
+
+        Mono<Optional<ProjectAssignment>> assignmentMono =
+                (projectId != null && userId != null)
+                        ? assignments.findFirstByTenantIdAndProjectIdAndUserId(tenantId, projectId, userId)
+                                .map(Optional::of).defaultIfEmpty(Optional.empty())
+                        : Mono.just(Optional.empty());
+
+        Mono<Optional<User>> userMono =
+                userId != null
+                        ? users.findById(userId).map(Optional::of).defaultIfEmpty(Optional.empty())
+                        : Mono.just(Optional.empty());
+
+        return Mono.zip(assignmentMono, userMono).map(tuple -> {
+            ProjectAssignment a = tuple.getT1().orElse(null);
+            User u = tuple.getT2().orElse(null);
+            if (entry.getRateAmount() == null) {
+                entry.setRateAmount(a != null && a.getBillRateOverride() != null
+                        ? a.getBillRateOverride()
+                        : (u != null ? u.getDefaultBillRate() : null));
+            }
+            if (entry.getCostRateAmount() == null) {
+                entry.setCostRateAmount(a != null && a.getCostRateOverride() != null
+                        ? a.getCostRateOverride()
+                        : (u != null ? u.getDefaultCostRate() : null));
+            }
+            return entry;
+        });
+    }
+
+    /**
+     * (Phase J) Find-or-create the OPEN {@code Timesheet} period (Mon–Sun ISO week in the
+     * split zone) for this entry's {@code startedAt} and stamp {@code timesheetId}. Explicit
+     * boolean branch — never {@code switchIfEmpty(create)}; the unique
+     * {@code tenant_user_period_idx} backstops a concurrent create
+     * ({@code DuplicateKeyException} → re-read). Called per split segment so a week-boundary
+     * session lands its halves in two periods.
+     */
+    private Mono<TimeEntry> assignPeriod(UUID tenantId, TimeEntry entry, String zoneId) {
+        LocalDate periodStart = weekStart(entry.getStartedAt(), zoneId);
+        LocalDate periodEnd = periodStart.plusDays(6);
+        return timesheets.findFirstByTenantIdAndUserIdAndPeriodStart(tenantId, entry.getUserId(), periodStart)
+                .map(Optional::of).defaultIfEmpty(Optional.empty())
+                .flatMap(opt -> {
+                    if (opt.isPresent()) {
+                        entry.setTimesheetId(opt.get().getId());
+                        return Mono.just(entry);
+                    }
+                    Timesheet ts = Timesheet.builder()
+                            .tenantId(tenantId)
+                            .userId(entry.getUserId())
+                            .periodStart(periodStart)
+                            .periodEnd(periodEnd)
+                            .status(Timesheet.Status.OPEN)
+                            .build();
+                    return timesheets.save(ts)
+                            .onErrorResume(DuplicateKeyException.class, ex ->
+                                    timesheets.findFirstByTenantIdAndUserIdAndPeriodStart(
+                                            tenantId, entry.getUserId(), periodStart))
+                            .map(saved -> {
+                                entry.setTimesheetId(saved.getId());
+                                return entry;
+                            });
+                });
+    }
+
+    /** (Phase J) Monday of the ISO week containing {@code startedAt}, in the split zone. */
+    private LocalDate weekStart(Instant startedAt, String zoneId) {
+        ZoneId zone = splitter.resolveZone(zoneId);
+        return startedAt.atZone(zone).toLocalDate()
+                .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
     }
 
     /**
