@@ -133,7 +133,15 @@ Sub-phase **J1** (this PR — data model, directory, assignment, rate stamping):
 - **Advisory events** (`DomainEventType` Phase-J block): `PROJECT_ASSIGNED`, `PROJECT_UNASSIGNED` — non-driving.
 - **§9 honored:** every conditional-create is explicit-boolean; `switchIfEmpty` only for genuine not-found (4101/4106/4140).
 
-Sub-phases **J2** (contractor scoped access — `/me/contractor/**` + `RoleGuard.denyRole`, codes 4130–4135), **J3** (timesheet submit/approve + approved-only invoicing gate, codes 4120/4150/4151), **J4** (payout + margin report) follow as separate PRs per the driving plan.
+Sub-phase **J2** (SHIPPED — contractor scoped access): a CONTRACTOR (a STAFF user carrying the `CONTRACTOR` role) is read-scoped to only their own work, mirroring the shipped portal access-control pattern.
+
+- **`ContractorSelfResolver`** (the chokepoint, mirrors `PortalLinkedContactResolver`) resolves the self `(tenantId, userId)` from the **verified token — never the request** (4130 not-a-contractor / 4131 null self id). This is what makes "show me MY data" un-spoofable.
+- **`ContractorAccessGuard`** (mirrors `PortalOwnershipGuard`) gates single-entity ops with the **same-404 for not-found AND not-assigned/not-owned** no-enumeration-oracle posture (4132 project not assigned; 4133 entity not owned). The ownership predicate never matches `null==null`; assignments must be `active`.
+- New `/me/contractor/**` read surface (`ContractorProjectsController` projects/`{id}`/tasks/client, `ContractorTimeController`, `ContractorExpenseController`) returns **projection records** (`ContractorProjectView`/`ContractorTaskView`/`ContractorClientView`) — never raw entities; the client view exposes only the assigned project's primary contact + company. Writes force self (a foreign body `userId` → 4134).
+- **`RoleGuard.denyRole("CONTRACTOR")`** (the inverse of `requireRole`, 4135) is composed at the head of the broad staff LIST/read endpoints (`TimeEntry`/`Expense`/`Project`/`Contact`/`Deal`/`Quote`/`Invoice` controllers) so a contractor is pushed off them onto `/me/contractor/**`. **Plain STAFF is unaffected**; ADMIN-gated mutations are untouched. No `SecurityConfig` change — scoping is purely application-level (resolver / guard / denyRole). Codes **4130–4135**.
+- `ContractorScopeIT` (19 scenarios) is the access-control gate (assigned→200 / unassigned→4132 / broad reader with contractor token→4135 / cross-user write→4134 / plain-STAFF-unaffected regression).
+
+Sub-phases **J3** (timesheet submit/approve + approved-only invoicing gate, codes 4120/4150/4151) and **J4** (payout + margin report) follow as separate PRs per the driving plan.
 
 ## On-demand reference files
 
