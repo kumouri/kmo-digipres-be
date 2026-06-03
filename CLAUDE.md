@@ -175,7 +175,14 @@ Sub-phase **J2** (SHIPPED — contractor scoped access): a CONTRACTOR (a STAFF u
 - **`RoleGuard.denyRole("CONTRACTOR")`** (the inverse of `requireRole`, 4135) is composed at the head of the broad staff LIST/read endpoints (`TimeEntry`/`Expense`/`Project`/`Contact`/`Deal`/`Quote`/`Invoice` controllers) so a contractor is pushed off them onto `/me/contractor/**`. **Plain STAFF is unaffected**; ADMIN-gated mutations are untouched. No `SecurityConfig` change — scoping is purely application-level (resolver / guard / denyRole). Codes **4130–4135**.
 - `ContractorScopeIT` (19 scenarios) is the access-control gate (assigned→200 / unassigned→4132 / broad reader with contractor token→4135 / cross-user write→4134 / plain-STAFF-unaffected regression).
 
-Sub-phases **J3** (timesheet submit/approve + approved-only invoicing gate, codes 4120/4150/4151) and **J4** (payout + margin report) follow as separate PRs per the driving plan.
+Sub-phase **J3** (SHIPPED — timesheet submit/approve + approved-only invoicing gate): contractors submit a weekly `Timesheet`; an ADMIN approves or rejects; only approved time is invoiceable.
+
+- **`TimesheetService`** (mirrors `ExpenseService.approve/reject` + the `ILLEGAL_TRANSITIONS` set): `submit` (contractor self, OPEN/REJECTED→SUBMITTED), `approve` (ADMIN, SUBMITTED→APPROVED), `reject` (ADMIN, SUBMITTED→REJECTED, reason required → 4151), `reopen` (contractor self, REJECTED→OPEN). Approve/reject/reopen **bulk-flip the member `TimeEntry.approved` flag** (`findAllByTenantIdAndTimesheetId` → `saveAll`), **excluding `billingStatus==INVOICED`** entries (can't un/re-approve billed time). Illegal transition → 4150; timesheet not found → 4152.
+- **`/me/contractor/timesheets`** (`ContractorTimesheetController`, CONTRACTOR — own list / get / submit / reopen via `ContractorAccessGuard.requireOwnedTimesheet`, returns `TimesheetView`) + **`/timesheets`** (`TimesheetController`, ADMIN — `?status=` review queue / get / approve / reject).
+- **Approved-only invoicing gate:** `TimeEntryService.createInvoiceFromTime` now also filters `&& e.isApproved()`; if billable UNBILLED time exists but none is approved → new code **4120** (ahead of the existing 3520 none-unbilled / 3522 all-invoiced arms). §9 explicit-boolean + the `billingStatus==UNBILLED` anchor unchanged.
+- Advisory events `TIMESHEET_SUBMITTED/APPROVED/REJECTED/REOPENED`. ITs: `TimesheetLifecycleIT` (14) + `InvoiceFromApprovedTimeIT` (2). Codes **4120/4150/4151/4152**.
+
+Sub-phase **J4** (payout + margin report) follows as a separate PR per the driving plan.
 
 ## On-demand reference files
 

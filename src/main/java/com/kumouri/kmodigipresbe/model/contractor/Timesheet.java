@@ -73,7 +73,7 @@ public class Timesheet implements Auditable {
     /** Set on approve/reject — when. */
     private Instant approvedAt;
 
-    /** Submitter note (on submit) or rejection reason (on reject — errorCode 4051 if blank). */
+    /** Submitter note (on submit) or rejection reason (on reject — errorCode 4151 if blank). */
     private String note;
 
     @Version
