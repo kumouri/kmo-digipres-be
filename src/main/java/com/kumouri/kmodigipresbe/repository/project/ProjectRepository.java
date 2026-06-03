@@ -6,6 +6,7 @@ import org.springframework.data.mongodb.repository.Query;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -52,4 +53,17 @@ public interface ProjectRepository extends TenantScopedReactiveMongoRepository<P
             sort = "{ 'createdAt': -1 }")
     Flux<Project> findAllByTenantAndPrimaryContactOrCompany(
             UUID tenantId, UUID primaryContactId, UUID companyId);
+
+    /**
+     * Phase 3 (NMM coverage-window automation) — selects a tenant's Projects whose coverage window
+     * is still open ({@code coverageWindowEndsAt != null && coverageWindowEndsAt > now}), the
+     * default-OFF {@code CoverageNudgeJob}'s active-coverage selector. <strong>Strictly additive</strong>
+     * (new derived finder) — every existing {@code ProjectService}/{@code ProjectRepository} behaviour
+     * is unchanged (the Phase-1 {@code ContactRepository.findByTenantAndPhoneNumber} precedent for a
+     * strictly-additive finder). The {@code GreaterThan} on a nullable field also excludes
+     * {@code coverageWindowEndsAt == null} (Mongo {@code $gt} never matches a missing/null field), so
+     * legacy/non-coverage Projects are naturally skipped. Carries an explicit {@code tenantId}
+     * predicate ({@code TenantScopedReactiveMongoRepository} does NOT auto-scope derived finders).
+     */
+    Flux<Project> findAllByTenantIdAndCoverageWindowEndsAtAfter(UUID tenantId, Instant now);
 }
