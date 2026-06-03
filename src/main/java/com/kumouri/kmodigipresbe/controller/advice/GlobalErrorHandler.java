@@ -319,9 +319,13 @@ import java.util.UUID;
  *       submit/approve/reject/reopen {@code ILLEGAL_TRANSITIONS}); {@code 4151} timesheet
  *       reject reason required (400); {@code 4152} timesheet not found for the tenant (404,
  *       the admin lifecycle load-by-id path — the contractor self-surface uses the same-404
- *       {@code 4133} via {@code ContractorAccessGuard#requireOwnedTimesheet}). Reused (NOT
+ *       {@code 4133} via {@code ContractorAccessGuard#requireOwnedTimesheet}).
+ *       <em>Payout + margin report (J4):</em> {@code 4160} payout report request invalid —
+ *       missing {@code userId}, missing {@code from}/{@code to}, or {@code to} not after
+ *       {@code from} (400, {@code PayoutController}; a pure read otherwise returns data, so
+ *       {@code 4160} is the only J4-allocated code). Reused (NOT
  *       re-allocated):
- *       {@code 1800} RoleGuard ADMIN-required (team + assignment endpoints);
+ *       {@code 1800} RoleGuard ADMIN-required (team + assignment + payout-report endpoints);
  *       {@code 3100}/{@code 3101} idempotency middleware (assignment POST);
  *       {@code 3500}/{@code 3502}/{@code 3503}/{@code 3505}/{@code 3506} and
  *       {@code 3511}-{@code 3517} surfaced unchanged by the reused {@code TimeEntryService} /
