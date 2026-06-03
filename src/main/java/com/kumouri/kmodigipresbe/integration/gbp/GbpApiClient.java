@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
 
 /**
  * Reads Google-Business-Profile reviews and posts replies (NMM GBP review-reply automation). Raw
@@ -69,10 +70,21 @@ import java.util.UUID;
  * {@code CallNotPermittedException} / {@code Unauthorized} / {@code DigiPresBeException},
  * {@code .timeout(requestTimeoutSeconds)}.
  *
+ * <h2>OAuth2 access-token refresh on 401 (the auth path — review/reply logic untouched)</h2>
+ * Google access tokens expire (~1h). When a fetch/post attempt errors with
+ * {@link WebClientResponseException.Unauthorized} (401), {@link GbpTokenService#refreshAccessToken}
+ * exchanges the stored {@code refreshToken} for a fresh {@code accessToken} (persisting it to
+ * {@code IntegrationConnection.secrets}) and the original call is <strong>retried exactly once</strong>
+ * with the new token. The Resilience4j retry below deliberately <em>excludes</em> {@code Unauthorized}
+ * (so the breaker/backoff never masks the 401); the refresh-retry is a distinct single outer step
+ * layered above it. A second 401, or any refresh failure, surfaces {@code 4034}
+ * (gbp-token-refresh-failed) from {@link GbpTokenService}.
+ *
  * <h2>Error codes</h2>
  * {@code 4030} — Google Business Profile not connected / {@code accessToken} missing (404);
- * {@code 4031} — fetch / post failed (502). {@code 2510} remains the documented cross-integration
- * not-connected fallback.
+ * {@code 4031} — fetch / post failed (502); {@code 4034} — token refresh failed (502, raised by
+ * {@link GbpTokenService} after a 401 when no/invalid {@code refreshToken} or the token endpoint
+ * fails). {@code 2510} remains the documented cross-integration not-connected fallback.
  */
 @Slf4j
 @Service
@@ -86,6 +98,7 @@ public class GbpApiClient {
     private final WebClient.Builder webClientBuilder;
     private final GbpProperties properties;
     private final CircuitBreakerRegistry breakers;
+    private final GbpTokenService tokenService;
 
     // -------------------------------------------------------------------------
     // Public API
@@ -107,7 +120,9 @@ public class GbpApiClient {
                     }
                     String baseUrl = resolveBaseUrl(conn);
                     String locationPath = resolveLocationPath(conn);
-                    return callFetch(baseUrl, accessToken, locationPath);
+                    // On 401, refresh the token (persisting it) and retry this call once.
+                    return refreshAndRetryOn401(conn,
+                            token -> callFetch(baseUrl, token, locationPath), accessToken);
                 }));
     }
 
@@ -127,8 +142,46 @@ public class GbpApiClient {
                         return Mono.<Void>error(notConnected());
                     }
                     String baseUrl = resolveBaseUrl(conn);
-                    return callPostReply(baseUrl, accessToken, reviewId, replyText);
+                    // On 401, refresh the token (persisting it) and retry this call once.
+                    return refreshAndRetryOn401(conn,
+                            token -> callPostReply(baseUrl, token, reviewId, replyText), accessToken);
                 }));
+    }
+
+    // -------------------------------------------------------------------------
+    // OAuth2 access-token refresh on 401 (the auth path; review/reply logic untouched)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Runs {@code callWithToken} with the current {@code accessToken}; on a 401
+     * ({@link WebClientResponseException.Unauthorized} — which the call methods deliberately let
+     * propagate raw) it refreshes the token via {@link GbpTokenService} (persisting the rotation)
+     * and retries the original call <strong>exactly once</strong> with the new token. A refresh
+     * failure surfaces {@code 4034}; a 401 that survives the post-refresh retry (auth still failing
+     * with a freshly-minted token) is mapped to {@code 4031} (a genuine fetch/post failure, not a
+     * stale-token problem). Non-401 errors are untouched (the call already mapped them to
+     * {@code 4031}/{@code DigiPresBeException}).
+     *
+     * <p>The refresh runs at most once per call — there is no retry loop — so an endpoint that
+     * always 401s cannot spin.
+     */
+    private <T> Mono<T> refreshAndRetryOn401(IntegrationConnection conn,
+                                             Function<String, Mono<T>> callWithToken,
+                                             String accessToken) {
+        return callWithToken.apply(accessToken)
+                .onErrorResume(WebClientResponseException.Unauthorized.class, unauthorized -> {
+                    log.info("GBP call got 401 for tenant {} — refreshing the access token and "
+                            + "retrying once", conn.getTenantId());
+                    return tokenService.refreshAccessToken(conn)
+                            .flatMap(newToken -> callWithToken.apply(newToken)
+                                    // A 401 with a freshly-refreshed token is no longer a
+                                    // stale-token problem → a genuine 4031 fetch/post failure.
+                                    .onErrorMap(WebClientResponseException.Unauthorized.class,
+                                            stillUnauthorized -> new DigiPresBeException(
+                                                    "GBP call still 401 after a token refresh: "
+                                                            + stillUnauthorized.getMessage(),
+                                                    4031, 502)));
+                });
     }
 
     // -------------------------------------------------------------------------
@@ -204,6 +257,9 @@ public class GbpApiClient {
                 .retryWhen(retrySpec())
                 .onErrorMap(err -> {
                     if (err instanceof DigiPresBeException) return err;
+                    // Let a 401 propagate raw so the refresh-and-retry-once wrapper can act on it
+                    // (refreshAndRetryOn401); everything else is a 4031 fetch failure.
+                    if (err instanceof WebClientResponseException.Unauthorized) return err;
                     return new DigiPresBeException(
                             "GBP fetch-reviews failed: " + err.getMessage(), 4031, 502);
                 });
@@ -233,6 +289,9 @@ public class GbpApiClient {
                 .retryWhen(retrySpec())
                 .onErrorMap(err -> {
                     if (err instanceof DigiPresBeException) return err;
+                    // Let a 401 propagate raw so the refresh-and-retry-once wrapper can act on it
+                    // (refreshAndRetryOn401); everything else is a 4031 post failure.
+                    if (err instanceof WebClientResponseException.Unauthorized) return err;
                     return new DigiPresBeException(
                             "GBP post-reply failed: " + err.getMessage(), 4031, 502);
                 });
