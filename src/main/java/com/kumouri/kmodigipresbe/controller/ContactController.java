@@ -3,6 +3,7 @@ package com.kumouri.kmodigipresbe.controller;
 import com.kumouri.kmodigipresbe.model.request.ActivityDTO;
 import com.kumouri.kmodigipresbe.model.request.ContactDTO;
 import com.kumouri.kmodigipresbe.service.ContactCrudService;
+import com.kumouri.kmodigipresbe.tenancy.RoleGuard;
 import com.kumouri.kmodigipresbe.util.RequestMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -28,9 +29,15 @@ public class ContactController {
     private final ContactCrudService service;
     private final RequestMapper mapper;
 
+    /**
+     * Broad reader (the full tenant contacts list) — {@code RoleGuard.denyRole("CONTRACTOR")}
+     * (Phase J — J2) keeps a contractor off the CRM contact list; the only client info a
+     * contractor sees is the read-only {@code GET /me/contractor/projects/{id}/client} for an
+     * assigned project (→ 4135). Plain STAFF (non-contractor) employees are unaffected.
+     */
     @GetMapping
     public Flux<ContactDTO> list() {
-        return service.findAll().map(mapper::toContactDTO);
+        return RoleGuard.denyRole("CONTRACTOR").thenMany(service.findAll().map(mapper::toContactDTO));
     }
 
     @GetMapping("/{id}")
