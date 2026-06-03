@@ -33,4 +33,22 @@ public final class RoleGuard {
                         : Mono.error(new DigiPresBeException(
                                 "Role '" + role + "' required", 1800, 403)));
     }
+
+    /**
+     * Inverse of {@link #requireRole(String)} (Phase J — J2). Completes empty when the
+     * current tenant context does NOT carry {@code role}, or errors with a
+     * {@link DigiPresBeException} (errorCode {@code 4135}, status 403) when it does.
+     *
+     * <p>Composed at the head of the broad staff LIST/read endpoints so a CONTRACTOR token
+     * (which also carries {@code STAFF}, keeping it on the staff security chain) is pushed
+     * off them onto the scoped {@code /me/contractor/**} surface. Plain {@code STAFF}
+     * (non-contractor) employees are unaffected.
+     */
+    public static Mono<Void> denyRole(String role) {
+        return TenantContextHolder.required()
+                .flatMap(ctx -> ctx.hasRole(role)
+                        ? Mono.error(new DigiPresBeException(
+                                "Role '" + role + "' is not permitted here", 4135, 403))
+                        : Mono.<Void>empty());
+    }
 }

@@ -57,17 +57,26 @@ public class TimeEntryController {
     // CRUD
     // -------------------------------------------------------------------------
 
+    /**
+     * Broad cross-user reader — {@code RoleGuard.denyRole("CONTRACTOR")} (Phase J — J2) pushes
+     * a contractor onto their self-scoped {@code GET /me/contractor/time} (→ 4135). Plain
+     * STAFF (non-contractor) employees are unaffected.
+     */
     @GetMapping("/by-user/{userId}")
     public Flux<TimeEntry> listByUser(@PathVariable UUID userId) {
-        return service.findByUser(userId);
+        return RoleGuard.denyRole("CONTRACTOR").thenMany(service.findByUser(userId));
     }
 
+    /**
+     * Broad cross-user reader — contractor pushed onto {@code GET /me/contractor/time/weekly}
+     * (J2; → 4135). Plain STAFF unaffected.
+     */
     @GetMapping("/weekly")
     public Flux<TimeEntry> listWeekly(
             @RequestParam Instant from,
             @RequestParam Instant to,
             @RequestParam UUID userId) {
-        return service.findWeekly(from, to, userId);
+        return RoleGuard.denyRole("CONTRACTOR").thenMany(service.findWeekly(from, to, userId));
     }
 
     @GetMapping("/{id}")

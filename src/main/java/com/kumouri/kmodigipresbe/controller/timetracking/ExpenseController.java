@@ -52,14 +52,23 @@ public class ExpenseController {
     // CRUD
     // -------------------------------------------------------------------------
 
+    /**
+     * Broad cross-user reader — {@code RoleGuard.denyRole("CONTRACTOR")} (Phase J — J2) pushes
+     * a contractor onto their self-scoped {@code GET /me/contractor/expenses} (→ 4135). Plain
+     * STAFF (non-contractor) employees are unaffected.
+     */
     @GetMapping("/by-user/{userId}")
     public Flux<Expense> listByUser(@PathVariable UUID userId) {
-        return service.findByUser(userId);
+        return RoleGuard.denyRole("CONTRACTOR").thenMany(service.findByUser(userId));
     }
 
+    /**
+     * Broad cross-user reader (an expense-approval queue across all submitters) — contractor
+     * denied (J2; → 4135). Plain STAFF unaffected.
+     */
     @GetMapping("/by-approval-status")
     public Flux<Expense> listByApprovalStatus(@RequestParam ApprovalStatus status) {
-        return service.findByApprovalStatus(status);
+        return RoleGuard.denyRole("CONTRACTOR").thenMany(service.findByApprovalStatus(status));
     }
 
     @GetMapping("/{id}")

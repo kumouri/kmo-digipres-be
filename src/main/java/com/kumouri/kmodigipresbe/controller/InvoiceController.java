@@ -4,6 +4,7 @@ import com.kumouri.kmodigipresbe.model.billing.Invoice;
 import com.kumouri.kmodigipresbe.model.billing.Payment;
 import com.kumouri.kmodigipresbe.model.idempotency.IdempotentRoute;
 import com.kumouri.kmodigipresbe.service.billing.InvoiceService;
+import com.kumouri.kmodigipresbe.tenancy.RoleGuard;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -27,9 +28,14 @@ public class InvoiceController {
 
     private final InvoiceService service;
 
+    /**
+     * Broad reader (all invoices / finances) — {@code RoleGuard.denyRole("CONTRACTOR")}
+     * (Phase J — J2) keeps a contractor out of invoices/finances (→ 4135). Plain STAFF
+     * (non-contractor) employees are unaffected.
+     */
     @GetMapping
     public Flux<Invoice> list() {
-        return service.findAll();
+        return RoleGuard.denyRole("CONTRACTOR").thenMany(service.findAll());
     }
 
     @GetMapping("/{id}")

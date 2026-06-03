@@ -289,12 +289,21 @@ import java.util.UUID;
  *       code); {@code 4103} displayName required (400); {@code 4104} a team member with
  *       this email already exists (409); {@code 4105} unknown user status (400);
  *       {@code 4140} team member not found (404).
+ *       <em>Contractor scoping (J2):</em> {@code 4130} caller is not a contractor (403,
+ *       {@code ContractorSelfResolver}); {@code 4131} token carries no user id (403);
+ *       {@code 4132} project not found / not actively assigned (404, same-404 no-enumeration
+ *       oracle, {@code ContractorAccessGuard#requireAssignedProject}); {@code 4133} time
+ *       entry / expense not found / not owned (404, same-404); {@code 4134} cross-user write
+ *       — a contractor body {@code userId != self} (400); {@code 4135} role not permitted —
+ *       a CONTRACTOR token on a broad staff reader ({@code RoleGuard.denyRole}, 403).
  *       <em>Reserved for later sub-phases:</em> {@code 4120} time exists but none approved
- *       (timesheet billing gate); {@code 4130-4135} contractor scoping (self-resolver,
- *       not-assigned / not-owned, cross-user write, denyRole); {@code 4150-4151} timesheet
- *       submit/approve transitions + reject-reason. Reused (NOT re-allocated):
+ *       (timesheet billing gate); {@code 4150-4151} timesheet submit/approve transitions +
+ *       reject-reason. Reused (NOT re-allocated):
  *       {@code 1800} RoleGuard ADMIN-required (team + assignment endpoints);
- *       {@code 3100}/{@code 3101} idempotency middleware (assignment POST).</li>
+ *       {@code 3100}/{@code 3101} idempotency middleware (assignment POST);
+ *       {@code 3500}/{@code 3502}/{@code 3503}/{@code 3505}/{@code 3506} and
+ *       {@code 3511}-{@code 3517} surfaced unchanged by the reused {@code TimeEntryService} /
+ *       {@code ExpenseService} on the contractor self-scoped time/expense paths.</li>
  * </ul>
  */
 @Slf4j

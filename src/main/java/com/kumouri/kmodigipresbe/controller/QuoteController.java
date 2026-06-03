@@ -3,6 +3,7 @@ package com.kumouri.kmodigipresbe.controller;
 import com.kumouri.kmodigipresbe.model.quote.Quote;
 import com.kumouri.kmodigipresbe.service.quote.QuoteService;
 import com.kumouri.kmodigipresbe.service.storage.FileStorageService;
+import com.kumouri.kmodigipresbe.tenancy.RoleGuard;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DefaultDataBufferFactory;
@@ -30,9 +31,14 @@ public class QuoteController {
 
     private final QuoteService service;
 
+    /**
+     * Broad reader (all quotes / sales financials) — {@code RoleGuard.denyRole("CONTRACTOR")}
+     * (Phase J — J2) keeps a contractor out of quotes (→ 4135). Plain STAFF (non-contractor)
+     * employees are unaffected.
+     */
     @GetMapping
     public Flux<Quote> list() {
-        return service.findAll();
+        return RoleGuard.denyRole("CONTRACTOR").thenMany(service.findAll());
     }
 
     @GetMapping("/{id}")
