@@ -1,10 +1,12 @@
 package com.kumouri.kmodigipresbe.service.contractor;
 
 import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
+import com.kumouri.kmodigipresbe.model.contractor.Timesheet;
 import com.kumouri.kmodigipresbe.model.project.Project;
 import com.kumouri.kmodigipresbe.model.timetracking.Expense;
 import com.kumouri.kmodigipresbe.model.timetracking.TimeEntry;
 import com.kumouri.kmodigipresbe.repository.contractor.ProjectAssignmentRepository;
+import com.kumouri.kmodigipresbe.repository.contractor.TimesheetRepository;
 import com.kumouri.kmodigipresbe.repository.project.ProjectRepository;
 import com.kumouri.kmodigipresbe.repository.timetracking.ExpenseRepository;
 import com.kumouri.kmodigipresbe.repository.timetracking.TimeEntryRepository;
@@ -45,6 +47,7 @@ public class ContractorAccessGuard {
     private final ProjectRepository projects;
     private final TimeEntryRepository timeEntries;
     private final ExpenseRepository expenses;
+    private final TimesheetRepository timesheets;
 
     // -------------------------------------------------------------------------
     // Public guard methods
@@ -97,6 +100,25 @@ public class ContractorAccessGuard {
                                 ? Mono.just(expense)
                                 : Mono.error(() -> new DigiPresBeException(
                                         "Expense not found", 4133, 404))));
+    }
+
+    /**
+     * Resolves the {@link Timesheet} identified by {@code id} and confirms it belongs to the
+     * caller (Phase J — J3). Both not-found and not-owned return the same {@code 4133}/404
+     * (no enumeration oracle — the owned-* posture). The contractor self-surface
+     * ({@code GET /me/contractor/timesheets/{id}}, {@code POST .../submit},
+     * {@code POST .../reopen}) gates on this; the admin lifecycle loads by id directly and
+     * surfaces {@code 4152} instead.
+     */
+    public Mono<Timesheet> requireOwnedTimesheet(UUID id) {
+        return self.resolve().flatMap(s ->
+                timesheets.findByTenantIdAndId(s.tenantId(), id)
+                        .switchIfEmpty(Mono.error(() -> new DigiPresBeException(
+                                "Timesheet not found", 4133, 404)))
+                        .flatMap(timesheet -> ownedBy(timesheet.getUserId(), s.userId())
+                                ? Mono.just(timesheet)
+                                : Mono.error(() -> new DigiPresBeException(
+                                        "Timesheet not found", 4133, 404))));
     }
 
     // -------------------------------------------------------------------------
