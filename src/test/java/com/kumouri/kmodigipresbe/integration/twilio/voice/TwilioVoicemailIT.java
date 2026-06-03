@@ -452,8 +452,10 @@ class TwilioVoicemailIT {
         assertThat(body).contains("<Response>");
         assertThat(body).contains("<Say>");
         assertThat(body).contains("transcribe=\"true\"");
-        assertThat(body).contains("transcribeCallback=\"/public/integrations/twilio/"
-                + tenantId + "/voicemail\"");
+        // Path-relative (no leading slash) so Twilio resolves it against the full voice URL
+        // and inherits the /api/v1 base-path — see TwilioVoicemailService#buildVoiceTwiml. A
+        // leading "/public/..." would resolve against the host root, dropping /api/v1 → 404.
+        assertThat(body).contains("transcribeCallback=\"voicemail\"");
         assertThat(body).contains("playBeep=\"true\"");
     }
 
