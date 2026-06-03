@@ -28,6 +28,19 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * assumed in {@code GbpApiClient} <strong>only</strong>. Correcting against the real Google
  * Business Profile API (My Business / Business Information API) is a change to that one client's
  * fetch/post methods — no other file assumes the wire format.
+ *
+ * <h2>OAuth2 token refresh (where the OAuth-app credentials live)</h2>
+ * Google access tokens expire (~1h). When a GBP API call returns 401, {@code GbpTokenService}
+ * exchanges the per-tenant {@code refreshToken} for a fresh {@code accessToken} at {@link #tokenUrl}
+ * and persists it. The split mirrors {@code QuickBooksProperties} exactly:
+ * <ul>
+ *   <li><strong>Per-tenant</strong> — the {@code refreshToken} (and the rotated {@code accessToken})
+ *       live in {@code IntegrationConnection(provider="google-business").secrets}
+ *       ({@code refreshToken} / {@code accessToken} / {@code tokenExpiresAt}).</li>
+ *   <li><strong>Global (these properties)</strong> — the OAuth app's {@link #clientId} /
+ *       {@link #clientSecret} (KMOSF's single Google-Cloud OAuth client; the same for every tenant)
+ *       and the {@link #tokenUrl} token endpoint.</li>
+ * </ul>
  */
 @Data
 @ConfigurationProperties(prefix = "kmosf.gbp")
@@ -44,4 +57,27 @@ public class GbpProperties {
 
     /** Per-request HTTP timeout (seconds). */
     private long requestTimeoutSeconds = 10;
+
+    /**
+     * OAuth2 token endpoint hit by {@code GbpTokenService} for the {@code grant_type=refresh_token}
+     * exchange. Defaults to a non-routable {@code .invalid} placeholder —
+     * <strong>never a real Google URL</strong> (§7 hard no-live-Google line; the real Google value
+     * is {@code https://oauth2.googleapis.com/token}). In every test/CI run this is overridden to
+     * the WireMock base URL via {@code @DynamicPropertySource}. No code path hardcodes a real host.
+     */
+    private String tokenUrl = "https://oauth2.googleapis.invalid/token";
+
+    /**
+     * KMOSF's Google-Cloud OAuth2 app client id — the same for every tenant (the
+     * {@code QuickBooksProperties.clientId} posture). Sent as {@code client_id} in the refresh-token
+     * exchange. Blank by default (no live Google in the implementation loop).
+     */
+    private String clientId = "";
+
+    /**
+     * KMOSF's Google-Cloud OAuth2 app client secret — the same for every tenant. Sent as
+     * {@code client_secret} in the refresh-token exchange. Blank by default; a sandbox fake in tests
+     * (never a live secret in any fixture — §7).
+     */
+    private String clientSecret = "";
 }

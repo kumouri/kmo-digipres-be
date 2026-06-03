@@ -287,11 +287,15 @@ import java.util.UUID;
  *       for the tenant — no {@code IntegrationConnection(provider="google-business")} (404, the
  *       Phase-local not-connected code; {@code 2510} remains the documented cross-integration
  *       fallback); {@code 4031} GBP API fetch-reviews / post-reply call failed (502 — a non-2xx or
- *       downstream throwable, after the Resilience4j retry/breaker). <em>Admin approve/post
- *       surface:</em> {@code 4032} review-reply draft not found for the tenant (404);
- *       {@code 4033} review-reply is not in {@code DRAFTED} status — cannot post/skip an already
- *       POSTED/SKIPPED draft (409, defensive). Reserved for future review-automation growth:
- *       {@code 4034-4049}. Reused (NOT re-allocated): {@code 1200-1203} (AI budget gate +
+ *       downstream throwable, after the Resilience4j retry/breaker). <em>OAuth2 access-token
+ *       refresh:</em> {@code 4034} GBP token refresh failed (502) — raised by {@code GbpTokenService}
+ *       when, after a GBP API call returned 401, the stored {@code refreshToken} is missing/blank,
+ *       the configurable {@code kmosf.gbp.token-url} endpoint returns a non-2xx / non-JSON body, or
+ *       the response carries no {@code access_token} (the access token cannot be rotated; a
+ *       re-consent is required). <em>Admin approve/post surface:</em> {@code 4032} review-reply
+ *       draft not found for the tenant (404); {@code 4033} review-reply is not in {@code DRAFTED}
+ *       status — cannot post/skip an already POSTED/SKIPPED draft (409, defensive). Reserved for
+ *       future review-automation growth: {@code 4035-4049}. Reused (NOT re-allocated): {@code 1200-1203} (AI budget gate +
  *       Anthropic call failure + missing-key — surfaced unchanged by the new
  *       {@code GbpReplyDraftService}, which mirrors {@code AnthropicAiAssistService}); {@code 2530-2532}
  *       (Twilio SMS recipient/send/secret — surfaced unchanged by the reused {@code TwilioSmsService}
