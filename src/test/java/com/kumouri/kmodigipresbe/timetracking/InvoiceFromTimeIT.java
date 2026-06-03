@@ -106,11 +106,14 @@ class InvoiceFromTimeIT {
                 .code("PRJ-2026-I01").name("Invoice Test Project")
                 .status(Project.ProjectStatus.ACTIVE).build()).block();
 
+        // (Phase J — J3) Candidate entries must be approved to clear the approved-only
+        // invoicing gate; this IT exercises invoice mechanics, not the gate itself.
         Instant start1 = Instant.parse("2026-05-16T09:00:00Z");
         TimeEntry e1 = timeEntryRepo.save(TimeEntry.builder()
                 .id(UUID.randomUUID()).tenantId(tenantId).userId(userId).projectId(projectId)
                 .startedAt(start1).endedAt(start1.plusSeconds(3600))
                 .durationSeconds(3600L).billable(true).billingStatus(BillingStatus.UNBILLED)
+                .approved(true)
                 .rateAmount(new BigDecimal("100.00")).description("Design work").build()).block();
 
         Instant start2 = Instant.parse("2026-05-16T11:00:00Z");
@@ -118,6 +121,7 @@ class InvoiceFromTimeIT {
                 .id(UUID.randomUUID()).tenantId(tenantId).userId(userId).projectId(projectId)
                 .startedAt(start2).endedAt(start2.plusSeconds(1800))
                 .durationSeconds(1800L).billable(true).billingStatus(BillingStatus.UNBILLED)
+                .approved(true)
                 .rateAmount(new BigDecimal("100.00")).description("Review work").build()).block();
 
         String requestBody = """
@@ -162,7 +166,7 @@ class InvoiceFromTimeIT {
         timeEntryRepo.save(TimeEntry.builder()
                 .id(UUID.randomUUID()).tenantId(tenantId).userId(userId).projectId(projectId)
                 .startedAt(s).endedAt(s.plusSeconds(3600)).durationSeconds(3600L)
-                .billable(true).billingStatus(BillingStatus.UNBILLED)
+                .billable(true).billingStatus(BillingStatus.UNBILLED).approved(true)
                 .rateAmount(new BigDecimal("80.00")).build()).block();
 
         String req = """
@@ -208,12 +212,14 @@ class InvoiceFromTimeIT {
                 .id(UUID.randomUUID()).tenantId(tenantId).userId(userId).projectId(projectId)
                 .startedAt(Instant.parse("2026-05-18T20:00:00Z")).endedAt(midnight)
                 .durationSeconds(14400L).billable(true).billingStatus(BillingStatus.UNBILLED)
+                .approved(true)
                 .rateAmount(new BigDecimal("100.00")).splitGroupId(groupId).build()).block();
         // Row B: Tue 00:00 → Tue 04:00 = 4h
         timeEntryRepo.save(TimeEntry.builder()
                 .id(UUID.randomUUID()).tenantId(tenantId).userId(userId).projectId(projectId)
                 .startedAt(midnight).endedAt(Instant.parse("2026-05-19T04:00:00Z"))
                 .durationSeconds(14400L).billable(true).billingStatus(BillingStatus.UNBILLED)
+                .approved(true)
                 .rateAmount(new BigDecimal("100.00")).splitGroupId(groupId).build()).block();
 
         String req = """
@@ -249,8 +255,9 @@ class InvoiceFromTimeIT {
         timeEntryRepo.save(TimeEntry.builder()
                 .id(UUID.randomUUID()).tenantId(tenantId).userId(userId).projectId(projectId)
                 .startedAt(s).endedAt(s.plusSeconds(3600)).durationSeconds(3600L)
-                .billable(true).billingStatus(BillingStatus.UNBILLED)
-                // No rateAmount — should trigger 3521
+                .billable(true).billingStatus(BillingStatus.UNBILLED).approved(true)
+                // No rateAmount — approved so it clears the J3 gate and reaches the rate
+                // check → should trigger 3521
                 .build()).block();
 
         String req = """
