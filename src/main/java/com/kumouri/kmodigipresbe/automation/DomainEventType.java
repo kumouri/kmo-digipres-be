@@ -223,6 +223,20 @@ public final class DomainEventType {
     //   payload {projectId, userId}.
     public static final String PROJECT_ASSIGNED   = "project.assigned";
     public static final String PROJECT_UNASSIGNED = "project.unassigned";
+    // J3 timesheet lifecycle — all advisory (TimesheetService is the single synchronous
+    // writer of the period status AND the TimeEntry.approved invoicing gate; these do NOT
+    // drive any core mutation).
+    // TIMESHEET_SUBMITTED: emitted by TimesheetService.submit; payload {userId}.
+    // TIMESHEET_APPROVED:  emitted by TimesheetService.approve (member entries flipped
+    //   approved=true in the same op); payload {approvedBy}.
+    // TIMESHEET_REJECTED:  emitted by TimesheetService.reject (member entries flipped back
+    //   to approved=false); payload {rejectedBy, reason}.
+    // TIMESHEET_REOPENED:  emitted by TimesheetService.reopen (REJECTED→OPEN; member entries
+    //   flipped back to approved=false); payload {userId}.
+    public static final String TIMESHEET_SUBMITTED = "timesheet.submitted";
+    public static final String TIMESHEET_APPROVED  = "timesheet.approved";
+    public static final String TIMESHEET_REJECTED  = "timesheet.rejected";
+    public static final String TIMESHEET_REOPENED  = "timesheet.reopened";
 
     // Phase 1 (NMM AI intake) — voicemail-to-lead pipeline. All are advisory (RuleEngine /
     // webhook fan-out) — they do NOT drive any core mutation; the voicemail reconcile

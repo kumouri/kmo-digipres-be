@@ -370,21 +370,34 @@ public class TimeEntryService {
             }
 
             return candidatesMono.flatMap(all -> {
-                // Filter: billable + stopped + UNBILLED
+                // Filter: billable + stopped + UNBILLED + APPROVED (Phase J — J3 approved-only
+                // invoicing gate; the durable UNBILLED anchor is unchanged).
                 List<TimeEntry> candidates = all.stream()
                         .filter(e -> e.isBillable()
                                 && e.getEndedAt() != null
-                                && e.getBillingStatus() == BillingStatus.UNBILLED)
+                                && e.getBillingStatus() == BillingStatus.UNBILLED
+                                && e.isApproved())
                         .toList();
 
                 // Explicit isEmpty check — NOT switchIfEmpty (§9 invariant)
                 if (candidates.isEmpty()) {
-                    // If all were already invoiced → 3522, else 3520
+                    // If all were already invoiced → 3522, else if billable-unbilled-stopped
+                    // entries exist but NONE are approved → 4120 (the J3 gate), else 3520.
                     boolean allInvoiced = !all.isEmpty() && all.stream()
                             .allMatch(e -> e.getBillingStatus() == BillingStatus.INVOICED);
                     if (allInvoiced) {
                         return Mono.error(new DigiPresBeException(
                                 "All selected time entries are already invoiced", 3522, 409));
+                    }
+                    boolean hasUnapprovedBillable = all.stream()
+                            .anyMatch(e -> e.isBillable()
+                                    && e.getEndedAt() != null
+                                    && e.getBillingStatus() == BillingStatus.UNBILLED
+                                    && !e.isApproved());
+                    if (hasUnapprovedBillable) {
+                        return Mono.error(new DigiPresBeException(
+                                "Time entries exist but none are approved — the owning timesheet must be approved first",
+                                4120, 409));
                     }
                     return Mono.error(new DigiPresBeException(
                             "No unbilled time entries to invoice", 3520, 409));

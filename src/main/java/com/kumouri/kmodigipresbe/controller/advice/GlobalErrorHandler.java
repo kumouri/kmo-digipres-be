@@ -312,9 +312,15 @@ import java.util.UUID;
  *       entry / expense not found / not owned (404, same-404); {@code 4134} cross-user write
  *       — a contractor body {@code userId != self} (400); {@code 4135} role not permitted —
  *       a CONTRACTOR token on a broad staff reader ({@code RoleGuard.denyRole}, 403).
- *       <em>Reserved for later sub-phases:</em> {@code 4120} time exists but none approved
- *       (timesheet billing gate); {@code 4150-4151} timesheet submit/approve transitions +
- *       reject-reason. Reused (NOT re-allocated):
+ *       <em>Timesheet lifecycle + invoicing gate (J3):</em> {@code 4120} time entries exist
+ *       but none are approved — the owning timesheet must be approved first (409,
+ *       {@code TimeEntryService.createInvoiceFromTime} approved-only gate); {@code 4150}
+ *       illegal timesheet lifecycle transition (409, {@code TimesheetService} —
+ *       submit/approve/reject/reopen {@code ILLEGAL_TRANSITIONS}); {@code 4151} timesheet
+ *       reject reason required (400); {@code 4152} timesheet not found for the tenant (404,
+ *       the admin lifecycle load-by-id path — the contractor self-surface uses the same-404
+ *       {@code 4133} via {@code ContractorAccessGuard#requireOwnedTimesheet}). Reused (NOT
+ *       re-allocated):
  *       {@code 1800} RoleGuard ADMIN-required (team + assignment endpoints);
  *       {@code 3100}/{@code 3101} idempotency middleware (assignment POST);
  *       {@code 3500}/{@code 3502}/{@code 3503}/{@code 3505}/{@code 3506} and

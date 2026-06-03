@@ -42,4 +42,12 @@ public interface TimeEntryRepository extends TenantScopedReactiveMongoRepository
 
     Flux<TimeEntry> findAllByTenantIdAndTaskIdAndBillingStatus(
             UUID tenantId, UUID taskId, BillingStatus billingStatus);
+
+    /**
+     * (Phase J — J3) The member entries of a {@code Timesheet} period. Backed by
+     * {@code tenant_timesheet_idx}. Used by {@code TimesheetService.approve/reject/reopen}
+     * to bulk-flip {@code TimeEntry.approved} (the invoice/payout gate) in lock-step with
+     * the period's lifecycle transition.
+     */
+    Flux<TimeEntry> findAllByTenantIdAndTimesheetId(UUID tenantId, UUID timesheetId);
 }
