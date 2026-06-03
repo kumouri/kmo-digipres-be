@@ -156,13 +156,18 @@ public class TwilioVoicemailService {
     public Mono<String> handleVoice(UUID tenantId, String signatureHeader, String fullUrl,
                                     MultiValueMap<String, String> form) {
         return verifiedConnection(tenantId, signatureHeader, fullUrl, form)
-                .thenReturn(buildVoiceTwiml(tenantId));
+                .thenReturn(buildVoiceTwiml());
     }
 
-    private String buildVoiceTwiml(UUID tenantId) {
-        // transcribeCallback points back at THIS controller's voicemail endpoint for the
-        // same tenant (relative path — Twilio resolves it against the voice webhook host).
-        String callbackPath = "/public/integrations/twilio/" + tenantId + "/voicemail";
+    private String buildVoiceTwiml() {
+        // transcribeCallback MUST be a path-relative reference ("voicemail", no leading
+        // slash). Twilio resolves it per RFC 3986 against the full voice-webhook URL it
+        // fetched (e.g. https://host/api/v1/public/integrations/twilio/{id}/voice), so the
+        // resolved callback inherits BOTH the host AND the deployment base-path →
+        // .../{id}/voicemail. A leading-slash "/public/..." would resolve against the host
+        // ROOT and silently DROP the /api/v1 base-path → a 404 callback (transcription never
+        // delivered, no lead created). Verified end-to-end against the live api-demo tunnel.
+        String callbackPath = "voicemail";
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
                 + "<Response>"
                 + "<Say>" + HtmlUtils.htmlEscape(greeting) + "</Say>"
