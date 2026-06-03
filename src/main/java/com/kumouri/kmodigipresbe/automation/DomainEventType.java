@@ -250,6 +250,26 @@ public final class DomainEventType {
     public static final String MOLE_PHOTO_CLASSIFIED = "mole.photoClassified";
     public static final String MOLE_LEAD_CREATED     = "mole.leadCreated";
 
+    // Phase 3 (NMM AI intake) — coverage-window automation. All are advisory (RuleEngine /
+    // webhook fan-out) — they do NOT drive any core mutation; the B2 re-activity tripwire
+    // performs the Attachment store + MoleVisionService classify + re-treatment Milestone
+    // creation (via the UNCHANGED MilestoneService.create) + notify-Rob dispatch synchronously
+    // and explicitly inside MoleTripwireService, and the default-OFF coverage-window nudge job
+    // dispatches the check-in SMS synchronously (idempotent per (project, period) via an
+    // explicit-boolean CoverageNudgeLog ledger probe). Like Phase 2, the tripwire has no
+    // idempotency ledger (a per-customer photo report is intentionally re-invocable), so the
+    // tripwire events are not dedupe-gated.
+    // MOLE_TRIPWIRE_REPORTED: emitted after a coverage customer's tripwire photo is classified;
+    //   payload {classification, confidence, attachmentId, projectId, aboveThreshold}.
+    // RETREATMENT_MILESTONE_CREATED: emitted after an above-threshold mole auto-creates a
+    //   re-treatment Milestone on the customer's Project; payload {projectId, milestoneId,
+    //   classification, confidence, attachmentId}.
+    // COVERAGE_NUDGE_SENT: emitted after the default-OFF nudge job dispatches a check-in SMS for
+    //   a (project, period); payload {projectId, periodKey, contactId}.
+    public static final String MOLE_TRIPWIRE_REPORTED       = "mole.tripwireReported";
+    public static final String RETREATMENT_MILESTONE_CREATED = "mole.retreatmentMilestoneCreated";
+    public static final String COVERAGE_NUDGE_SENT          = "coverage.nudgeSent";
+
     private DomainEventType() {
     }
 }
