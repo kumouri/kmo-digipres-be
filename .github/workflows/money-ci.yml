@@ -1,0 +1,22 @@
+name: money-ci
+
+# Money-critical PRs get the FULL Testcontainers suite (not just the fast unit lane)
+# before merge — the one place the CI-minutes split keeps full integration coverage at
+# PR time. Native pull_request path-trigger (no third-party action): the workflow only
+# runs when one of these packages changes, then reuses full-ci.yml verbatim.
+on:
+  pull_request:
+    paths:
+      - 'src/main/java/com/kumouri/kmodigipresbe/service/recurring/**'
+      - 'src/main/java/com/kumouri/kmodigipresbe/service/billing/**'
+      - 'src/main/java/com/kumouri/kmodigipresbe/integration/stripe/**'
+      - 'src/main/java/com/kumouri/kmodigipresbe/integration/documenso/**'
+
+concurrency:
+  group: money-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full:
+    name: full Testcontainers suite (money paths changed)
+    uses: ./.github/workflows/full-ci.yml

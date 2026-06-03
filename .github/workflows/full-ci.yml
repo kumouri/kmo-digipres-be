@@ -1,0 +1,101 @@
+name: full-ci
+
+# The full Testcontainers suite (every *IT + *Test class), sharded. Triggers:
+#   * push to main      — post-merge gate (merge commits are new, untested SHAs); also
+#                         the only place docs/api/openapi.json is refreshed.
+#   * workflow_dispatch — run the full suite on demand (e.g. before merging a risky branch).
+#   * workflow_call     — reused by money-ci.yml for PRs touching money-critical paths.
+# Reduced from 4 shards to 2: each shard pays the full JDK/Gradle/Testcontainers boot
+# once, so halving the shard count halves that fixed per-run overhead.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+  workflow_call: {}
+
+concurrency:
+  group: full-ci-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: gradle test (shard ${{ matrix.shard }}/2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: ./gradlew test (shard ${{ matrix.shard }}/2)
+        run: ./gradlew test -Dtest.shard.index=${{ matrix.shard }} -Dtest.shard.total=2 --no-daemon --stacktrace
+        # Each shard runs in a fresh runner with its own Docker engine => its own
+        # singleton Testcontainers Mongo/Kafka. maxParallelForks=1 is preserved within
+        # each shard; isolation is across jobs, not JVM forks. Ryuk reaps any leak.
+
+      - name: Upload test reports (shard ${{ matrix.shard }})
+        # always() so a *cancelled* job still uploads reports (cancellation skips
+        # failure()-gated steps, which hides stack traces needed to diagnose CI failures).
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-shard-${{ matrix.shard }}
+          path: |
+            build/reports/tests/**
+            build/test-results/**
+          if-no-files-found: ignore
+          retention-days: 7
+
+  openapi:
+    name: openapi spec (export + refresh)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Export spec via OpenApiEndpointIT then refresh docs/api/openapi.json
+        run: ./gradlew test --tests "*OpenApiEndpointIT" verifyOpenApi --no-daemon --stacktrace
+        # OpenApiEndpointIT exports build/openapi/openapi.json during the Testcontainers
+        # phase; verifyOpenApi (mustRunAfter 'test') then copies it to docs/api/openapi.json.
+
+      - name: Upload generated OpenAPI spec
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-spec
+          path: build/openapi/openapi.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  ci-gate:
+    name: ci gate (all shards + openapi)
+    needs: [test, openapi]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Verify all jobs passed
+        run: |
+          echo "shards=${{ needs.test.result }} openapi=${{ needs.openapi.result }}"
+          [ "${{ needs.test.result }}" = "success" ] && [ "${{ needs.openapi.result }}" = "success" ]

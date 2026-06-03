@@ -33,7 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient
 @Import(TestcontainersConfiguration.class)
-class RetentionPolicyControllerTest {
+class RetentionPolicyControllerIT {
 
     @Autowired WebTestClient web;
     @Autowired RetentionPolicyRepository retentionPolicyRepository;

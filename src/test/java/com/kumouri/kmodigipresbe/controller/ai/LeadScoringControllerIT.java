@@ -33,7 +33,7 @@ import java.util.UUID;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient
 @Import(TestcontainersConfiguration.class)
-class LeadScoringControllerTest {
+class LeadScoringControllerIT {
 
     @Autowired WebTestClient web;
     @Autowired ContactRepository contactRepository;
