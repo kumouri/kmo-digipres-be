@@ -29,10 +29,12 @@ import java.util.UUID;
  * {@code 3712 / 404} without any side effect. A module flag on the controller
  * would silently 404 a tenant's signed-document callback if the flag flipped.
  *
- * <h2>Signature header (F-D7 documented assumption)</h2>
- * The exact header name is assumed to be {@code X-Documenso-Signature}. This is
- * the <strong>only place the header name is referenced</strong> — correcting it
- * against a real Documenso deployment is a one-line change here.
+ * <h2>Webhook secret header (corrected against the real Documenso product)</h2>
+ * Documenso sends the configured webhook secret verbatim in the
+ * {@code X-Documenso-Secret} header (it does NOT HMAC-sign the body). This is the
+ * <strong>only place the header name is referenced</strong>; the verification
+ * scheme (constant-time equality vs the stored {@code webhookSigningSecret}) lives
+ * only in {@code DocumensoSignatureVerifier}.
  *
  * <h2>Tenant resolution</h2>
  * Tenant id comes from the URL path; the payload's claimed tenant (if any) is
@@ -48,15 +50,16 @@ public class DocumensoWebhookController {
     /**
      * Receives a Documenso webhook delivery for the given tenant.
      *
-     * @param tenantId  tenant UUID from the URL path (validated here — 3711 if invalid)
-     * @param signature value of the assumed {@code X-Documenso-Signature} header
-     *                  (may be absent — treated as invalid by the verifier → 3710/401)
-     * @param body      raw request body (may be absent — treated as empty by the service)
+     * @param tenantId tenant UUID from the URL path (validated here — 3711 if invalid)
+     * @param secret   value of the {@code X-Documenso-Secret} header — Documenso's
+     *                 verbatim webhook secret (may be absent — treated as invalid by
+     *                 the verifier → 3710/401)
+     * @param body     raw request body (may be absent — treated as empty by the service)
      */
     @PostMapping("/{tenantId}/webhook")
     public Mono<Void> webhook(
             @PathVariable String tenantId,
-            @RequestHeader(name = "X-Documenso-Signature", required = false) String signature,
+            @RequestHeader(name = "X-Documenso-Secret", required = false) String secret,
             @RequestBody(required = false) String body) {
         UUID parsed;
         try {
@@ -65,6 +68,6 @@ public class DocumensoWebhookController {
             return Mono.error(new DigiPresBeException(
                     "Invalid tenant id in webhook path", 3711, 400));
         }
-        return webhook.handle(parsed, signature, body == null ? "" : body);
+        return webhook.handle(parsed, secret, body == null ? "" : body);
     }
 }
