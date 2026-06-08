@@ -47,6 +47,11 @@ public class EquipmentVisionItStorageTestConfig {
                 return Mono.just("tenants/" + tenantId + "/" + partition + "/"
                         + UUID.randomUUID() + "." + suffix);
             }
+
+            @Override
+            public Mono<byte[]> getBytes(UUID tenantId, String storageRef) {
+                return Mono.just(new byte[0]);
+            }
         };
     }
 }

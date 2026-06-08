@@ -53,6 +53,22 @@ public interface FileStorageService {
     Mono<String> putBytes(UUID tenantId, String partition, byte[] bytes,
                           String contentType, String suffix);
 
+    /**
+     * Server-side byte read (RE-4 — Marketing Studio). The read-twin of
+     * {@link #putBytes}: fetches the object at {@code storageRef} directly into
+     * memory using the non-blocking {@code S3AsyncClient} and returns its bytes.
+     * Used when the server needs the actual bytes of an already-stored object —
+     * the RE-4 Marketing Studio reads back a listing photo {@code Attachment} to
+     * feed {@code AiVisionService.extract} for a feature caption.
+     *
+     * <p>Like {@link #presignDownload}, it refuses a key that is not under this
+     * tenant's prefix ({@code tenants/<tenantId>/...}) — error
+     * {@link com.kumouri.kmodigipresbe.exceptions.DigiPresBeException} {@code 1311}/403,
+     * the cross-tenant guard — and errors {@code 1310}/503 if the bucket is not
+     * configured. Returns a {@link Mono} that emits the bytes on success.
+     */
+    Mono<byte[]> getBytes(UUID tenantId, String storageRef);
+
     record Presigned(String url, String storageRef, String method) {
     }
 }

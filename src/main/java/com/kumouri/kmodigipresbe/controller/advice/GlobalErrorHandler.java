@@ -562,6 +562,40 @@ import java.util.UUID;
  *       {@code MEETING} type. The slot-offer + confirmation copy is deterministic templating (no Anthropic
  *       call). <strong>No live Twilio / Cal.com in tests</strong> (a mock {@code TwilioSmsService} + a direct
  *       Meeting projection write — no Cal.com).</li>
+ *   <li>{@code 4266-4269} — <em>Real Estate Concierge RE-4 (flagship #3)</em>: the <strong>Marketing
+ *       Studio</strong> — one agent action on a {@code Listing} → Claude (Sonnet) drafts MLS remarks + N
+ *       platform-tuned social captions + an email blast, and the UNCHANGED {@code AiVisionService.extract}
+ *       captions the listing photos (feature callouts woven into the copy), behind a <strong>Fair-Housing
+ *       guardrail</strong> (a strict system-prompt instruction + a deterministic post-generation
+ *       {@code FairHousingLint}) and a <strong>mandatory human approval before publish</strong> (the draft
+ *       lands DRAFTED and is <strong>NEVER auto-published</strong> — the GBP review-reply draft→approve
+ *       posture). All gated on {@code kmosf.modules.realestate.enabled}. The photo bytes are read back via
+ *       the new {@code FileStorageService.getBytes} (the read-twin of {@code putBytes}); intake stores them
+ *       via {@code putBytes} + a generic LISTING {@code Attachment} + a {@code ListingPhoto}.
+ *       <strong>RE-4 mints only advisory codes</strong> (every path is best-effort — a Claude/vision
+ *       failure never errors, it yields a partial/empty draft): {@code 4266} no listing photos to caption
+ *       (advisory log — text-only generation proceeds, never thrown); {@code 4267} reserved — the
+ *       Fair-Housing lint is non-blocking (it surfaces flags on the DRAFTED draft for human review; it does
+ *       NOT hard-block, because the mandatory human approval is the real gate, never an auto-publish);
+ *       {@code 4268} generation degraded/blank — a Claude budget/upstream/parse failure (the draft is saved
+ *       DRAFTED with {@code generationDegraded=true} + a flag, never thrown); {@code 4269} reserved for RE-4
+ *       growth. Reused (NOT re-allocated): {@code 1200-1203} (AI budget gate / Anthropic non-200 /
+ *       missing-key — via the {@code MarketingGenerationService} sibling of {@code ConciergeAnswerService}
+ *       AND the shared {@code AiVisionService.extract}; all best-effort, swallowed into a degraded draft);
+ *       {@code 4211} unsupported image media type on photo intake (the shared
+ *       {@code AiVisionService.isSupportedMediaType} gate, the HS-2 {@code 4211} posture);
+ *       {@code 4253} listing not found / not owned (the reused RE-1 {@code ListingService} not-found code) —
+ *       also reused on the draft surface for a missing draft (404) and a non-DRAFTED approve/skip (409, the
+ *       {@code GbpReviewReplyAdminService} {@code 4033} same-status guard, kept RE-local);
+ *       {@code 1310}/{@code 1311} file storage (the reused {@code FileStorageService} {@code putBytes} store
+ *       + the new {@code getBytes} read, including the {@code 1311} foreign-tenant-key guard);
+ *       {@code 1130}/{@code 1132} module gate; {@code 1800} STAFF {@code RoleGuard} on the controller. The
+ *       {@code ListingMarketingController} is {@code @ConditionalOnProperty}-gated, so it is absent from the
+ *       generated OpenAPI spec when the module is off. <strong>No live Anthropic / OpenAI / Atlas in
+ *       tests</strong> (WireMock for the text + vision Anthropic calls; a test {@code FileStorageService}
+ *       stub for the photo bytes). <strong>RE-1/RE-2/RE-3 + ChairFill + the scorer byte-equivalent:</strong>
+ *       RE-4 is a purely additive agent-triggered surface + two additive {@code @Bean}s; it touches no
+ *       inbound-SMS / concierge / scoring path.</li>
  * </ul>
  */
 @Slf4j

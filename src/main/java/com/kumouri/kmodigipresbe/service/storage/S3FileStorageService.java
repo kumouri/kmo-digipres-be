@@ -6,6 +6,7 @@ import reactor.core.publisher.Mono;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.async.AsyncRequestBody;
+import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.S3AsyncClientBuilder;
@@ -132,6 +133,30 @@ public class S3FileStorageService implements FileStorageService, Closeable {
         return Mono.fromFuture(() ->
                 asyncClient.putObject(put, AsyncRequestBody.fromBytes(bytes))
         ).thenReturn(key);
+    }
+
+    /**
+     * Server-side byte read (RE-4 — Marketing Studio). The read-twin of
+     * {@link #putBytes}: fetches the object at {@code storageRef} into memory via
+     * the non-blocking {@link S3AsyncClient} ({@code AsyncResponseTransformer.toBytes()})
+     * and returns its bytes. Refuses a foreign-tenant key (the same
+     * {@link #presignDownload} {@code tenants/<tenantId>/} prefix guard, {@code 1311}/403).
+     */
+    @Override
+    public Mono<byte[]> getBytes(UUID tenantId, String storageRef) {
+        requireBucket();
+        String prefix = "tenants/" + tenantId + "/";
+        if (storageRef == null || !storageRef.startsWith(prefix)) {
+            return Mono.error(new DigiPresBeException(
+                    "Refusing to read a foreign-tenant key", 1311, 403));
+        }
+        GetObjectRequest get = GetObjectRequest.builder()
+                .bucket(props.bucket())
+                .key(storageRef)
+                .build();
+        return Mono.fromFuture(() ->
+                asyncClient.getObject(get, AsyncResponseTransformer.toBytes())
+        ).map(software.amazon.awssdk.core.ResponseBytes::asByteArray);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

@@ -297,3 +297,120 @@ per-tenant `IntegrationConnection(calcom)` + webhook signing secret + the agent'
 availability, so `generateSlots` reads live availability and `book` drives a real Cal.com booking that the
 shipped `CalComWebhookService` reconciles (idempotent on `calComBookingUid`). Already on the RE go-live ledger
 (plan §9). No concierge code change needed for the flip.
+
+---
+
+# RE-4 — Real Estate Concierge: Marketing Studio (vision captions + Sonnet copy + Fair-Housing lint + draft→approve) — Progress Ledger
+
+> Branch `realestate-concierge-phase-4-marketing-studio` (off `main` @ `63fdf96`, RE-1+RE-2+RE-3 merged).
+> Spec: `~/.claude/plans/real-estate-concierge-flagship.md` §5 decision 5 + the RE-4 sub-phase. Error band: **4266-4269**.
+
+## Goal (RE-4)
+
+One agent action on a `Listing` → Claude (Sonnet) drafts **MLS remarks + N platform-tuned social captions + an
+email blast**, and the UNCHANGED `AiVisionService.extract` **captions the listing photos** (feature callouts
+woven into the copy), behind a **Fair-Housing guardrail** (strict system prompt + a deterministic
+post-generation lint) and a **mandatory human approval before publish** — the draft lands DRAFTED and is
+**NEVER auto-published** (the GBP review-reply draft→approve posture). RE-1/RE-2/RE-3 + ChairFill + the scorer
+stay byte-equivalent.
+
+## Design as built
+
+- **Photo intake.** `ListingMarketingController.uploadPhoto` (STAFF-gated, `multipart/form-data`, the
+  `EquipmentPhotoController` byte-reading pattern) → `ListingMarketingService.addPhoto` stores the bytes via the
+  shared `FileStorageService.putBytes` (partition `listing-photos`), registers a generic
+  `Attachment(subjectType="LISTING", subjectId=listingId)`, and persists a `ListingPhoto` linking the two.
+  Unsupported media type → 4211; missing image / missing-or-not-owned listing → 4253.
+- **`FileStorageService.getBytes` (the read-twin of `putBytes`).** A new interface method + S3 impl (S3
+  `GetObject` via the existing non-blocking `S3AsyncClient` + `AsyncResponseTransformer.toBytes()`), with the
+  same `tenants/<tenantId>/` foreign-tenant guard (1311) as `presignDownload`. Needed so the Studio can read a
+  stored listing photo back at generate time to feed the vision call. The 4 test storage stubs gained a
+  trivial `getBytes` (empty-bytes) impl.
+- **Generate (`ListingMarketingService.generate`).** Load the listing (4253); for each listing photo read its
+  bytes (`getBytes`) → UNCHANGED `AiVisionService.extract` for a `{caption, features[]}` read (best-effort per
+  photo — a getBytes/vision/parse failure or a blank read contributes no caption, never throws; an empty photo
+  set logs 4266 → text-only generation proceeds); then `MarketingGenerationService` (Sonnet, the
+  `AnthropicAiAssistService`/`ConciergeAnswerService` transport shape) drafts the per-channel copy grounded in
+  the listing facts + the photo notes; then the deterministic `FairHousingLint` runs over every generated
+  piece. Persist a DRAFTED `ListingMarketingDraft` (pieces + photoCaptions + fairHousingFlags +
+  generationDegraded) and emit `LISTING_MARKETING_DRAFTED`.
+- **Fair-Housing guardrail (two layers).** (1) The generation system prompt forbids protected-class /
+  steering / "ideal for [family/race/religion/…]" framing (FHA §3604(c)) and instructs "describe the property,
+  never the ideal occupant"; the vision-caption prompt carries the same instruction. (2) `FairHousingLint` —
+  a pure deterministic keyword/phrase scan (case-insensitive, word-boundary for single tokens, substring for
+  multi-word steering phrases) over the generated copy → a `FairHousingFlag {term, channel, snippet}` per hit.
+  The flags are **surfaced** on the DRAFTED draft (and `fairHousingFlagged`) but do **NOT block** it from human
+  review — the mandatory human approval is the real gate (never an auto-publish). (RE-4 4267 is reserved/
+  non-blocking by design.)
+- **Best-effort generation.** A Claude budget/upstream/parse failure (1200/1202/1203) is swallowed → an
+  empty/partial package + `generationDegraded=true` (4268); the draft is still saved DRAFTED, never an error.
+- **Draft → approve / skip (never auto-publish).** `listDrafted` (the review queue, the GBP
+  `findByTenantIdAndStatusOrderBy...Desc` precedent); `approve` flips DRAFTED→APPROVED (copy-ready, paste-out —
+  the actual MLS/social posting is out of scope, the GBP approve→post posture) + emits
+  `LISTING_MARKETING_APPROVED`; `skip` discards (SKIPPED). A non-DRAFTED approve/skip is rejected (the
+  `GbpReviewReplyAdminService` 4033 same-status guard, kept RE-local as a 409 on 4253); not-found → 404/4253.
+
+### New files
+- `module/realestate/model/MarketingChannel.java` (MLS_REMARKS / INSTAGRAM / FACEBOOK / X / EMAIL_BLAST)
+- `module/realestate/model/ListingPhoto.java` + `ListingPhotoRepository.java`
+- `module/realestate/model/ListingMarketingDraft.java` (+ embedded `GeneratedPiece` / `PhotoCaption` /
+  `FairHousingFlag`; status DRAFTED→APPROVED|SKIPPED) + `ListingMarketingDraftRepository.java`
+- `module/realestate/marketing/FairHousingLint.java` (the deterministic lint — pure utility, no bean)
+- `module/realestate/marketing/MarketingGenerationService.java` (the Sonnet per-channel JSON drafter)
+- `module/realestate/marketing/ListingMarketingService.java` (the orchestrator: intake / generate / approve)
+- `module/realestate/controller/ListingMarketingController.java` (STAFF + module-gated; photos / generate /
+  drafts / approve / skip)
+
+### Edited (additive; RE-1 + RE-2 + RE-3 + ChairFill + scorer byte-equivalent)
+- `service/storage/FileStorageService.java` (+`getBytes`) + `S3FileStorageService.java` (S3 GetObject impl)
+- 4 test storage stubs (+trivial `getBytes`): `contract/support/ContractItStorageTestConfig`,
+  `integration/equipmentvision/support/EquipmentVisionItStorageTestConfig`,
+  `integration/molevision/support/MoleTriageItStorageTestConfig`,
+  `integration/moletripwire/support/MoleTripwireItStorageTestConfig`
+- `RealEstateAutoConfiguration.java` (+the `MarketingGenerationService` + `ListingMarketingService` beans)
+- `automation/DomainEventType.java` (+`LISTING_MARKETING_DRAFTED`, `LISTING_MARKETING_APPROVED`)
+- `controller/advice/GlobalErrorHandler.java` (+4266-4269 doc band)
+
+### Tests
+- `src/test/java/.../module/realestate/RealEstateMarketingStudioIT.java` — (1) generate → a DRAFTED draft with
+  MLS remarks + 3 social captions + an email blast + a per-photo (stubbed-vision) callout (caption + features),
+  `LISTING_MARKETING_DRAFTED` emitted; (2) steering language in the generated copy → the lint flags it
+  (`perfect for families`, `safe neighborhood`) but the draft is still saved DRAFTED (NOT blocked, NOT
+  auto-published); (3) approve → APPROVED + leaves the DRAFTED queue + `LISTING_MARKETING_APPROVED` emitted, and
+  a second approve is rejected (same-status guard); (4) a Claude (text) failure → a best-effort partial/empty
+  DRAFTED draft + `generationDegraded`, no error (the photo was still captioned); (5) never-auto-publish —
+  generation alone leaves every draft DRAFTED, no APPROVED event. WireMock serves BOTH the vision `extract`
+  (image content block) and the text generation (string content), disambiguated by request body; an in-memory
+  `FileStorageService` round-trips the photo bytes through `getBytes`.
+
+## Validation status
+
+- `./gradlew compileJava compileTestJava` — GREEN.
+- `./gradlew cleanTest test --tests "*RealEstateMarketingStudioIT" --tests "*RealEstateConciergeIT"
+  --tests "*RealEstateQualificationIT" --tests "*RealEstateShowingBookingIT" --tests "*AiVisionServiceIT"
+  --tests "*GapFillWaitlistIT" --tests "*OpenApiEndpointIT"` — **GREEN**. Per-class (tests/failures/errors):
+  RealEstateMarketingStudioIT 5/0/0; RealEstateConciergeIT 5/0/0; RealEstateQualificationIT 5/0/0;
+  RealEstateShowingBookingIT 4/0/0; AiVisionServiceIT 5/0/0; GapFillWaitlistIT 11/0/0; OpenApiEndpointIT 2/0/0.
+- `./gradlew test --tests "*LeadScoringV2IT"` — **GREEN** (4/0/0; the scorer regression gate).
+
+## Hard gates
+
+1. RE-1 grounding + RE-2 qualification/scoring + RE-3 booking + ChairFill inbound + the lead-scorer all
+   **byte-equivalent** (`RealEstateConciergeIT`, `RealEstateQualificationIT`, `RealEstateShowingBookingIT`,
+   `GapFillWaitlistIT`, `LeadScoringV2IT` green). RE-4 is a purely additive agent-triggered surface + two
+   additive `@Bean`s; it touches no inbound-SMS / concierge / scoring path.
+2. **Never auto-publish** — generation only ever produces a DRAFTED draft; APPROVED requires a staff approve
+   (test 5 asserts it). The Fair-Housing lint surfaces flags but never blocks/posts.
+3. Module-gated (`realestate`), blast-radius zero; best-effort (a Claude/vision failure → a partial/empty
+   DRAFTED draft + a flag, never an error). Error band **4266-4269** (advisory); reuse 1200-1203 (AI),
+   4211 (unsupported media), 4253 (listing/draft not-found / not-DRAFTED), 1310/1311 (storage), 1130/1132
+   (module gate), 1800 (STAFF). The controller is `@ConditionalOnProperty`-gated → absent from the OpenAPI
+   spec when off (no committed-spec drift).
+
+## Go-live note
+
+The studio is **paste-out + approve** — it never posts to MLS or social (that is out of scope; the agent copies
+the approved text). For a live client that wants auto-posting, a per-channel publish adapter (MLS/IDX write API,
+the social platforms' APIs, or the GBP post path for review replies) would be a separate add-on behind the same
+DRAFTED→APPROVED queue. Vision + text both need the Anthropic house/per-tenant key + a per-tenant AI budget
+(already on the RE go-live ledger, plan §9). No live MLS/IDX feed (decision 6).
