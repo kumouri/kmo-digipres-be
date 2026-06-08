@@ -150,8 +150,9 @@ public class DocumensoClient {
 
     /**
      * Downloads the signed PDF from a direct URL (primary path when the webhook
-     * payload includes a {@code downloadUrl} — F-D7 adapter). The {@code apiToken}
-     * is still required as a Bearer credential.
+     * payload includes a {@code downloadUrl}, and the second hop of
+     * {@link #downloadSignedPdf} — F-D7 adapter). The {@code apiToken} is still
+     * required as the raw {@code Authorization} header value.
      *
      * @param downloadUrl absolute URL of the signed PDF served by Documenso
      * @return raw PDF bytes; errors with {@code DigiPresBeException(3721, 502)} on
@@ -221,7 +222,10 @@ public class DocumensoClient {
         Mono<DocumensoSendResult> attempt = Mono.defer(() ->
                 client.post()
                         .uri("/api/v1/documents")
-                        .header("Authorization", "Bearer " + apiToken)
+                        // Documenso v1 auth: the raw API token is the Authorization
+                        // header VALUE itself (the spec's apiKey-in-header scheme).
+                        // NOT "Bearer <token>", NOT "api_<token>".
+                        .header("Authorization", apiToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .accept(MediaType.APPLICATION_JSON)
                         .bodyValue(body)
@@ -260,7 +264,10 @@ public class DocumensoClient {
         Mono<byte[]> attempt = Mono.defer(() ->
                 client.get()
                         .uri("/api/v1/documents/{id}/download", documensoDocumentId)
-                        .header("Authorization", "Bearer " + apiToken)
+                        // Documenso v1 auth: the raw API token is the Authorization
+                        // header VALUE itself (the spec's apiKey-in-header scheme).
+                        // NOT "Bearer <token>", NOT "api_<token>".
+                        .header("Authorization", apiToken)
                         .retrieve()
                         .bodyToMono(byte[].class)
                         .timeout(Duration.ofSeconds(properties.getRequestTimeoutSeconds()))
@@ -294,7 +301,10 @@ public class DocumensoClient {
         Mono<byte[]> attempt = Mono.defer(() ->
                 client.get()
                         .uri(downloadUrl)
-                        .header("Authorization", "Bearer " + apiToken)
+                        // Documenso v1 auth: the raw API token is the Authorization
+                        // header VALUE itself (the spec's apiKey-in-header scheme).
+                        // NOT "Bearer <token>", NOT "api_<token>".
+                        .header("Authorization", apiToken)
                         .retrieve()
                         .bodyToMono(byte[].class)
                         .timeout(Duration.ofSeconds(properties.getRequestTimeoutSeconds()))
