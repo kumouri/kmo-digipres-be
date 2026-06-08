@@ -33,7 +33,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <ol>
  *   <li>A valid token + DTO creates a Contact and a DRAFT WorkOrder under the
- *       token's tenant, returns both IDs.</li>
+ *       token's tenant — with a server-assigned {@code workOrderNumber} (the widget
+ *       routes through {@code WorkOrderService.create}, so field-service is enabled
+ *       here too) — and returns both IDs.</li>
  *   <li>A tampered token rejects with errorCode {@code 1602} (Phase 9b
  *       signature-invalid range).</li>
  *   <li>A token issued for a different widgetType rejects with errorCode
@@ -45,7 +47,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient
 @Import(TestcontainersConfiguration.class)
-@TestPropertySource(properties = "kmosf.modules.home-services.enabled=true")
+@TestPropertySource(properties = {
+        "kmosf.modules.home-services.enabled=true",
+        // field-service enabled so the WorkOrderService bean exists and the widget
+        // routes WorkOrder creation through WorkOrderService.create (server-assigned
+        // workOrderNumber) rather than the field-service-disabled fallback save.
+        "kmosf.modules.field-service.enabled=true"
+})
 class ServiceRequestWidgetIT {
 
     @Autowired WebTestClient web;
@@ -104,6 +112,10 @@ class ServiceRequestWidgetIT {
         assertThat(wo.getStatus()).isEqualTo(WorkOrderStatus.DRAFT);
         assertThat(wo.getServiceType()).isEqualTo("FURNACE_SERVICE");
         assertThat(wo.getNotes()).contains("Furnace making clicking noises.");
+        assertThat(wo.getWorkOrderNumber())
+                .as("widget WorkOrder routed through WorkOrderService.create → server-assigned number")
+                .isNotBlank()
+                .matches("\\d{4}-\\d{2}-\\d{4}");
     }
 
     @Test

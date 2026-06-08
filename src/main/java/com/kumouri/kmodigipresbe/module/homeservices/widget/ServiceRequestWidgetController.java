@@ -8,6 +8,7 @@ import com.kumouri.kmodigipresbe.model.contact.PhoneNumber;
 import com.kumouri.kmodigipresbe.module.fieldservice.model.WorkOrder;
 import com.kumouri.kmodigipresbe.module.fieldservice.model.WorkOrderStatus;
 import com.kumouri.kmodigipresbe.module.fieldservice.repository.WorkOrderRepository;
+import com.kumouri.kmodigipresbe.module.fieldservice.service.WorkOrderService;
 import com.kumouri.kmodigipresbe.repository.ContactRepository;
 import com.kumouri.kmodigipresbe.service.widget.PublicWidgetToken;
 import com.kumouri.kmodigipresbe.service.widget.PublicWidgetTokenService;
@@ -16,6 +17,7 @@ import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -50,8 +52,10 @@ import java.util.Set;
  *       (the lookup is read-only; we don't rewrite an existing contact's name
  *       from a public form to avoid letting strangers mutate staff-curated
  *       data).</li>
- *   <li>Create a DRAFT WorkOrder linked to the resolved JobSite (if the
- *       submission carries one) or with a null jobSite for staff triage.</li>
+ *   <li>Create a DRAFT WorkOrder — numbered via {@link WorkOrderService#create}
+ *       when field-service is enabled (see {@link #createDraftWorkOrder}) — linked
+ *       to the resolved JobSite (if the submission carries one) or with a null
+ *       jobSite for staff triage.</li>
  *   <li>Respond with both IDs.</li>
  * </ol>
  *
@@ -82,6 +86,14 @@ public class ServiceRequestWidgetController {
     private final PublicWidgetTokenService tokens;
     private final ContactRepository contacts;
     private final WorkOrderRepository workOrders;
+    /**
+     * The field-service {@link WorkOrderService} — present only when
+     * {@code kmosf.modules.field-service.enabled=true}. Resolved lazily via an
+     * {@link ObjectProvider} so the home-services widget still boots on a server
+     * with field-service disabled (the {@code maintenanceVisitService} bean is
+     * {@code @ConditionalOnBean(WorkOrderService.class)} for the same reason).
+     */
+    private final ObjectProvider<WorkOrderService> workOrderServiceProvider;
 
     @PostMapping("/{token}")
     public Mono<ServiceRequestSubmissionResponseDTO> submit(
@@ -121,6 +133,21 @@ public class ServiceRequestWidgetController {
                         .switchIfEmpty(Mono.defer(() -> contacts.save(buildContact(body)))));
     }
 
+    /**
+     * Routes through the canonical {@link WorkOrderService#create} — the same
+     * create path every staff-created WorkOrder uses — so widget submissions get a
+     * server-assigned {@code workOrderNumber} ({@code YYYY-MM-{seq:04}}, via
+     * {@code WorkOrderNumberGenerator} under the synthetic {@code TenantContext}
+     * established in {@link #handleSubmission}) and the create-path defaults
+     * (id/number cleared, status defaulted to DRAFT).
+     *
+     * <p>Guarded on the {@link WorkOrderService} bean: on a server with
+     * {@code field-service} disabled the bean is absent, so we fall back to a direct
+     * {@code workOrders.save}. The widget's contract is to always return a
+     * {@code workOrderId}, so — unlike the voicemail flow, which can degrade to no
+     * WorkOrder — the fallback still persists the WorkOrder; it just won't carry a
+     * server-assigned number until field-service is enabled for the tenant.
+     */
     private Mono<WorkOrder> createDraftWorkOrder(Contact contact, ServiceRequestSubmissionDTO body) {
         WorkOrder wo = WorkOrder.builder()
                 .jobSiteId(body.jobSiteId())
@@ -128,7 +155,8 @@ public class ServiceRequestWidgetController {
                 .serviceType(body.serviceType())
                 .notes(annotateNotes(contact, body))
                 .build();
-        return workOrders.save(wo);
+        WorkOrderService workOrderService = workOrderServiceProvider.getIfAvailable();
+        return workOrderService != null ? workOrderService.create(wo) : workOrders.save(wo);
     }
 
     private Contact buildContact(ServiceRequestSubmissionDTO body) {
