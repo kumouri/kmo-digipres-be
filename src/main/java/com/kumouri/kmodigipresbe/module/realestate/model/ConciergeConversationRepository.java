@@ -26,4 +26,19 @@ public interface ConciergeConversationRepository
     /** All conversations for a listing, most-recent first — the agent transcript list. */
     Flux<ConciergeConversation> findByTenantIdAndListingIdOrderByLastInboundAtDesc(
             UUID tenantId, UUID listingId);
+
+    /**
+     * RE-5a — all conversations for a tenant, most-recent first, backing the staff-facing concierge
+     * list ({@code GET /realestate/conversations}). Additive read finder; carries the explicit
+     * {@code tenantId} predicate (the marker does not auto-scope derived finders).
+     */
+    Flux<ConciergeConversation> findByTenantIdOrderByLastInboundAtDesc(UUID tenantId);
+
+    /**
+     * RE-5a — a single conversation scoped to the tenant, backing the detail read
+     * ({@code GET /realestate/conversations/{id}}). Tenant-scoped so a thread can never be fetched for
+     * a foreign tenant (the {@code ListingRepository.findByIdAndTenantId} posture; {@code 4270} on a
+     * missing / not-owned conversation).
+     */
+    Mono<ConciergeConversation> findByIdAndTenantId(UUID id, UUID tenantId);
 }
