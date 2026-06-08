@@ -26,4 +26,11 @@ public interface WaitlistOfferRepository
 
     /** Sibling offers for the same freed slot — used to mark the rest SUPERSEDED after a claim. */
     Flux<WaitlistOffer> findByTenantIdAndFreedBookingId(UUID tenantId, UUID freedBookingId);
+
+    /**
+     * Recent offers for a tenant, newest sent first — the CF-5a waitlist-board read
+     * ({@code WaitlistBoardController}) shows who's been offered what, across all statuses
+     * (OFFERED/CLAIMED/SUPERSEDED/EXPIRED). The controller caps the stream. Additive.
+     */
+    Flux<WaitlistOffer> findByTenantIdOrderBySentAtDesc(UUID tenantId);
 }
