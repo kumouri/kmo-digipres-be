@@ -636,6 +636,21 @@ import java.util.UUID;
  *       lead-scorer + the core calendar + NMM/ChairFill/RE byte-equivalent:</strong> FD-1 is a purely
  *       additive module that reads only {@code AppointmentRepository}, never {@code BookingRepository} —
  *       the two no-show scorers share the {@code NoShowRisk} value type but never share data.</li>
+ *   <li>{@code 4280-4284} — <em>FrontDesk IQ FD-2 (Health-practices flagship #4)</em>: risk-tiered
+ *       confirmation + recall/recare re-engagement, all <strong>generic / PHI-free outbound copy</strong>
+ *       (fence F3). The {@code FrontDeskConfirmationService} {@code @PostConstruct} subscriber on
+ *       {@code APPOINTMENT_RISK_SCORED} (HIGH → an extra confirmation ask; LOW/MEDIUM → a light reminder;
+ *       no deposit, unlike CF-2), the {@code RecallDetectorJob} nightly recall sweep (lapsed-patient →
+ *       recall {@code Sequence} enroll + generic recare nudge), and the {@code FrontDeskReminderAutomation}
+ *       baseline {@code WorkflowRule} seeder. <strong>FD-2 mints NO new error codes</strong> — it is a
+ *       parallel {@code frontdesk} subscriber + two scheduled jobs that reuse existing codes only: AI
+ *       {@code 1200-1203} (via {@code ConfirmationCopyService} — the budget gate / upstream non-200 /
+ *       missing-key, all degraded best-effort to a generic template), Twilio {@code 2530-2532} (SMS send,
+ *       degraded best-effort). The whole {@code 4280-4284} band is reserved for FD-2 growth.
+ *       <strong>FD-1 + CF-1/CF-2 + the lead-scorer + NMM/ChairFill/RE byte-equivalent:</strong> FD-2 reads
+ *       only {@code AppointmentRepository} / {@code ContactRepository} / the shipped {@code Sequence} engine,
+ *       touches no salon {@code Booking} / deposit path, and the copy is provably generic (a release-blocking
+ *       IT asserts a forbidden clinical/provider-token set is absent from every outbound body).</li>
  * </ul>
  */
 @Slf4j
