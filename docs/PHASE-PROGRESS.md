@@ -927,6 +927,8 @@ contains no `chairfill/reviews` path and is left at HEAD; `OpenApiEndpointIT` pa
   wins, one queue row — no duplicate). Acceptable for a low-concurrency staff paste-in PoC; not worth
   a lock.
 
+---
+
 # CF-5a — ChairFill waitlist-board read API (backing the CF-5 board FE) — Progress Ledger
 
 ## Goal
@@ -1013,3 +1015,88 @@ contains no `chairfill/waitlist` path and is left byte-unchanged at HEAD; `OpenA
   seeds via save-then-`toBuilder().createdAt(...)`-resave (the `RetentionPurgeIT` back-dating precedent)
   to make the newest-first ordering assertions deterministic. `WaitlistOffer` ordering keys on `sentAt`
   (a plain field), so it needs no such dance.
+
+---
+
+# CF-3 follow-up — ChairFill stale-offer expiry sweeper (`OFFERED` → `EXPIRED`) — Progress Ledger
+
+> Branch `fix/chairfill-offer-expiry-sweeper` (off `main` @ `cebfe46`, after CF-1/CF-2/CF-3/CF-4 merged).
+> Closes a CF-3 ledger-hygiene gap; no spec change.
+
+## Goal
+
+CF-3 mints `WaitlistOffer` rows (`chairfill_waitlist_offers`) as `OFFERED` with an `expiresAt`. The
+inbound-YES path (`WaitlistClaimService.resolveOpenOffer`) correctly filters out past-`expiresAt` offers,
+so an expired offer is **never wrongly claimable** — but nothing ever transitions a stale `OFFERED` row to
+the `EXPIRED` status the enum already defines, so the ledger accumulates perpetually-`OFFERED` rows that
+are in fact dead (muddying every "open offers" read/report). Add a small, best-effort, module-gated
+`@Scheduled` sweeper that flips every `OFFERED` offer whose `expiresAt` is in the past to `EXPIRED`.
+
+## Design as built (mirror of `NoShowRiskScoringService.nightlyRun` / the `CoverageNudgeJob`)
+
+- **`WaitlistOfferExpiryService`** (new `module/chairfill/gapfill/`) — a config-driven
+  `@Scheduled(cron = "${kmosf.chairfill.gapfill.offer-expiry-cron:0 15 3 * * *}")` tick (default nightly
+  03:15, offset from the no-show 02:30 run + the retention purge at 03:00). The scheduled method subscribes
+  the sweep on `Schedulers.boundedElastic()` (never the Netty loop, fire-and-forget); a visible-for-test
+  `sweepOnce()` returns the `Mono<Long>` count of flips an IT blocks (the `CoverageNudgeJob.nudgeDueOnce()`
+  posture). The tenant scan filters to **ACTIVE** tenants whose `enabledModules` contains `"chairfill"`
+  (the `nightlyRun` filter verbatim).
+- **Hand-wired as a `@Bean` in `ChairFillAutoConfiguration`**, `@ConditionalOnBean(SalonBookingService.class)`
+  — so it exists only when `kmosf.modules.chairfill.enabled=true` AND the salon-spa module it rides is
+  loaded, exactly like every other CF bean.
+- **The query** is a new explicit-`tenantId` derived finder
+  `WaitlistOfferRepository.findByTenantIdAndStatusAndExpiresAtBefore(tenantId, OFFERED, now)` — derived
+  finders aren't auto-tenant-scoped (the repo's documented contract), and `save()` needs no request context
+  when the entity already carries `tenantId` (the `NoShowRiskScoringService.runJobForTenant` precedent;
+  `TenantStampingCallback` only requires a context when `tenantId` is null). A null/absent `expiresAt` is
+  not matched (Mongo Date type-bracketing), mirroring `resolveOpenOffer` treating null as never-expiring.
+
+## Invariants
+
+- **Pure ledger hygiene — zero claimability change.** Whether a YES wins is still decided by
+  `resolveOpenOffer`'s `expiresAt` filter + the slot-level `findAndModify` (D2), both untouched. The sweep
+  only makes the persisted `status` reflect what `expiresAt` already implies. Runs correctly at any cadence.
+- **Best-effort + never clobbers a winner.** Per-tenant and per-offer failures are caught and logged
+  (one bad row never aborts the rest); a lost optimistic-lock race (`@Version`) — a concurrent inbound YES
+  just moved the row to `CLAIMED`/`SUPERSEDED` — is skipped, not retried, so an `EXPIRED` never overwrites a
+  `CLAIMED`/`SUPERSEDED`. The `status = OFFERED` query predicate is the first guard; `@Version` is the
+  backstop.
+- **Blast radius zero.** Only chairfill tenants' offers are ever read or written; a non-chairfill (or
+  non-salon) tenant is skipped. No new error codes; **no new endpoint** (a `@Scheduled` `@Bean`, not a
+  controller) → the OpenAPI surface is unchanged.
+
+## Files
+
+**Created:**
+- `module/chairfill/gapfill/WaitlistOfferExpiryService.java` — the sweeper.
+- `src/test/.../module/chairfill/OfferExpirySweepIT.java` — 3 cases.
+
+**Modified (surgical, additive):**
+- `module/chairfill/model/WaitlistOfferRepository.java` — add the `findByTenantIdAndStatusAndExpiresAtBefore`
+  expiry-sweep finder.
+- `module/chairfill/ChairFillAutoConfiguration.java` — register the `WaitlistOfferExpiryService` `@Bean`
+  (`@ConditionalOnBean(SalonBookingService.class)`).
+
+## Test result — BUILD SUCCESSFUL
+
+`./gradlew cleanTest test --tests "*OfferExpirySweepIT" --tests "*GapFillWaitlistIT"
+--tests "*NoShowRiskScoringIT" --tests "*OpenApiEndpointIT"` (Docker up):
+
+| Class | tests | failures | errors | skipped |
+|---|---|---|---|---|
+| `OfferExpirySweepIT` (new) | 3 | 0 | 0 | 0 |
+| `GapFillWaitlistIT` (CF-3 regression — UNCHANGED) | 11 | 0 | 0 | 0 |
+| `NoShowRiskScoringIT` (CF-1 regression — UNCHANGED) | 8 | 0 | 0 | 0 |
+| `OpenApiEndpointIT` | 2 | 0 | 0 | 0 |
+| **TOTAL** | **24** | **0** | **0** | **0** |
+
+`OfferExpirySweepIT` cases: (1) `sweep_flipsPastExpiryOffered_toExpired_andLeavesValidOffered` — a
+past-`expiresAt` `OFFERED` row flips to `EXPIRED` while a still-valid `OFFERED` row stays `OFFERED` (the
+core requirement), sweep count = 1; (2) `sweep_leavesAlreadyTerminalOffers_untouched` — past-expiry
+`CLAIMED`/`SUPERSEDED` rows are NOT re-flipped (the `status = OFFERED` filter), count = 0; (3)
+`sweep_nonChairfillTenant_isHardNoOp` — a non-chairfill tenant's past-expiry `OFFERED` offer is never
+swept (blast-radius-zero), count = 0.
+
+### OpenAPI
+The sweeper is a `@Scheduled` `@Bean` (no controller/endpoint), so the generated spec is unchanged;
+`docs/api/openapi.json` left at HEAD; `OpenApiEndpointIT` passes (2/0/0).

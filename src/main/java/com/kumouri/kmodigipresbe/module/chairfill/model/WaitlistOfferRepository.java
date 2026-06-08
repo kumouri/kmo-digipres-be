@@ -3,6 +3,7 @@ package com.kumouri.kmodigipresbe.module.chairfill.model;
 import com.kumouri.kmodigipresbe.tenancy.TenantScopedReactiveMongoRepository;
 import reactor.core.publisher.Flux;
 
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -33,4 +34,15 @@ public interface WaitlistOfferRepository
      * (OFFERED/CLAIMED/SUPERSEDED/EXPIRED). The controller caps the stream. Additive.
      */
     Flux<WaitlistOffer> findByTenantIdOrderBySentAtDesc(UUID tenantId);
+
+    /**
+     * The stale-offer expiry-sweep query (CF-3 follow-up): this tenant's offers in {@code status} whose
+     * {@code expiresAt} is strictly before {@code cutoff}. The {@code WaitlistOfferExpiryService} flips the
+     * still-{@code OFFERED}, now-past ones to {@code EXPIRED} — pure ledger hygiene, since the
+     * {@code WaitlistClaimService.resolveOpenOffer} claimability gate already excludes them. A null/absent
+     * {@code expiresAt} is NOT matched (Mongo comparison type-bracketing on a Date operand), which mirrors
+     * {@code resolveOpenOffer} treating a null expiry as never-expiring.
+     */
+    Flux<WaitlistOffer> findByTenantIdAndStatusAndExpiresAtBefore(
+            UUID tenantId, WaitlistOffer.Status status, Instant cutoff);
 }
