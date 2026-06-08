@@ -147,3 +147,158 @@ field**, so the model literally cannot see a diagnosis (fence F1). A release-blo
   exist); the advisory spec is `docs/api/openapi.json`, auto-refreshed by the `verifyOpenApi` Gradle task,
   and the gated controllers are absent from it when the module is OFF by default. OpenApiEndpointIT (which
   only asserts the committed spec is non-empty) stays green; no manual cp1252 edit was needed.
+
+---
+
+# FD-2 — FrontDesk IQ: risk-tiered confirmation + recall/recare re-engagement — Progress Ledger
+
+> Crash-recovery source of truth for `frontdesk-iq-phase-2-prevention-recall`
+> (off `main` @ `15f98da`, FD-1 merged via PR #94). Appends to the FD-1 ledger above (same
+> `frontdesk-iq-flagship` lineage).
+>
+> Spec: `~/.claude/plans/frontdesk-iq-flagship.md` §2 (FD-2 sub-phase) + §0 fence F3 (generic outbound copy).
+> Error band: **4280-4284** (reserved — FD-2 mints none; reuses AI 1200-1203 + Twilio 2530-2532).
+
+## Goal (FD-2)
+
+(a) **Risk-tiered confirmation** on FD-1's `APPOINTMENT_RISK_SCORED` — HIGH → an extra confirmation ask;
+LOW/MEDIUM → a light reminder (**no deposit**, unlike CF-2's salon path). (b) **Recall/recare
+re-engagement** — a nightly sweep that finds lapsed patients (last visit > window, no upcoming) and enrolls
+them into the practice's recall `Sequence` (the shipped engine) + sends a generic recare nudge. **All
+outbound copy is GENERIC and PHI-free (fence F3)** — "time for your visit", never a procedure / provider /
+visit-type. The F3 fence is the PHI headline and is made *provable* by a release-blocking IT.
+
+## Design as built
+
+### The risk-tiered confirmation subscriber (mirrors CF-2 `RiskTieredPreventionService`, minus the deposit)
+- `module/frontdesk/automation/FrontDeskConfirmationService.java` — a `@PostConstruct` subscriber on
+  `APPOINTMENT_RISK_SCORED`, the line-shape mirror of `chairfill/automation/RiskTieredPreventionService`:
+  `events.stream().filter(type).flatMap(handle)` + synthetic `TenantContext` + a visible-for-test
+  `handle(event)`. **Branch (no deposit path — health doesn't deposit):** HIGH → `confirm=true` (an extra
+  confirmation ask); LOW/MEDIUM → `confirm=false` (a light reminder). Copy from `ConfirmationCopyService`
+  (best-effort) → a generic deterministic fallback. **Gates:** module-membership re-check (defense-in-depth,
+  HARD GATE 2), the `sms-opt-out` consent tag, phone-present, and a per-contact rolling frequency cap
+  (`kmosf.frontdesk.confirmation.max-per-contact-per-window` over `…window-hours`).
+- `module/frontdesk/automation/ConfirmationLog.java` + `ConfirmationLogRepository.java` — the idempotency +
+  frequency-cap ledger, mirror of `ReminderLog`/`ReminderLogRepository` **minus `depositRequired`** (carries
+  a `confirmation` boolean instead). Unique on `(tenantId, appointmentId)` — inserted **FIRST**, so a
+  re-fired event loses on `DuplicateKeyException` = zero duplicate. `(tenantId, contactId, sentAt)` backs the
+  frequency cap.
+
+### The F3 generic-copy fence (the PHI headline) — provable at TWO layers
+- `module/frontdesk/ai/ConfirmationCopyService.java` — the `ReminderCopyService` sibling (per-tenant
+  Anthropic key + house-key fallback, `AiUsageRecorder` budget gate, WireMock-able base-url, AI codes
+  1200-1203 reused). **Fence F3 by construction, not a bolt-on:**
+  1. **The model is given NO clinical input.** Its `ConfirmationContext` carries ONLY
+     `{clientFirstName, appointmentWhen, brandTone, confirm}` — there is deliberately **no service / provider /
+     visit-type field** (unlike the salon `ReminderContext`, which carries `stylistName` + `lastService`). The
+     record physically cannot transport a clinical token to the LLM.
+  2. **The system prompt hard-forbids inventing one** — "GENERIC copy only … NEVER name, describe, guess, or
+     invent any procedure, treatment, diagnosis, symptom, medication, test, body part, department, specialty,
+     provider name, or visit type."
+- The **deterministic fallback** (`FrontDeskConfirmationService.genericTemplate`) references only the first
+  name + the time — there is no parameter through which a clinical token could enter.
+- **The release-blocking IT** asserts a `FORBIDDEN_TOKENS` set (root canal/crown/procedure/diagnos/oncology/
+  prescription/refill/hygiene/wellness/recall/dentist/doctor/provider/new-patient/… 30+ tokens) is **absent
+  from every outbound body** — the Claude path, the fallback, AND the recall nudge.
+
+### The recall/recare sweep (the shipped Sequence engine + a generic nudge)
+- `module/frontdesk/automation/RecallDetectorJob.java` — a nightly `@Scheduled` per-tenant sweep (the
+  `CoverageNudgeJob` posture), config cron `0 30 3 * * *` (after the FD-1 scorer's 02:45). Per frontdesk
+  tenant (ACTIVE + `enabledModules ∋ "frontdesk"`): loads all appointments once, computes **lapsed contacts**
+  = most-recent visit (`lastVisitAt` or a COMPLETED appt's `scheduledStart`) older than
+  `kmosf.frontdesk.recall.window-days` (default 180) **AND no upcoming (SCHEDULED/CONFIRMED future)
+  appointment**. For each: idempotent per `(tenant, contact, periodKey=ISO-week)` via a `RecallLog`
+  ledger-insert-FIRST, then **(a) enroll** into the tenant's ACTIVE recall `Sequence` (matched by name
+  `kmosf.frontdesk.recall.sequence-name`, default `frontdesk-recall`, via the reused
+  `SequenceCrudService.enroll`) **and (b) send a generic recare nudge SMS** (consent-gated, F3-generic). Both
+  best-effort.
+- `module/frontdesk/automation/RecallLog.java` + `RecallLogRepository.java` — the recall idempotency ledger,
+  unique on `(tenantId, contactId, periodKey)` (the `CoverageNudgeLog` pattern).
+
+### The baseline WorkflowRule seeder (the ChairFillReminderAutomation analogue)
+- `module/frontdesk/automation/FrontDeskReminderAutomation.java` — seeds an owner-tunable static `SEND_SMS`
+  `WorkflowRule` on `APPOINTMENT_RISK_SCORED` per frontdesk tenant (idempotent on the rule name, on
+  `ApplicationReadyEvent`). A visible, editable placeholder; the personalized/PHI-free logic stays in the
+  subscriber (the v1 caveat: the payload carries no resolved phone, so the generic dispatcher safely skips).
+
+## Files
+
+### New (FD-2)
+- `module/frontdesk/automation/FrontDeskConfirmationService.java` (the subscriber, minus deposit)
+- `module/frontdesk/automation/ConfirmationLog.java` + `ConfirmationLogRepository.java`
+- `module/frontdesk/ai/ConfirmationCopyService.java` (the F3-fenced Claude drafter)
+- `module/frontdesk/automation/RecallDetectorJob.java` (the recall sweep)
+- `module/frontdesk/automation/RecallLog.java` + `RecallLogRepository.java`
+- `module/frontdesk/automation/FrontDeskReminderAutomation.java` (the baseline rule seeder)
+
+### Touched (additive only)
+- `module/frontdesk/FrontDeskAutoConfiguration.java` (+4 FD-2 `@Bean`s + the FD-2 class-doc section)
+- `repository/SequenceRepository.java` (+ derived finder `findAllByTenantIdAndStatus` — additive, harmless
+  to existing callers; needed because the recall job runs outside a request `TenantContext`)
+- `controller/advice/GlobalErrorHandler.java` (+4280-4284 doc band)
+
+### Reused (NOT copied)
+- `service/sequence/SequenceCrudService` + the shipped `SequenceEngine`/`Sequence`/`SequenceEnrollment`
+  (recall cadence), `integration/twilio/TwilioSmsService` (SMS), `service/ai/AiUsageRecorder` +
+  `IntegrationConnectionRepository` (the AI budget/key spine), `ContactRepository`, `TenantRepository`,
+  `WorkflowRule`/`WorkflowRuleRepository`, the chairfill `NoShowRisk.TIER_*` constants.
+
+### Tests
+- `src/test/java/.../module/frontdesk/FrontDeskConfirmationIT.java` — (1) HIGH → an extra confirmation ask,
+  generic, no deposit; (2) LOW → one light reminder, generic; (3) **F3 fence on the deterministic fallback**
+  (no clinical/provider token); (4) idempotent on a re-fired event (zero duplicate, one ledger row); (5) a
+  non-frontdesk tenant is a hard no-op; (6) TCPA — an opted-out contact gets no SMS; (7) best-effort — a
+  Claude 500 still sends a generic reminder (`personalized=false`); (8) recall — a lapsed contact enrolls into
+  the recall Sequence + gets a generic nudge while a contact WITH an upcoming appointment is NOT recalled, and
+  the sweep is idempotent per period. **Every outbound-body assertion runs through the `FORBIDDEN_TOKENS`
+  generic-copy guard (fence F3).** WireMock for Anthropic; `@MockitoBean TwilioSmsService` capture seam.
+
+## Validation status
+
+- `./gradlew compileJava compileTestJava` — GREEN.
+- `./gradlew cleanTest test --tests "*FrontDesk*IT" --tests "*chairfill.RiskTieredPreventionIT"
+  --tests "*chairfill.NoShowRiskScoringIT" --tests "*LeadScoringV2IT" --tests "*OpenApiEndpointIT"`
+  — **GREEN** (force-clean). Per-class (tests/failures/errors): **FrontDeskConfirmationIT 8/0/0**;
+  FrontDeskNoShowScoringServiceIT 10/0/0; RiskTieredPreventionIT (CF-2) 5/0/0; NoShowRiskScoringIT (CF-1)
+  8/0/0; LeadScoringV2IT 4/0/0; OpenApiEndpointIT 2/0/0.
+- Plus `./gradlew test --tests "*frontdesk.NoShowRiskControllerIT"` (FD-1 controller, not caught by the
+  `*FrontDesk*IT` glob) — **7/0/0**, confirming the FD-1 surface stays green with the FD-2 beans loaded.
+
+## Hard gates
+
+1. **PHI-free outbound (F3)** — every confirmation/reminder/recall body is generic; the `FORBIDDEN_TOKENS`
+   assertion (30+ clinical/provider/visit-type tokens) passes on the Claude path, the fallback, and the recall
+   nudge. The drafter's `ConfirmationContext` physically cannot carry a clinical token (structural fence).
+2. **FD-1 + CF-1/CF-2 + the lead-scorer untouched** — RiskTieredPreventionIT (CF-2) 5/0/0, NoShowRiskScoringIT
+   (CF-1) 8/0/0, LeadScoringV2IT 4/0/0, FD-1 ITs 10/0/0 + 7/0/0 all pass unchanged. FD-2 is a parallel
+   `frontdesk` subscriber + two scheduled jobs; it touches no salon `Booking`/deposit path. The only shipped
+   file touched outside `frontdesk` is `SequenceRepository` (a purely additive derived finder).
+3. **Consent/TCPA + idempotent log** — opt-out tag + frequency cap gates; `ConfirmationLog` insert-FIRST
+   (unique on tenant+appointment) → no duplicate on a re-fired event; `RecallLog` insert-FIRST (unique on
+   tenant+contact+period) → no duplicate recall per period. Both verified by ITs.
+4. **Module-gated, blast radius zero, best-effort** — all FD-2 beans live under the `@ConditionalOnProperty`
+   `frontdesk` gate (no bean for a non-frontdesk server); the subscriber re-checks `enabledModules`
+   membership; the recall sweep filters to ACTIVE frontdesk tenants. Every Claude/SMS call is `onErrorResume`
+   best-effort (degrade to generic / skip, never error). Error band **4280-4284** reserved; FD-2 mints no new
+   codes (reuses AI 1200-1203, Twilio 2530-2532).
+
+## Deviations / surprises
+
+- **Recall does BOTH enroll AND nudge (plan said "enroll … OR … nudge").** The shipped `SequenceEngine` is
+  email-only (`EMAIL_SEND`/`WAIT`/`BRANCH`/`EXIT`) and FrontDesk's outbound channel is SMS, so a Sequence
+  alone wouldn't produce the demo-visible SMS nudge. The job therefore enrolls into the recall Sequence (the
+  marquee "shipped engine" reuse — visible on the contact, drives any email cadence) AND sends the generic
+  recare SMS nudge (the immediate, demo-visible re-engagement) under ONE idempotent ledger insert. Both are
+  asserted by the IT. If a tenant has no recall Sequence, the nudge still fires (enroll is skipped cleanly).
+- **No recall domain event emitted.** An earlier draft emitted a recall event but it would have re-entered the
+  `APPOINTMENT_RISK_SCORED` subscriber (and carried no appointmentId) — confusing and a latent feedback
+  footgun. Dropped: the ledger row + the enrollment + the SMS are the observable outcomes the IT asserts; no
+  event is needed.
+- **`SequenceRepository.findAllByTenantIdAndStatus` added.** The marker repo had no tenant-scoped finder and
+  the recall job runs outside a request `TenantContext`, so a derived finder with an explicit `tenantId`
+  predicate was required (the `BookingRepository`/`AppointmentRepository` posture). Additive; existing
+  `SequenceCrudService`/`SequenceController` callers are unaffected.
+- **`ConfirmationCopyService.ConfirmationContext` deliberately drops the salon record's `stylistName` +
+  `lastService` fields.** This is the structural half of fence F3 — the strongest possible guard is to make
+  the clinical token un-passable, not merely forbidden in the prompt.
