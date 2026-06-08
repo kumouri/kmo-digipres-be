@@ -97,3 +97,134 @@ passes (2/0/0).
 §9: the only `switchIfEmpty` in changed code is the pre-existing genuine not-connected
 `verifiedConnection` + the existing `findOrCreateContact` explicit-boolean (unchanged); the
 WO-create branch uses an explicit null/Optional check, never `switchIfEmpty(create)`.
+
+---
+
+# HS-2 — Equipment-nameplate photo vision enrichment — Progress Ledger
+
+> Branch `home-services-front-desk-phase-2-equipment-vision` (off `main` @ `e056c7d`, HS-1 merged).
+> Spec: `~/.claude/plans/home-services-front-desk.md` §3 (HS-2), §7 (reuse map "Vision nameplate"),
+> §4.5 (error band — HS-2 claims `4210-4214`), §6 (risks).
+
+## Goal
+
+After a home-services voicemail creates a DRAFT `WorkOrder` (HS-1), let the caller upload a photo of
+the equipment; read the nameplate via the **already-shipped `AiVisionService.extract`** with a
+nameplate prompt → `{make, model, serial, equipmentType, observedSymptom}`; store the photo as an
+`Attachment(subjectType="WORK_ORDER")`; enrich the DRAFT WorkOrder (notes + customFields) + log an
+`Activity(NOTE, WORK_ORDER)` + enrich the owner digest. **Best-effort throughout** — a vision/budget/
+upstream failure enriches nothing but never errors the request or drops/corrupts the lead.
+
+## DESIGN FORK — tokenized upload link (chosen), NOT an inbound-MMS webhook
+
+The photo arrives over a **tokenized HTTPS upload**, reusing the proven `MoleTripwireService` +
+entity-bound-token pattern (HMAC token carrying `tenantId + workOrderId` → public multipart endpoint
+→ store `Attachment` → vision → enrich the bound WorkOrder). Rationale:
+- **No new inbound Twilio MMS webhook, no added 10DLC surface.** The only inbound Twilio handler
+  (`TwilioVoicemailController`) is voice/transcription-only; there is no clean inbound-SMS/MMS handler
+  to extend. A net-new MMS webhook would add a 10DLC-registered campaign dependency (plan §6 risk) for
+  no gain over the link.
+- **Trivial correlation:** the token encodes the target WorkOrder, so the caller's photo binds to
+  *their* job with zero guessing. Tenant + WorkOrder come from the token **only**, never the payload.
+- **Exact precedent:** `MoleTripwireService` is the `classify`-shaped, Project-targeted twin; HS-2 is
+  its `extract`-shaped, WorkOrder-targeted twin. `EquipmentPhotoTokenService` is the additive sibling
+  of `MoleTripwireTokenService`/`PublicWidgetTokenService` (those cores stay empty-diff).
+- The HS-1 caller auto-ack SMS carries the link (gated strictly behind the home-services vertical —
+  appended only when a DRAFT WO was created AND `kmosf.home-services.equipment-upload-base-url` is
+  set, default empty → the mole/NMM auto-ack body is **byte-unchanged**; `TwilioVoicemailIT` is the
+  gate).
+
+## Files
+
+**Created (new `integration/equipmentvision/` package):**
+- `EquipmentReading.java` — defensive parse of the open-schema vision JSON → `{make, model, serial,
+  equipmentType, observedSymptom}`; `isEmpty()`, `toFieldMap()`, `toSummaryLine()` (never throws).
+- `EquipmentPhotoToken.java` + `EquipmentPhotoTokenService.java` — HMAC token carrying
+  `tenantId|widgetType|workOrderId|expiry` (the `MoleTripwireTokenService` 4-field format, WorkOrder
+  as the entity); reuses `kmosf.security.widget-token-secret` + `1600-1603` rejection codes.
+- `EquipmentPhotoResponse.java` — public result `{enriched, make, model, serial, message, attachmentId}`.
+- `EquipmentVisionService.java` — the store→`extract`→enrich→notify pipeline (the `MoleTripwireService`
+  twin). `@ConditionalOnProperty(home-services)`. Best-effort vision; loads WO tenant-scoped (`4212`
+  if gone); merges nameplate fields into WO `customFields` + appends a notes line; `Activity(NOTE,
+  WORK_ORDER)`; owner digest; `EQUIPMENT_PHOTO_READ` event.
+
+**Created (`module/homeservices/`):**
+- `controller/EquipmentPhotoController.java` — public `POST /public/integrations/home-services/
+  equipment-photo/{token}/upload` (multipart via `getMultipartData()`, the `MoleTripwireController`
+  pattern; missing image part → `4213`). `@ConditionalOnProperty(home-services)`.
+- `controller/EquipmentPhotoTokenController.java` — ADMIN `POST /home-services/equipment-photo/tokens/
+  {workOrderId}` (the `MoleTripwireTokenController` `{projectId}` twin; loads WO tenant-scoped first →
+  `4214` if not found; 7-day TTL). `@ConditionalOnProperty(home-services)` + `requireEnabled` +
+  `requireRole("ADMIN")`.
+- `EquipmentVisionItStorageTestConfig.java` (test support) — in-memory `FileStorageService`
+  `@Bean @Primary` stub (the `MoleTripwireItStorageTestConfig` clone).
+- `EquipmentVisionIT.java` (test) — 6 cases (below).
+
+**Modified (surgical):**
+- `automation/DomainEventType.java` — add `EQUIPMENT_PHOTO_READ` (advisory).
+- `controller/advice/GlobalErrorHandler.java` — document the `4210-4214` HS-2 band.
+- `integration/twilio/voice/TwilioVoicemailService.java` — inject `EquipmentPhotoTokenService` +
+  `kmosf.home-services.equipment-upload-base-url`; the auto-ack appends the upload link **only** for
+  the home-services vertical (WO present) + when the base URL is set. Mole/NMM path byte-unchanged.
+
+## Error band (plan §4.5 — HS-2 claims `4210-4214`)
+
+`4210` token widgetType mismatch (401); `4211` unsupported image media type (415, shared
+`AiVisionService.isSupportedMediaType`); `4212` token's WorkOrder gone (404, public upload); `4213`
+missing image part (400); `4214` WorkOrder not found for token issuance (404, ADMIN). Reused (NOT
+re-allocated): `1200-1203` (AI — best-effort, never surfaced), `1600-1603` (token), `1310` (storage),
+`1300` (Activity), `1800` (not-ADMIN), `2530-2532` (Twilio SMS).
+
+## Invariants
+
+- **Best-effort:** `AiVisionService.extract` already degrades to `{}` on any failure; an additional
+  `onErrorResume` in `readNameplate` catches an upstream-thrown budget/missing-key (`1200`/`1203`)
+  before that fallback. Either way → empty `EquipmentReading` → 200, `enriched=false`, WO untouched.
+- **Never drops/corrupts the lead:** the photo `Attachment` is always stored; a failed/blank read
+  makes zero WO/Activity mutation; the upload always returns 200.
+- §9: the only `switchIfEmpty` in the package is the genuine WO not-found (`4212`); the blank-read
+  branch is an explicit `if (reading.isEmpty())`, never `switchIfEmpty`.
+- §7: Anthropic via WireMock; Twilio SMS + email via `@MockitoBean`; in-memory storage stub; sandbox
+  keys; no live charge/send/upload.
+- NMM byte-equivalence held: `TwilioVoicemailIT` 6/0/0 UNCHANGED (the auto-ack link is gated behind
+  the home-services vertical + an unset-by-default base URL).
+
+## Sub-steps
+
+| Sub-step | Status | SHA | Build | Notes |
+|---|---|---|---|---|
+| SP1 — equipmentvision package (reading, token, service, response) + HS controllers + event + error band | done | (this commit) | compileJava OK | tokenized-link fork; `AiVisionService.extract` reused as-is |
+| SP2 — auto-ack carries the upload link, gated behind the HS vertical (byte-unchanged mole path) | done | (this commit) | compileJava OK | base URL default empty → no link → NMM IT byte-identical |
+| SP3 — `EquipmentVisionIT` (6 cases) + storage stub + full gate-suite re-run | done | (this commit) | full suite GREEN | |
+
+## Test result — BUILD SUCCESSFUL
+
+`./gradlew cleanTest test --tests "*EquipmentVisionIT" --tests "*TwilioVoicemailIT"
+--tests "*HomeServicesVoicemailIT" --tests "*HomeServicesVoicemailFieldServiceDisabledIT"
+--tests "*MoleTriageIT" --tests "*MoleVisionServiceIT" --tests "*MoleTripwireIT"
+--tests "*OpenApiEndpointIT"` (Docker up):
+
+| Class | tests | failures | errors | skipped |
+|---|---|---|---|---|
+| `EquipmentVisionIT` (HS-2, new) | 6 | 0 | 0 | 0 |
+| `TwilioVoicemailIT` (NMM gate — UNCHANGED) | 6 | 0 | 0 | 0 |
+| `HomeServicesVoicemailIT` (HS-1) | 4 | 0 | 0 | 0 |
+| `HomeServicesVoicemailFieldServiceDisabledIT` (HS-1) | 2 | 0 | 0 | 0 |
+| `MoleTriageIT` (vision regression) | 7 | 0 | 0 | 0 |
+| `MoleVisionServiceIT` (vision regression) | 5 | 0 | 0 | 0 |
+| `MoleTripwireIT` (entity-bound-token regression) | 6 | 0 | 0 | 0 |
+| `OpenApiEndpointIT` | 2 | 0 | 0 | 0 |
+
+`EquipmentVisionIT` cases: (1) legible nameplate → WO customFields+notes enriched, `Activity(NOTE,
+WORK_ORDER)`, owner notify, **image content block hit WireMock** (`messages[0].content[0].type==image`),
+`EQUIPMENT_PHOTO_READ` enriched=true; (2) vision 500 → 200 best-effort, WO customFields/notes
+UNCHANGED, photo stored, no Activity; (3) blank/all-null read → 200 enriched=false, WO untouched, no
+Activity; (4) missing image part → 400/`4213`; (5) wrong-widgetType token → 401/`4210`, zero effect;
+(6) tampered token → 401 (`1600`-range), zero effect.
+
+### OpenAPI
+`EquipmentPhotoController` + `EquipmentPhotoTokenController` are `@ConditionalOnProperty(home-services)`,
+so — like every other gated-module controller — they are absent from the spec `OpenApiEndpointIT`
+generates (that context runs with opt-in modules OFF). `docs/api/openapi.json` unchanged at HEAD;
+`OpenApiEndpointIT` passes (2/0/0). Confirms the HS-1 note: gated opt-in-module controllers add
+nothing to the generated surface.

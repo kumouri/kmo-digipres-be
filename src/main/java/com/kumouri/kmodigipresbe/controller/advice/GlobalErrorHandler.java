@@ -348,8 +348,8 @@ import java.util.UUID;
  *       home-services is not enabled for the tenant (404 — surfaced via the shared
  *       {@code TenantModuleRegistry.requireEnabled} {@code 1130}/{@code 1132} module-gate codes;
  *       mirrors the {@code 2700}/{@code 3930} not-enabled posture). Reserved for HS growth:
- *       {@code 4203-4219} (HS-2 will claim {@code 4210-4214} MMS/vision; HS-3 {@code 4215-4219}
- *       forward/booking-link). Reused (NOT re-allocated): {@code 1200-1203} (AI budget gate +
+ *       {@code 4203-4209} (HS-3 {@code 4215-4219} forward/booking-link). Reused (NOT re-allocated):
+ *       {@code 1200-1203} (AI budget gate +
  *       Anthropic call failure + missing-key — surfaced unchanged by the shared
  *       {@code VoicemailExtractionService} transport the per-vertical strategies call);
  *       {@code 4000-4003} (Twilio sig/not-connected/CallSid/tenant-id — the voicemail webhook still
@@ -357,6 +357,29 @@ import java.util.UUID;
  *       terminal / number-generation — the reused {@code WorkOrderService.create} path);
  *       {@code 2530-2532} (Twilio SMS — reused {@code TwilioSmsService} on the notify + auto-ack
  *       paths); {@code 1300} Activity-not-found (reused {@code ActivityCrudService}).</li>
+ *   <li>{@code 4210-4214} — <em>HS-2 (Home Services — "Front Desk That Never Sleeps")</em>:
+ *       equipment-nameplate photo enrichment. The caller's photo arrives over a tokenized HTTPS
+ *       upload ({@code EquipmentPhotoController}, the {@code MoleTriageController} /
+ *       {@code MoleTripwireController} pattern) — NOT an inbound Twilio MMS webhook, so HS-2 adds no
+ *       new 10DLC surface (plan §3 design fork). {@code 4210} equipment-photo token type mismatch —
+ *       a correctly-signed token whose {@code widgetType} is not {@code "equipment-photo"} (401,
+ *       the {@code 4013}/{@code 4010} widget-type-mismatch posture); {@code 4211} unsupported image
+ *       media type (415; only {@code image/jpeg|png|webp|gif}, the shared
+ *       {@code AiVisionService.isSupportedMediaType} gate); {@code 4212} the token references a
+ *       WorkOrder that no longer exists for the tenant (404, public-upload path — same-404
+ *       no-enumeration); {@code 4213} equipment-photo upload missing its {@code image} part (400, the
+ *       {@code 4011}/{@code 4014} missing-image posture); {@code 4214} WorkOrder not found for
+ *       equipment-photo-token issuance (404, the ADMIN {@code EquipmentPhotoTokenController}
+ *       {@code {workOrderId}} load — tenant-scoped, the {@code 4016} tripwire-token-issuance
+ *       precedent). Reused (NOT re-allocated): {@code 1200-1203} (AI budget gate + Anthropic vision
+ *       call failure + missing-key — the shared {@code AiVisionService.extract} the nameplate read
+ *       calls, best-effort so they never surface to the caller); {@code 1600-1603} (generic
+ *       equipment-photo-token rejections — missing/malformed/bad-signature/expired, the
+ *       {@code EquipmentPhotoTokenService} reuse of the widget/tripwire token vocabulary);
+ *       {@code 1310} storage-not-configured (reused {@code FileStorageService.putBytes});
+ *       {@code 1300} Activity-not-found (reused {@code ActivityCrudService}); {@code 1800}
+ *       not-ADMIN (reused {@code RoleGuard} on the token issuer); {@code 2530-2532} (Twilio SMS —
+ *       reused {@code TwilioSmsService} on the owner-digest notify).</li>
  * </ul>
  */
 @Slf4j
