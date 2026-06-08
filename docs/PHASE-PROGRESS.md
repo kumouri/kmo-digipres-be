@@ -445,3 +445,181 @@ transcript is **NEVER persisted or indexed** — made provable by a release-bloc
   text focuses on the transcript; the recording pointer is a re-fetchable path back to the spoken words, so
   omitting it from the payload closes that gap too. (For mole/multi-trade the pointer is retained
   byte-identically — the default-true branch is unchanged.)
+
+---
+
+# FD-4 — FrontDesk IQ: HIPAA-safe review-reply (CF-4 + GBP generalization, fence F4) — Progress Ledger
+
+> Crash-recovery source of truth for `frontdesk-iq-phase-4-review-reply`
+> (off `main` @ `74b58c6`, FD-3 merged via PR #96). Appends to the FD-1/FD-2/FD-3 ledger above (same
+> `frontdesk-iq-flagship` lineage).
+>
+> Spec: `~/.claude/plans/frontdesk-iq-flagship.md` §2 (FD-4 sub-phase) + §0 fence F4 (HIPAA-guardrail
+> review-reply prompt + never-auto-post). Error band: **4290-4294**.
+
+## Goal (FD-4)
+
+Generalize the shipped review-reply drafter for a health practice with a **hard HIPAA guardrail** (the
+flagship's signature demo). The public reply may only **thank / apologize for the experience /
+invite-offline**; it **never confirms the reviewer was a patient, never names a procedure / treatment /
+diagnosis / medication, never references any clinical detail** — even on an adversarial review that
+explicitly mentions a procedure. Draft → **human approve** (copy-ready) / skip; **never auto-post**. Calls
+the **unchanged** `GbpReplyDraftService.draftReply(review, systemPromptOverride, exemplars)` overload with a
+HIPAA system prompt (NMM/CF-4 byte-equivalence). The F4 fence is made *provable* by a release-blocking IT.
+
+## Design as built
+
+### The HIPAA-guardrail prompt + the unchanged drafter (CF-4 D4 — generalize, don't fork)
+- `module/frontdesk/reviews/FrontDeskReviewReplyService.java` — the CF-4 `SalonReviewReplyService` sibling.
+  Calls the **unchanged** `GbpReplyDraftService.draftReply(review, healthSystemPrompt(), exemplars)` overload
+  — `GbpReplyDraftService` is **not modified** (NMM/GBP + ChairFill pass their own prompts; the health prompt
+  is additive + per-call). Ledger-insert-FIRST idempotency on the (synthetic/supplied) review id (synthetic =
+  `health-pasted/<uuid>`), best-effort draft → a generic **HIPAA-safe** fallback, emit
+  `GBP_REVIEW_REPLY_DRAFTED`.
+- **The `HEALTH_DEFAULT_SYSTEM_PROMPT` (fence F4):** four ABSOLUTE rules that override the review/any other
+  instruction — (1) NEVER confirm/imply the reviewer is/was a patient; (2) NEVER name/echo ANY procedure /
+  treatment / diagnosis / condition / medication / test / clinical detail **even if the review names one**;
+  (3) may ONLY thank-for-feedback + general (non-clinical) apology + invite-to-call-the-office-offline;
+  (4) 2-4 warm sentences, first-name OK, no invented facts/markdown. Plus a closing "when unsure, leave it
+  out — a generic thank-you-and-please-call-us is always safe." The per-tenant
+  `kmosf.frontdesk.review-system-prompt` is appended as a brand-tone hint (cannot relax the guardrail — the
+  guardrail clauses come first).
+- **The generic fallback is HIPAA-safe by construction:** it thanks / apologizes / invites-offline and
+  **deliberately does NOT echo the review text**, so an adversarial review's clinical term cannot bleed into
+  the fallback when Claude is unavailable.
+
+### The deterministic HIPAA lint (the backstop — RE-4 `FairHousingLint` / FD-2 F3-lint pattern)
+- `module/frontdesk/reviews/HipaaReplyLint.java` — a pure, stateless, side-effect-free utility (no Spring
+  bean, the `FairHousingLint` posture). Two banned-phrase families scanned over the **drafted reply**:
+  **PATIENT_STATUS** confirmation phrases ("being our patient", "thank you for choosing our practice", "your
+  treatment", "your procedure", "your appointment", "your visit", …) and **CLINICAL** vocabulary (crown, root
+  canal, filling, extraction, surgery, biopsy, x-ray, prescription, diagnosis, chemo, spay/neuter, …).
+  Case-insensitive whole-word (single tokens, via a word-boundary check) / substring (multi-word phrases)
+  match — conservative (a dismissible false positive is cheaper than a missed disclosure). Returns
+  `List<HipaaFlag{category, term, snippet}>`; `isClean()` convenience. **It does NOT block** — the lint flags
+  + the mandatory human approval are the gate.
+
+### The draft → approve/skip queue (mirror `SalonReviewReplyController`, module + STAFF gated)
+- `module/frontdesk/controller/FrontDeskReviewReplyController.java` — `@ConditionalOnProperty(frontdesk)` +
+  `TenantModuleRegistry.requireEnabled` per handler + `RoleGuard.requireRole("STAFF")`:
+  - `POST /frontdesk/reviews/draft` — paste-in (blank comment → **4290**) → draft + lint → DRAFTED.
+  - `GET /frontdesk/reviews` — `listDrafted` (most-recent first), each row carrying its live lint flags.
+  - `POST /frontdesk/reviews/{id}/approve` — DRAFTED → **POSTED, copy-ready** (`postedAt` set, **NO live
+    Google call** — the demo path has no GBP OAuth; the staffer copies the approved reply into the GBP
+    console), emits `GBP_REVIEW_REPLY_POSTED`. Leaves the queue. Same-status guard → **4291**; not-found →
+    **4292**.
+  - `POST /frontdesk/reviews/{id}/skip` — DRAFTED → SKIPPED. Same guards.
+- **Why a FrontDesk-specific queue (not the shared `GbpReviewReplyAdminController`):** the shared admin
+  surface is ADMIN-gated and posts **live** to Google via `GbpApiClient.postReply`; the FD-4 demo path is
+  STAFF-gated and **copy-ready (never auto-post)**. Reusing it would force a GBP connection + an ADMIN role
+  for the demo. The FD-4 surface reuses the shared `GbpReviewReply` model + repository + `DRAFTED/POSTED/
+  SKIPPED` status machine **unchanged** (no model/enum change → NMM/CF-4 byte-equivalent), exposing
+  approve=copy-ready (POSTED without the Google call) through its own controller/service.
+
+### Lint flags surfaced without a model change (the `DraftedReply` DTO)
+- The byte-equivalent `GbpReviewReply` model carries **no flag field** (changing it would risk NMM/CF-4
+  byte-equivalence). FD-4 returns a small `FrontDeskReviewReplyService.DraftedReply{reply, hipaaFlags}` DTO;
+  the flags are computed at draft time **and re-computed deterministically on every list/approve/skip read**,
+  so the staffer always sees the current screen of the drafted text. No persistence, no schema change.
+
+### Exemplar/voice source (reuse ChairFill's ledger-backed source)
+- `frontDeskReplyExemplarSource` `@Bean` reuses the ChairFill `LedgerReplyExemplarSource` (the tenant's own
+  POSTED replies, no embeddings, CI-robust) for on-brand tone. A FrontDesk-qualified bean so it never
+  collides with ChairFill's (both modules can be on). Toggle via `kmosf.frontdesk.review-exemplars-enabled`
+  (default true), limit `kmosf.frontdesk.review-exemplar-limit` (default 3). The guardrail prompt — not the
+  exemplars — is the load-bearing part of F4.
+
+## Files
+
+### New (FD-4)
+- `module/frontdesk/reviews/HipaaReplyLint.java` (the deterministic HIPAA lint + `HipaaFlag` record)
+- `module/frontdesk/reviews/FrontDeskReviewReplyService.java` (the drafter + draft→approve/skip queue + the
+  `HEALTH_DEFAULT_SYSTEM_PROMPT` + the HIPAA-safe generic fallback + the `DraftedReply` DTO)
+- `module/frontdesk/controller/FrontDeskReviewReplyController.java` (the STAFF/module-gated paste-in + queue)
+
+### Touched (additive only)
+- `module/frontdesk/FrontDeskAutoConfiguration.java` (+2 FD-4 `@Bean`s — `frontDeskReplyExemplarSource`,
+  `frontDeskReviewReplyService` — + the FD-4 class-doc section; imports `GbpReplyDraftService`, the chairfill
+  `ReplyExemplarSource`/`LedgerReplyExemplarSource`, `GbpReviewReplyRepository`)
+- `controller/advice/GlobalErrorHandler.java` (+4290-4294 doc band)
+
+### Reused, NOT copied / NOT changed
+- `integration/gbp/GbpReplyDraftService` (the additive `draftReply(review, prompt, exemplars)` overload —
+  **byte-unchanged**), `model/integration/GbpReviewReply` + `repository/gbp/GbpReviewReplyRepository` (the
+  shared ledger/queue + `DRAFTED/POSTED/SKIPPED` status machine — **unchanged**), the chairfill
+  `reviews/ReplyExemplarSource` + `LedgerReplyExemplarSource`, `automation/DomainEventType`
+  (`GBP_REVIEW_REPLY_DRAFTED`/`_POSTED` — existing), `RoleGuard`, `TenantModuleRegistry`.
+
+### Tests
+- `src/test/java/.../module/frontdesk/FrontDeskReviewReplyIT.java` — (1) **THE HEADLINE / release-blocking
+  F4 test**: an adversarial 1-star review naming a procedure ("the dentist botched my crown and the root
+  canal was a disaster … needed a prescription") → a DRAFTED reply that contains **NONE** of a forbidden
+  patient-status/procedure token set, and the **HIPAA-guardrail system prompt** (HIPAA / "NEVER confirm" /
+  "procedure, treatment, diagnosis") was the one sent to Claude; the review text WAS sent as model input
+  (the guardrail constrains the *output*, we don't strip the input); and **no Google/GBP call was made**
+  (never-auto-post). (2) the deterministic lint catches a crafted leak (PATIENT_STATUS + CLINICAL flags on a
+  leaky reply, clean on a compliant one) + the leak surfaces on the queue row. (3) approve → POSTED,
+  copy-ready, leaves the queue, **no Google call**, re-approve → 4291. (4) best-effort — a Claude 500 →
+  a generic HIPAA-safe fallback (no error, DRAFTED, non-blank, contains the reviewer name, **still clean of
+  the forbidden set** even though the review named procedures, still no post). (5) skip → SKIPPED + leaves the
+  queue. (6) blank comment → 4290; non-frontdesk tenant → 1132 (no row, no Claude call). WireMock for
+  Anthropic (the `SalonReviewReplyIT` pattern); no GBP base-url override is wired (so any GBP PUT would be a
+  never-auto-post bug the IT would catch).
+
+## Validation status
+
+- `./gradlew compileJava compileTestJava` — GREEN.
+- `./gradlew cleanTest test --tests "*FrontDeskReviewReplyIT" --tests "*SalonReviewReply*IT"
+  --tests "*GbpReply*IT" --tests "*FrontDeskConfirmationIT" --tests "*OpenApiEndpointIT"` — **GREEN**
+  (force-clean). Per-class (tests/failures/errors): **FrontDeskReviewReplyIT 7/0/0**; **SalonReviewReplyIT
+  (CF-4 byte-equivalence) 8/0/0**; **GbpReplyDraftServiceIT (GBP draft-reply byte-equivalence) 4/0/0**;
+  FrontDeskConfirmationIT (FD-2 regression) 8/0/0; OpenApiEndpointIT 2/0/0.
+- Plus `./gradlew cleanTest test --tests "*GbpReviewReply*IT" --tests "*GbpReviewPoller*IT"` (the GBP
+  review-reply byte-equivalence gates the `*GbpReply*IT` glob does not match) — **GREEN**:
+  **GbpReviewReplyAdminIT 6/0/0**; **GbpReviewPollerIT 2/0/0**.
+
+## Hard gates
+
+1. **F4 / HIPAA-safe (the headline)** — the drafted reply confirms no patient status + names no procedure
+   even on an adversarial review that explicitly mentions a procedure; the release-blocking IT asserts a
+   forbidden patient-status/procedure token set is **absent** from the draft (both the Claude path and the
+   generic fallback), and the deterministic `HipaaReplyLint` catches a crafted leak. The guardrail prompt +
+   the lint + the mandatory human approval are the three layers.
+2. **`GbpReplyDraftService` untouched** — the file is byte-unchanged; FD-4 calls the existing additive
+   overload with a per-call prompt. `GbpReplyDraftServiceIT` (4/0/0) + `SalonReviewReplyIT` (CF-4, 8/0/0) +
+   `GbpReviewPollerIT` (2/0/0) + `GbpReviewReplyAdminIT` (6/0/0) all pass unchanged. The shared
+   `GbpReviewReply` model/enum + the GBP admin surface are also unchanged (NMM/CF-4 byte-equivalent).
+3. **Never auto-post** — drafting persists DRAFTED only; approve marks POSTED/copy-ready **without** any
+   `GbpApiClient.postReply` / Google call (the IT asserts zero GBP PUTs across draft + approve + skip + the
+   best-effort path; no GBP base-url is even wired). Staff approval is the gate (the GBP posture).
+4. **Module-gated, zero blast radius, best-effort, error band 4290-4294** — the controller is
+   `@ConditionalOnProperty(frontdesk)`-gated (absent from the OpenAPI spec when off → `openapi.json`
+   unchanged) + `requireEnabled` per handler + STAFF `RoleGuard`. A Claude failure `onErrorResume`-degrades
+   to a safe, never-leaky generic draft + the lint flags (never an error, never a dropped review). New codes
+   **4290** blank paste-in (400), **4291** not-DRAFTED approve/skip (409), **4292** draft not found (404);
+   4293-4294 reserved; AI 1200-1203 reused (the unchanged drafter), 1130/1132 module gate, 1800 STAFF.
+
+## Deviations / surprises
+
+- **`approve` = DRAFTED→POSTED *copy-ready* (no live Google call), not a new `APPROVED` status.** The plan
+  asked for "approve (DRAFTED→APPROVED, copy-ready)", but the shared `GbpReviewReply.Status` enum is
+  `DRAFTED/POSTED/SKIPPED` and **must not be modified** (NMM/CF-4 byte-equivalence + out of FD-4 scope). The
+  CF-4 controller doc already defines "copy-ready" as the no-OAuth approve path ("edits the on-brand draft and
+  copies it into the GBP console"). So FD-4 models approve as terminal **POSTED with `postedAt` set but no
+  `GbpApiClient.postReply` call** — the demo "approved/copy-ready for manual paste-in" semantics — keeping the
+  shared model/enum and the GBP admin queue byte-unchanged. (A dedicated `APPROVED` state would be a
+  shared-model change touching CF-4/NMM; deliberately avoided.)
+- **A FrontDesk-specific `FrontDeskReviewReplyController` rather than reusing `GbpReviewReplyAdminController`
+  for the queue.** The shared admin controller is ADMIN-gated and posts live to Google; the FD-4 demo path is
+  STAFF-gated + copy-ready + module-gated. A separate controller keeps the shared admin surface unchanged and
+  gives FD-4 its own gating/semantics while reusing the shared model/repo/status-machine underneath.
+- **Lint flags returned via a `DraftedReply` DTO, not persisted on `GbpReviewReply`.** Persisting flags would
+  mutate the shared, byte-equivalent model. The flags are deterministic over the draft text, so re-computing
+  them on every read (draft/list/approve/skip) costs nothing and avoids the schema change.
+- **The service is named `FrontDeskReviewReplyService` (per the task's explicit file path), the plan's prose
+  calls it `HealthReviewReplyService`.** Followed the task path; it also matches the sibling naming
+  (`FrontDeskConfirmationService`, `FrontDeskNoShowScoringService`).
+- **`openapi.json` not hand-edited** — the FD-4 controller is `@ConditionalOnProperty(frontdesk)`-gated and
+  the module is OFF by default, so the new endpoints are absent from the advisory `docs/api/openapi.json`
+  (the FD-1 `NoShowRiskController`/`AppointmentController` precedent). OpenApiEndpointIT stays green; no
+  cp1252 edit needed (`git status` confirms `openapi.json` unchanged).

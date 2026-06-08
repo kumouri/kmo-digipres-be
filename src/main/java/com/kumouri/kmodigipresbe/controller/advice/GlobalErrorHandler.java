@@ -672,6 +672,30 @@ import java.util.UUID;
  *       omitted; a release-blocking IT asserts the stored health-voicemail Activity contains none of
  *       the raw transcript text and no clinical token. NMM / Home-Services / ChairFill / Real Estate
  *       are byte-equivalent.</li>
+ *   <li>{@code 4290-4294} — <em>FrontDesk IQ FD-4 (Health-practices flagship #4)</em>: the
+ *       <strong>HIPAA-safe review-reply</strong> (the flagship's signature demo). A
+ *       {@code FrontDeskReviewReplyService} (the CF-4 {@code SalonReviewReplyService} sibling) drafts a public
+ *       reply via the <strong>unchanged</strong> {@code GbpReplyDraftService.draftReply(review, prompt,
+ *       exemplars)} overload using a <strong>HIPAA-guardrail system prompt</strong> (thank / apologize /
+ *       invite-offline — NEVER confirm the reviewer was a patient, name a procedure/treatment/diagnosis/
+ *       medication, or echo a clinical term the review itself raised, fence F4), runs a deterministic
+ *       {@code HipaaReplyLint} over the draft (the RE-4 {@code FairHousingLint} / FD-2 F3-lint backstop —
+ *       surfaces residual patient-status / clinical phrases, never blocks), and parks it DRAFTED in the shared
+ *       {@code GbpReviewReply} queue, exposed through a STAFF-gated draft → approve(copy-ready)/skip queue
+ *       ({@code FrontDeskReviewReplyController} — {@code POST /frontdesk/reviews/draft},
+ *       {@code GET /frontdesk/reviews}, {@code POST /{id}/approve}|{@code /{id}/skip}). <strong>Never
+ *       auto-posted</strong> (the GBP posture); approval is copy-ready (no live Google call — the demo path,
+ *       no GBP OAuth). New codes: {@code 4290} a malformed paste-in (blank review text, 400); {@code 4291} the
+ *       draft is not DRAFTED — cannot approve/skip (the same-status guard, 409); {@code 4292} the draft was
+ *       not found for the tenant (404); {@code 4293-4294} reserved for FD-4 growth. Reused (NOT re-allocated):
+ *       the AI band {@code 1200-1203} (via the unchanged {@code GbpReplyDraftService} — budget / upstream
+ *       non-200 / missing-key, degraded best-effort to a generic HIPAA-safe fallback so a review is never
+ *       dropped and a leaky reply is never persisted); {@code 1130}/{@code 1132} module gate (a non-frontdesk
+ *       tenant → the shared not-enabled response, the {@code NoShowRiskController} posture); {@code 1800} STAFF
+ *       {@code RoleGuard}. <strong>{@code GbpReplyDraftService} + NMM / GBP + ChairFill review-reply
+ *       byte-equivalent:</strong> FD-4 passes an additive per-call prompt; it does NOT modify
+ *       {@code GbpReplyDraftService}, the shared {@code GbpReviewReply} model, or the GBP admin surface, so the
+ *       GBP draft-reply ITs and {@code SalonReviewReplyIT} pass unchanged.</li>
  * </ul>
  */
 @Slf4j
