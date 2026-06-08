@@ -250,6 +250,13 @@ public final class DomainEventType {
     public static final String VOICEMAIL_RECEIVED     = "voicemail.received";
     public static final String VOICEMAIL_LEAD_CREATED = "voicemail.leadCreated";
 
+    // HS-1 (Home Services — "Front Desk That Never Sleeps") — voicemail→DRAFT WorkOrder. Advisory
+    // (RuleEngine / webhook fan-out) — does NOT drive the WorkOrder creation, which is synchronous
+    // in TwilioVoicemailService after a multi-trade-tenant voicemail's strategy builds a DRAFT WO.
+    // Emitted only for verticals that create a WorkOrder from a voicemail (home-services), never for
+    // mole (whose strategy creates none). Payload: {callSid, workOrderId, contactId, trade, urgency}.
+    public static final String VOICEMAIL_WORK_ORDER_DRAFTED = "voicemail.workOrderDrafted";
+
     // Phase 2 (NMM AI intake) — "is this a mole?" photo-triage pipeline (Feature B). All are
     // advisory (RuleEngine / webhook fan-out) — they do NOT drive any core mutation; the photo
     // triage performs the Attachment store + MoleVisionService classify + Contact find-or-create

@@ -76,6 +76,15 @@ public class TwilioVoicemailEvent implements TenantScoped {
      */
     private UUID createdActivityId;
 
+    /**
+     * The field-service {@link com.kumouri.kmodigipresbe.module.fieldservice.model.WorkOrder}
+     * drafted from this voicemail (HS-1 — Home Services front desk). Non-null only for a
+     * multi-trade home-services tenant whose voicemail produced a DRAFT WorkOrder AND on a server
+     * where field-service is enabled; <strong>null for mole tenants</strong> (which create no
+     * WorkOrder) and when the {@code WorkOrderService} bean is absent. No index change.
+     */
+    private UUID createdWorkOrderId;
+
     private Instant receivedAt;
 
     @Version
