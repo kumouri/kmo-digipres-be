@@ -696,6 +696,28 @@ import java.util.UUID;
  *       byte-equivalent:</strong> FD-4 passes an additive per-call prompt; it does NOT modify
  *       {@code GbpReplyDraftService}, the shared {@code GbpReviewReply} model, or the GBP admin surface, so the
  *       GBP draft-reply ITs and {@code SalonReviewReplyIT} pass unchanged.</li>
+ *   <li>{@code 4295-4299} — <em>FrontDesk IQ FD-5a (Health-practices flagship #4)</em>: the two
+ *       <strong>staff-facing board reads</strong> backing the FD-5 recall board + callback inbox FE
+ *       ({@code FrontDeskBoardController} — {@code GET /frontdesk/recall} + {@code GET /frontdesk/callbacks}).
+ *       The other two FD-5 surfaces already have their reads (the risk-sorted day view =
+ *       {@code NoShowRiskController GET /frontdesk/risk/appointments}; the review inbox =
+ *       {@code FrontDeskReviewReplyController GET /frontdesk/reviews}). A pure read over the FD-2
+ *       {@code RecallLog} / FD-1 {@code Appointment} / FD-3 callback {@code Activity} collections: the
+ *       recall board surfaces the FD-2 lapsed-contact selector (most-recent visit older than the recall
+ *       window AND no upcoming appointment, + the contact name + the nudged-this-period flag), and the
+ *       callback inbox surfaces the FD-3 PHI-free voicemail callbacks (fence F2 — logistics fields ONLY,
+ *       NEVER a transcript: the read keys on the {@code TRANSCRIPT_REDACTED_MARKER} body produced only by
+ *       the health front-desk strategy, and the {@code CallbackInboxItemDTO} has no transcript/body/
+ *       recording field). <strong>FD-5a mints NO new error code</strong> — it reuses the shared
+ *       {@code TenantModuleRegistry.requireEnabled} module gate ({@code 1130}/{@code 1132}, the
+ *       {@code 4202}/{@code 2700}/{@code 3930} not-enabled posture) and the {@code RoleGuard} STAFF gate
+ *       ({@code 1800}). The band {@code 4295-4299} is RESERVED for future board-read growth. The
+ *       {@code FrontDeskBoardController} is {@code @ConditionalOnProperty}-gated, so it is absent from the
+ *       generated OpenAPI spec when the module is off (the {@code NoShowRiskController} /
+ *       {@code WaitlistBoardController} / {@code ConciergeConversationController} precedent).
+ *       <strong>FD-1..FD-4 + ChairFill + NMM byte-equivalent:</strong> FD-5a is a purely additive read
+ *       controller + DTOs + two additive repo finders + a visibility-only constant promotion; it touches
+ *       no scoring / outbound-comms / voicemail-pipeline / review-reply behavior.</li>
  * </ul>
  */
 @Slf4j
