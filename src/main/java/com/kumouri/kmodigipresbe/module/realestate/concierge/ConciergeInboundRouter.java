@@ -6,6 +6,7 @@ import com.kumouri.kmodigipresbe.automation.DomainEventType;
 import com.kumouri.kmodigipresbe.integration.twilio.TwilioSmsService;
 import com.kumouri.kmodigipresbe.model.contact.PhoneContact;
 import com.kumouri.kmodigipresbe.model.request.SmsCommunicationRequest;
+import com.kumouri.kmodigipresbe.module.realestate.model.BuyerQualification;
 import com.kumouri.kmodigipresbe.module.realestate.model.ConciergeConversation;
 import com.kumouri.kmodigipresbe.module.realestate.model.ConciergeConversationRepository;
 import com.kumouri.kmodigipresbe.module.realestate.model.ConciergeTurn;
@@ -44,6 +45,17 @@ import java.util.UUID;
  *       grounded answer; append the ASSISTANT turn (with citations) and save.</li>
  * </ol>
  *
+ * <p><strong>RE-2 — multi-turn qualification (additive, best-effort).</strong> After the grounded
+ * answer/handoff is sent + the turn is persisted (the RE-1 path is byte-equivalent), the router runs a
+ * {@link QualificationExtractionService} extraction over the conversation-so-far and accumulates
+ * {@code budget/timeline/financing/intent} via {@link QualificationService} — which, on enough signal,
+ * materializes the buyer {@code Contact} + a concierge-sourced {@code Deal} the unchanged nightly
+ * {@code LeadScoringV2Service} tiers (the hot-handoff then fires off {@code LEAD_SCORE_UPDATED}). The
+ * qualification step is wrapped {@code onErrorResume} and never changes the answer/handoff outcome: a
+ * Claude/extraction failure is swallowed (advisory {@code 4260}) so a question still gets its cited answer.
+ * On a {@code HANDED_OFF} turn the state stays {@code HANDED_OFF}; otherwise the state becomes
+ * {@code QUALIFYING} once a Deal is materialized (else stays {@code ASKING}).
+ *
  * <p><strong>Best-effort &amp; never 500 the webhook:</strong> all work runs under the synthetic
  * {@code TenantContext(tenantId, null, {INTEGRATION_TWILIO})} (so {@link ConciergeAnswerService} +
  * {@link TwilioSmsService} resolve the tenant), and the {@code handle} chain swallows errors to an
@@ -60,6 +72,8 @@ public class ConciergeInboundRouter {
     private final ListingDisclosureRepository disclosures;
     private final ConciergeConversationRepository conversations;
     private final ListingConciergeService conciergeService;
+    private final QualificationExtractionService qualificationExtraction;
+    private final QualificationService qualificationService;
     private final TwilioSmsService twilioSmsService;
     private final DomainEventPublisher events;
     private final long correlationTtlMinutes;
@@ -71,6 +85,8 @@ public class ConciergeInboundRouter {
                                   ListingDisclosureRepository disclosures,
                                   ConciergeConversationRepository conversations,
                                   ListingConciergeService conciergeService,
+                                  QualificationExtractionService qualificationExtraction,
+                                  QualificationService qualificationService,
                                   TwilioSmsService twilioSmsService,
                                   DomainEventPublisher events,
                                   long correlationTtlMinutes,
@@ -81,6 +97,8 @@ public class ConciergeInboundRouter {
         this.disclosures = disclosures;
         this.conversations = conversations;
         this.conciergeService = conciergeService;
+        this.qualificationExtraction = qualificationExtraction;
+        this.qualificationService = qualificationService;
         this.twilioSmsService = twilioSmsService;
         this.events = events;
         this.correlationTtlMinutes = correlationTtlMinutes;
@@ -160,15 +178,111 @@ public class ConciergeInboundRouter {
                         return reply(from, handoffSmsBody)
                                 .then(appendAssistant(conv, handoffSmsBody, true, List.of(),
                                         ConversationState.HANDED_OFF))
-                                .then(notifyAgent(listing, from, question))
+                                // RE-2: still qualify on a handoff turn (the buyer may have revealed budget
+                                // in the same text that we couldn't answer) — but keep the HANDED_OFF state.
+                                .flatMap(savedConv -> notifyAgent(listing, from, question)
+                                        .then(qualifyAndPersist(tenantId, listing, savedConv, true)))
                                 .thenReturn(Outcome.HANDED_OFF);
                     }
                     return resolveCitations(tenantId, answer.citations())
                             .flatMap(turnCitations -> reply(from, answer.answer())
                                     .then(appendAssistant(conv, answer.answer(), false, turnCitations,
                                             ConversationState.ASKING))
+                                    .flatMap(savedConv -> qualifyAndPersist(tenantId, listing, savedConv,
+                                            false))
                                     .thenReturn(Outcome.ANSWERED));
                 });
+    }
+
+    /**
+     * RE-2 qualification step — runs AFTER the grounded answer/handoff turn is persisted (so the RE-1 path
+     * is byte-equivalent). Extracts the buyer's {@code budget/timeline/financing/intent} from the
+     * conversation-so-far and accumulates it via {@link QualificationService} (which materializes the buyer
+     * {@code Contact} + concierge {@code Deal} on enough signal). Best-effort: a Claude/extraction failure
+     * is swallowed ({@code 4260}) — the answer/handoff already happened and is durable, the conversation is
+     * never dropped. When a Deal materializes and the turn was not a handoff, the state advances to
+     * {@code QUALIFYING}; a handoff turn keeps {@code HANDED_OFF}.
+     *
+     * <p><strong>Cheap pre-filter (cost + RE-1 byte-equivalence).</strong> The Claude extraction only fires
+     * when the conversation actually carries a qualification signal ({@link #hasQualificationSignal}) — a
+     * pure factual question ("how old is the roof?") never triggers an extraction call, so it is both cheap
+     * (no LLM per inbound factual Q) and keeps the RE-1 grounding path's model-call behavior byte-identical
+     * (the {@code RealEstateConciergeIT} call-count gate). A signal-bearing turn (budget / financing /
+     * timeline / buy-sell language) runs the extraction.
+     */
+    private Mono<ConciergeConversation> qualifyAndPersist(UUID tenantId, Listing listing,
+                                                         ConciergeConversation conv, boolean handoffTurn) {
+        if (!conversationHasSignal(conv)) {
+            // Nothing qualification-shaped was said — skip the extraction entirely (no model call).
+            return Mono.just(conv);
+        }
+        return qualificationExtraction.extract(conv.getTurns())
+                .flatMap(extracted -> qualificationService.qualify(tenantId, listing, conv, extracted))
+                .flatMap(qualified -> {
+                    BuyerQualification q = qualified.getQualification();
+                    boolean materialized = q != null && q.isDealMaterialized();
+                    if (materialized && !handoffTurn
+                            && qualified.getState() == ConversationState.ASKING) {
+                        qualified.setState(ConversationState.QUALIFYING);
+                    }
+                    return conversations.save(qualified);
+                })
+                .onErrorResume(err -> {
+                    log.warn("RE-2 concierge: qualification step failed (best-effort, 4260) for "
+                            + "conversation {}: {}", conv.getId(), err.toString());
+                    return Mono.just(conv);
+                });
+    }
+
+    /** True when any BUYER turn carries a qualification signal — gates the (paid) extraction call. */
+    private static boolean conversationHasSignal(ConciergeConversation conv) {
+        if (conv.getTurns() == null) {
+            return false;
+        }
+        return conv.getTurns().stream()
+                .filter(t -> t.getRole() == ConciergeTurn.Role.BUYER)
+                .anyMatch(t -> hasQualificationSignal(t.getBody()));
+    }
+
+    /**
+     * Cheap, deterministic heuristic: does this buyer text plausibly contain budget / financing / timeline /
+     * buy-sell signal worth running an extraction over? Keeps a pure factual disclosure question (no money /
+     * timeline / intent words) from ever triggering a (paid) Claude qualification call. Intentionally
+     * permissive — the extraction itself is the precise step; this just avoids the obviously-pointless call.
+     */
+    static boolean hasQualificationSignal(String body) {
+        if (body == null || body.isBlank()) {
+            return false;
+        }
+        String s = body.toLowerCase();
+        if (s.contains("$")) {
+            return true;
+        }
+        // money / budget vocabulary
+        if (s.contains("budget") || s.contains("afford") || s.contains("price range")
+                || s.contains("pre-approv") || s.contains("preapprov") || s.contains("pre approv")
+                || s.contains("approved") || s.contains("financ") || s.contains("mortgage")
+                || s.contains("lender") || s.contains("loan") || s.contains("cash")
+                || s.contains("down payment")) {
+            return true;
+        }
+        // intent vocabulary
+        if (s.contains("looking to buy") || s.contains("want to buy") || s.contains("looking to sell")
+                || s.contains("want to sell") || s.contains("make an offer") || s.contains("offer on")) {
+            return true;
+        }
+        // timeline vocabulary
+        if (s.contains("timeline") || s.contains("move in") || s.contains("closing")
+                || s.contains("no rush") || s.contains("asap")) {
+            return true;
+        }
+        // a money-shaped number: digits followed by k/m, or a 4+ digit figure, or "<n> days/weeks/months"
+        if (s.matches(".*\\b\\d+(\\.\\d+)?\\s*[km]\\b.*")
+                || s.matches(".*\\b\\d{4,}\\b.*")
+                || s.matches(".*\\b\\d+\\s*(day|days|week|weeks|month|months)\\b.*")) {
+            return true;
+        }
+        return false;
     }
 
     /**

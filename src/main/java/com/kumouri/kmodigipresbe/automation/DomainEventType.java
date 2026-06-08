@@ -356,6 +356,20 @@ public final class DomainEventType {
     public static final String LISTING_DISCLOSURE_INDEXED = "realestate.listingDisclosureIndexed";
     public static final String CONCIERGE_INBOUND_RECEIVED = "realestate.conciergeInboundReceived";
 
+    // Real Estate Concierge RE-2 — multi-turn qualification + hot-handoff. Both advisory (RuleEngine /
+    // webhook fan-out) — they do NOT drive any core mutation; the qualification materializes the buyer
+    // Contact + Deal synchronously and explicitly inside the realestate-module-gated QualificationService,
+    // and the hot-handoff notifies the agent synchronously inside LeadHandoffService. RE-2 adds NO new ML
+    // and does NOT modify LeadScoringV2Service — the materialized Deal flows through the UNCHANGED nightly
+    // scorer, which emits the existing LEAD_SCORE_UPDATED (above); LeadHandoffService subscribes to THAT.
+    // CONCIERGE_LEAD_QUALIFIED: emitted by QualificationService after enough signal (a budget) materializes
+    //   / updates the buyer's concierge-sourced Deal. Payload: {conversationId, contactId, dealId, listingId}.
+    // CONCIERGE_HOT_HANDOFF: emitted by LeadHandoffService after a HOT LEAD_SCORE_UPDATED for a contact with
+    //   a concierge-sourced realestate Deal triggers the best-effort agent alert. Payload:
+    //   {contactId, dealId, listingId, score, tier}.
+    public static final String CONCIERGE_LEAD_QUALIFIED = "realestate.conciergeLeadQualified";
+    public static final String CONCIERGE_HOT_HANDOFF     = "realestate.conciergeHotHandoff";
+
     private DomainEventType() {
     }
 }
