@@ -1,6 +1,7 @@
 package com.kumouri.kmodigipresbe.module.frontdesk.automation;
 
 import com.kumouri.kmodigipresbe.tenancy.TenantScopedReactiveMongoRepository;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.UUID;
@@ -20,4 +21,12 @@ public interface RecallLogRepository
 
     /** The explicit-boolean idempotency probe for a (tenant, contact, period). */
     Mono<RecallLog> findByTenantIdAndContactIdAndPeriodKey(UUID tenantId, UUID contactId, String periodKey);
+
+    /**
+     * All recall-ledger rows for a tenant in one period (ISO week). Backs the FD-5a recall-board read's
+     * {@code nudgedThisPeriod} enrichment — the board marks a recall-due contact whose sweep already
+     * fired this period so a staffer does not manually double-nudge. Explicit {@code tenantId} predicate
+     * (the marker does not auto-scope derived finders).
+     */
+    Flux<RecallLog> findByTenantIdAndPeriodKey(UUID tenantId, String periodKey);
 }

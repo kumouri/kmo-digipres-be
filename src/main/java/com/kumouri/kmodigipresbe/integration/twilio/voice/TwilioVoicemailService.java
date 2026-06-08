@@ -654,7 +654,7 @@ public class TwilioVoicemailService {
      * is {@code false}). The raw transcript is NEVER stored; only the logistics fields the strategy
      * surfaces (name / callback number / intent bucket) live on the record.
      */
-    static final String TRANSCRIPT_REDACTED_MARKER =
+    public static final String TRANSCRIPT_REDACTED_MARKER =
             "(voicemail transcript not retained — front-desk callback)";
 
     /**

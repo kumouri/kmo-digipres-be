@@ -623,3 +623,144 @@ HIPAA system prompt (NMM/CF-4 byte-equivalence). The F4 fence is made *provable*
   the module is OFF by default, so the new endpoints are absent from the advisory `docs/api/openapi.json`
   (the FD-1 `NoShowRiskController`/`AppointmentController` precedent). OpenApiEndpointIT stays green; no
   cp1252 edit needed (`git status` confirms `openapi.json` unchanged).
+
+---
+
+# FD-5a — FrontDesk IQ: recall-board + callback-inbox staff reads — Progress Ledger
+
+> Crash-recovery source of truth for `frontdesk-iq-phase-5a-recall-callback-reads`
+> (off `main` @ `a80b899`, FD-4 merged via PR #98). Appends to the FD-1..FD-4 ledger above (same
+> `frontdesk-iq-flagship` lineage).
+>
+> Spec: FD-5 FE has 4 surfaces; two already have reads (risk-sorted day = `NoShowRiskController GET
+> /frontdesk/risk/appointments`; review inbox = `FrontDeskReviewReplyController GET /frontdesk/reviews`).
+> FD-5a adds the other two reads. Error band: **4295-4299** (reserved — FD-5a mints none; reuses the
+> module gate 1130/1132 + STAFF `RoleGuard` 1800).
+
+## Goal (FD-5a)
+
+Two staff reads backing the FD-5b FE: **(1) the recall board** — who is due for recall/recare (the FD-2
+lapsed selector, surfaced as a read), and **(2) the callback inbox** — the FD-3 after-hours health
+voicemail callbacks. The headline constraint is **fence F2 carried into the read**: the callback inbox
+returns logistics fields ONLY (name / callbackPhone / intentBucket) and **NEVER a transcript** — asserted
+by the IT. Purely additive over FD-1..FD-3 collections; FD-1..FD-4 behavior untouched.
+
+## Design as built
+
+### `FrontDeskBoardController` (mirror `NoShowRiskController` / `WaitlistBoardController` /
+### `ConciergeConversationController`)
+- `module/frontdesk/controller/FrontDeskBoardController.java` — `@RequestMapping("/frontdesk")` +
+  `@ConditionalOnProperty(kmosf.modules.frontdesk.enabled)` (absent from the OpenAPI spec when off) +
+  per-handler `guard()` = `TenantModuleRegistry.requireEnabled("frontdesk")` then
+  `RoleGuard.requireRole("STAFF")` (the 1130/1132 + 1800 posture). Two GET handlers.
+
+### Recall board — `GET /frontdesk/recall`
+- Replicates the FD-2 `RecallDetectorJob.lapsedContacts` selector **verbatim** (most-recent visit =
+  `lastVisitAt` or a COMPLETED appointment's `scheduledStart`, older than the recall window AND no
+  upcoming SCHEDULED/CONFIRMED future appointment), but keeps the **timestamp** per contact (the read
+  needs `lastVisitAt` / `daysSinceLastVisit`; the job only needed the ids). One `findAllByTenantId`
+  read (the FD-1 scorer posture). Shares the SAME window config `kmosf.frontdesk.recall.window-days`
+  (default 180) the FD-2 job uses, so the read's lapsed set matches the sweep's.
+- Enriched with **(a)** the contact's display name (`ContactRepository.findByTenantIdAndId`, best-effort
+  — a missing contact never fails the read, the RE-5a `resolveLeadTier` posture) and **(b)**
+  `nudgedThisPeriod` from the FD-2 `RecallLog` ledger (the new `findByTenantIdAndPeriodKey` finder,
+  filtered to `nudged`, for the current ISO-week period key — the SAME period key the job stamps).
+- Response: a `List<RecallDueDTO>` sorted **most-overdue first** (`daysSinceLastVisit` desc).
+
+### Callback inbox — `GET /frontdesk/callbacks` (fence F2)
+- Selects the FD-3 health callbacks via the new
+  `ActivityRepository.findAllByTenantIdAndTypeAndDirectionAndBodyOrderByOccurredAtDesc(tenantId, CALL,
+  INBOUND, TRANSCRIPT_REDACTED_MARKER)`. **The body-marker predicate is the F2 discriminator:** the
+  redaction marker is produced ONLY by the health front-desk strategy (`persistTranscript()=false`); the
+  mole / multi-trade voicemail verticals store the raw transcript as `body`, so this query cleanly
+  selects the PHI-free health callbacks and excludes every other inbound-call Activity.
+- Projects through `CallbackInboxItemDTO.from(Activity)`, which reads ONLY the logistics
+  `payload.extractedJson` (name / callbackNumber / intentBucket / callbackRequested) + the caller-ID
+  `payload.fromNumber` — it **never reads `body`** (the marker) or any recording pointer, and the DTO
+  **has no transcript/body/recording field**, so the read can never surface the spoken words. The
+  `callbackPhone` prefers the extracted `callbackNumber`, falling back to the caller-ID so the row is
+  always dialable. Response: a `List<CallbackInboxItemDTO>`, newest first (`occurredAt` desc).
+
+## Files
+
+### New (FD-5a)
+- `module/frontdesk/controller/FrontDeskBoardController.java` (the two reads, gated + STAFF)
+- `module/frontdesk/controller/dto/RecallDueDTO.java` (contactId, name, lastVisitAt, daysSinceLastVisit,
+  nudgedThisPeriod)
+- `module/frontdesk/controller/dto/CallbackInboxItemDTO.java` (activityId, contactId, callerName,
+  callbackPhone, intentBucket, callbackRequested, receivedAt — logistics-only, no transcript; F2)
+
+### Touched (additive only)
+- `module/frontdesk/automation/RecallLogRepository.java` (+`findByTenantIdAndPeriodKey` derived finder —
+  backs the `nudgedThisPeriod` enrichment; the recall job runs outside a request context so the explicit
+  `tenantId` predicate is required)
+- `repository/ActivityRepository.java` (+`findAllByTenantIdAndTypeAndDirectionAndBodyOrderByOccurredAtDesc`
+  derived finder — the F2-marker callback query)
+- `integration/twilio/voice/TwilioVoicemailService.java` (`TRANSCRIPT_REDACTED_MARKER` promoted
+  package-private → `public` so the controller references the same constant — value byte-unchanged)
+- `controller/advice/GlobalErrorHandler.java` (+4295-4299 doc band — *see below; appended*)
+
+### Reused, NOT copied / NOT changed
+- The FD-2 lapsed-contact selector logic (replicated in the read because the job's method is private and
+  returns ids only), `RecallLog`/`RecallLogRepository`, `AppointmentRepository.findAllByTenantId`,
+  `ContactRepository.findByTenantIdAndId`, `ActivityRepository`, `TenantModuleRegistry`, `RoleGuard`.
+
+### Tests
+- `src/test/java/.../module/frontdesk/FrontDeskBoardReadIT.java` — (1) `GET /frontdesk/recall` returns
+  ONLY the lapsed contact (last visit 200d ago, no upcoming) — not the upcoming-appointment contact, not
+  the recently-seen contact — with the resolved name, days-since, and `nudgedThisPeriod=true`; (2) `GET
+  /frontdesk/callbacks` returns the F2-redacted health callback with its logistics fields (name /
+  callbackPhone=555-0142 / intentBucket=PRESCRIPTION_REFILL_REQUEST) and **EXCLUDES** a non-redacted mole
+  inbound-call Activity that stores a transcript, with the **F2 assertion** (the serialized response
+  contains no clinical token and no transcript/body/recording field); (3) a non-frontdesk tenant → 1132
+  (both reads); (4) a non-staff role → 1800 (both reads). (`WebTestClient` + JWT, the `NoShowRiskController`
+  pattern; pure Mongo-seeded, no WireMock/Twilio.)
+
+## Validation status
+
+- `./gradlew compileJava compileTestJava` — GREEN.
+- `./gradlew cleanTest test --tests "*FrontDeskBoard*IT" --tests "*FrontDeskConfirmationIT"
+  --tests "*HealthFrontDeskVoicemailIT" --tests "*FrontDeskNoShowScoringServiceIT"
+  --tests "*OpenApiEndpointIT"` — **GREEN** (force-clean). Per-class (tests/failures/errors):
+  **FrontDeskBoardReadIT 4/0/0**; HealthFrontDeskVoicemailIT (FD-3 F2 regression) 2/0/0;
+  FrontDeskConfirmationIT (FD-2 regression) 8/0/0; FrontDeskNoShowScoringServiceIT (FD-1 regression)
+  10/0/0; OpenApiEndpointIT 2/0/0. (26 total, 0 failures.)
+
+## Hard gates
+
+1. **The callback read NEVER exposes a transcript (F2)** — the `CallbackInboxItemDTO` has no
+   transcript/body/recording field; the read filters to the F2-marker activities and projects only the
+   logistics `extractedJson` + caller-ID. The IT asserts the serialized `/frontdesk/callbacks` response
+   contains no clinical token (and the `transcript`/`recordingUrl`/`recordingSid` field names) AND that
+   the non-redacted mole transcript Activity is excluded entirely.
+2. **Module-gated, blast radius zero** — `@ConditionalOnProperty(frontdesk)` (default off) +
+   `requireEnabled` per handler + STAFF `RoleGuard`. The controller is **absent from the OpenAPI spec**
+   when off: OpenApiEndpointIT green; both the live-generated spec and committed `docs/api/openapi.json`
+   contain no `/frontdesk/recall` or `/frontdesk/callbacks` path; `git status` confirms `openapi.json`
+   unchanged.
+3. **FD-1..FD-4 / ChairFill / NMM untouched** — FD-1 (10/0/0), FD-2 (8/0/0), FD-3 F2 (2/0/0) ITs pass
+   unchanged. FD-5a is a purely additive read controller + 2 DTOs + 2 additive repo finders + a
+   visibility-only constant promotion; it touches no FD-1..FD-4 / voicemail-pipeline / scoring behavior.
+4. **Error band 4295-4299 reserved** — FD-5a mints NO new error code (reuses 1130/1132 module gate, 1800
+   STAFF). The 4295-4299 band is reserved + documented for future board-read growth.
+
+## Deviations / surprises
+
+- **The FD-2 lapsed selector is replicated in the read, not extracted/shared.** `RecallDetectorJob`'s
+  `lapsedContacts(...)` is a private method that returns contact ids only; the read needs the per-contact
+  last-visit timestamp (for `lastVisitAt` / `daysSinceLastVisit`). Replicating the small, well-tested
+  computation (keeping the timestamp) was cleaner + lower-blast-radius than refactoring the job's private
+  method out into a shared selector (which would touch shipped FD-2 code). Both use the SAME window config,
+  so they agree on who is lapsed.
+- **The F2 discriminator is the redaction-marker body, not a new field.** Rather than add a vertical tag to
+  `Activity`, the read keys on `body == TRANSCRIPT_REDACTED_MARKER` — which is produced *only* by the
+  health strategy. This is the cleanest tenant-scoped query that excludes mole/multi-trade voicemails (they
+  store the transcript as body) with zero model change. The IT proves the exclusion with a seeded mole
+  transcript Activity.
+- **`TRANSCRIPT_REDACTED_MARKER` promoted to `public`.** It was package-private `static final` on
+  `TwilioVoicemailService`; the controller (a different package) references it so the read and the writer
+  share one source of truth for the marker. Value byte-unchanged; the FD-3 IT (which used a string literal)
+  is unaffected.
+- **`callbackPhone` falls back to the caller-ID `From`.** The extracted `callbackNumber` can be null (the
+  caller didn't state one); the Twilio caller-ID is captured independently, so the inbox row is always
+  dialable (the FD-3 "a callback is never dropped" posture, carried into the read).
