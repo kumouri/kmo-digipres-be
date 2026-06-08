@@ -430,6 +430,34 @@ import java.util.UUID;
  *       create-time). TCPA-safe: a {@value com.kumouri.kmodigipresbe.module.chairfill.automation.RiskTieredPreventionService#SMS_OPT_OUT_TAG}
  *       contact tag (honors STOP) + a per-contact rolling frequency cap gate every send; the
  *       {@code ReminderLog} ledger (unique per (tenant, booking)) makes a re-fired event a no-op.</li>
+ *   <li>{@code 4230-4239} — <em>ChairFill CF-3 (Personal-care / salon flagship)</em>: gap-fill waitlist
+ *       auto-offer (the double-YES-correct showpiece). The {@code GapFillService} subscriber on the
+ *       additively-emitted {@code BOOKING_CANCELLED} ranks the {@code salon-waitlist} pool (the CF-1
+ *       model inverted), Claude drafts a time-boxed offer, and the first inbound YES atomically claims
+ *       the freed slot via a slot-level {@code findAndModify} ({@code claimedByContactId:null} guard,
+ *       the {@code WorkOrderNumberGenerator} precedent) → winner gets a real booking via the unchanged
+ *       {@code SalonBookingService.create} (policy-validated, {@code @Version} backstop), loser(s) get
+ *       an apologetic auto-reply. {@code 4230} {@code salon-waitlist} widget-type mismatch — a correctly
+ *       -signed widget token whose {@code widgetType} claim is not {@code "salon-waitlist"} (401, the
+ *       {@code 2911}/{@code 4010}/{@code 4013} widget-type-mismatch posture; the generic token-rejection
+ *       codes {@code 1600-1603} from {@code PublicWidgetTokenService} are surfaced unchanged for
+ *       missing/malformed/bad-signature/expired tokens). {@code 4231-4239} reserved for CF-3 growth.
+ *       <strong>The inbound-SMS webhook is NET-NEW</strong> ({@code TwilioInboundSmsController} /
+ *       {@code InboundSmsService}, {@code POST /public/integrations/twilio/{id}/sms}) — it REUSES the
+ *       voicemail webhook's {@code 4000} (signature invalid, 401), {@code 4001} (Twilio not connected,
+ *       404), {@code 4003} (invalid tenant id in path, 400) verbatim (NOT re-allocated). Reused (NOT
+ *       re-allocated): {@code 1200-1203} (AI budget gate / Anthropic non-200 / missing-key, via the
+ *       {@code OfferCopyService} sibling of {@code ReminderCopyService} — all best-effort, degrade to a
+ *       generic offer); the Twilio SMS codes {@code 2530-2532} (offer / confirmation / apology sends —
+ *       best-effort); the salon booking/deposit {@code 2900}/{@code 2901} (the reused
+ *       {@code SalonBookingService.create} → {@code BookingPolicyService.validate} guards the winner's
+ *       booking, so even a logic slip cannot double-book); {@code 4000-4003} (the reused inbound Twilio
+ *       webhook signature/not-connected/tenant-id codes). TCPA: the waitlist join is the opt-in
+ *       (default-safe — only {@code smsOptIn} entries are offered), a STOP inbound sets the CF-2
+ *       {@code sms-opt-out} tag, and the atomic claim makes a re-delivered YES a loser (apology), never a
+ *       second booking. The {@code WaitlistWidgetController} + {@code TwilioInboundSmsController} are
+ *       {@code @ConditionalOnProperty}-gated, so they are absent from the generated OpenAPI spec when the
+ *       module is off (the HS / {@code NoShowRiskController} precedent).</li>
  * </ul>
  */
 @Slf4j

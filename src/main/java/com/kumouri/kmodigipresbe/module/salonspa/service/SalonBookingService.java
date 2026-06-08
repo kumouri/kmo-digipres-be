@@ -204,6 +204,19 @@ public class SalonBookingService {
         });
     }
 
+    /**
+     * Cancels a booking. Existing behaviour is unchanged — an already-CANCELLED booking is a no-op,
+     * a COMPLETED booking is rejected (2902), otherwise the status flips to CANCELLED and the booking
+     * is saved — with one <strong>additive</strong> step: a {@link DomainEventType#BOOKING_CANCELLED}
+     * domain event is emitted after the save (the {@link #complete()} {@code emitCompleted} precedent).
+     *
+     * <p>The emit is the reliable gap-fill trigger for ChairFill (CF-3): the freed slot
+     * ({@code staffMemberId} + {@code scheduledStart}/{@code scheduledEnd}) lets the chairfill
+     * {@code GapFillService} rank the waitlist and send time-boxed offers. It is purely advisory and
+     * NMM-irrelevant — no waitlist subscriber runs for a non-chairfill tenant, so this is a harmless
+     * no-op there (the {@code complete}/{@code BOOKING_COMPLETED} posture). The two pre-existing
+     * branches (already-cancelled no-op, completed-rejection) emit nothing, exactly as before.
+     */
     public Mono<Booking> cancel(UUID id) {
         return findById(id).flatMap(booking -> {
             if (booking.getStatus() == BookingStatus.CANCELLED) return Mono.just(booking);
@@ -212,7 +225,8 @@ public class SalonBookingService {
                         "Cannot cancel a completed booking", 2902, 409));
             }
             booking.setStatus(BookingStatus.CANCELLED);
-            return bookings.save(booking);
+            return bookings.save(booking)
+                    .doOnNext(saved -> emitCancelled(saved));
         });
     }
 
@@ -225,6 +239,28 @@ public class SalonBookingService {
         payload.put("serviceMenuItemId", booking.getServiceMenuItemId());
         events.publish(DomainEvent.of(
                 DomainEventType.BOOKING_COMPLETED,
+                booking.getTenantId(),
+                booking.getId(),
+                payload));
+    }
+
+    /**
+     * Emits {@link DomainEventType#BOOKING_CANCELLED} carrying the freed-slot coordinates the ChairFill
+     * (CF-3) {@code GapFillService} needs to rank the waitlist and send offers:
+     * {@code {bookingId, contactId, staffMemberId, serviceMenuItemId, scheduledStart, scheduledEnd}}.
+     * Mirrors {@link #emitCompleted} exactly (same publisher, same shape). Advisory only — it drives no
+     * core mutation here; non-chairfill tenants have no subscriber so the event is a harmless no-op.
+     */
+    private void emitCancelled(Booking booking) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("bookingId", booking.getId());
+        payload.put("contactId", booking.getContactId());
+        payload.put("staffMemberId", booking.getStaffMemberId());
+        payload.put("serviceMenuItemId", booking.getServiceMenuItemId());
+        payload.put("scheduledStart", booking.getScheduledStart());
+        payload.put("scheduledEnd", booking.getScheduledEnd());
+        events.publish(DomainEvent.of(
+                DomainEventType.BOOKING_CANCELLED,
                 booking.getTenantId(),
                 booking.getId(),
                 payload));
