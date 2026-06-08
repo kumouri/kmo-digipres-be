@@ -7,6 +7,9 @@ import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
 import com.kumouri.kmodigipresbe.integration.IntegrationConnection;
 import com.kumouri.kmodigipresbe.integration.IntegrationConnectionRepository;
 import com.kumouri.kmodigipresbe.integration.twilio.TwilioSmsService;
+import com.kumouri.kmodigipresbe.integration.twilio.voice.extract.VoicemailExtractionStrategy;
+import com.kumouri.kmodigipresbe.integration.twilio.voice.extract.VoicemailExtractionStrategyResolver;
+import com.kumouri.kmodigipresbe.integration.twilio.voice.extract.VoicemailLeadDetails;
 import com.kumouri.kmodigipresbe.model.activity.Activity;
 import com.kumouri.kmodigipresbe.model.activity.ActivityDirection;
 import com.kumouri.kmodigipresbe.model.activity.ActivityType;
@@ -19,6 +22,8 @@ import com.kumouri.kmodigipresbe.model.contact.PhoneNumber;
 import com.kumouri.kmodigipresbe.model.integration.TwilioVoicemailEvent;
 import com.kumouri.kmodigipresbe.model.request.SingleEmailCommunicationRequest;
 import com.kumouri.kmodigipresbe.model.request.SmsCommunicationRequest;
+import com.kumouri.kmodigipresbe.module.fieldservice.model.WorkOrder;
+import com.kumouri.kmodigipresbe.module.fieldservice.service.WorkOrderService;
 import com.kumouri.kmodigipresbe.repository.ContactRepository;
 import com.kumouri.kmodigipresbe.repository.twilio.TwilioVoicemailEventRepository;
 import com.kumouri.kmodigipresbe.service.ActivityCrudService;
@@ -26,6 +31,7 @@ import com.kumouri.kmodigipresbe.service.EmailService;
 import com.kumouri.kmodigipresbe.tenancy.TenantContext;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.dao.DuplicateKeyException;
@@ -100,12 +106,20 @@ public class TwilioVoicemailService {
     private final IntegrationConnectionRepository connections;
     private final TwilioVoicemailEventRepository voicemailEvents;
     private final VoicemailTranscriptionSource transcriptionSource;
-    private final VoicemailExtractionService extractionService;
+    private final VoicemailExtractionStrategyResolver strategyResolver;
     private final ContactRepository contacts;
     private final ActivityCrudService activityCrudService;
     private final EmailService emailService;
     private final TwilioSmsService twilioSmsService;
     private final DomainEventPublisher events;
+    /**
+     * The field-service {@link WorkOrderService} — present only when
+     * {@code kmosf.modules.field-service.enabled=true}. Lazily resolved via an
+     * {@link ObjectProvider} so the voicemail module still boots on a server with field-service
+     * disabled; when absent, a home-services voicemail degrades to Contact+Activity+notify (logged,
+     * never errors — plan §4.4).
+     */
+    private final ObjectProvider<WorkOrderService> workOrderServiceProvider;
 
     private final String greeting;
     private final int recordMaxLengthSeconds;
@@ -116,12 +130,13 @@ public class TwilioVoicemailService {
             IntegrationConnectionRepository connections,
             TwilioVoicemailEventRepository voicemailEvents,
             VoicemailTranscriptionSource transcriptionSource,
-            VoicemailExtractionService extractionService,
+            VoicemailExtractionStrategyResolver strategyResolver,
             ContactRepository contacts,
             ActivityCrudService activityCrudService,
             EmailService emailService,
             TwilioSmsService twilioSmsService,
             DomainEventPublisher events,
+            ObjectProvider<WorkOrderService> workOrderServiceProvider,
             @Value("${kmosf.voicemail.greeting:Thank you for calling. Please leave a message "
                     + "with your name, address, and a description of your problem after the "
                     + "beep, and we will call you back.}") String greeting,
@@ -132,12 +147,13 @@ public class TwilioVoicemailService {
         this.connections = connections;
         this.voicemailEvents = voicemailEvents;
         this.transcriptionSource = transcriptionSource;
-        this.extractionService = extractionService;
+        this.strategyResolver = strategyResolver;
         this.contacts = contacts;
         this.activityCrudService = activityCrudService;
         this.emailService = emailService;
         this.twilioSmsService = twilioSmsService;
         this.events = events;
+        this.workOrderServiceProvider = workOrderServiceProvider;
         this.greeting = greeting;
         this.recordMaxLengthSeconds = recordMaxLengthSeconds;
         this.autoAckMessage = autoAckMessage;
@@ -301,27 +317,47 @@ public class TwilioVoicemailService {
     }
 
     /**
-     * Extracts structured lead fields from the transcript (best-effort — an AI budget/upstream
-     * failure must NOT drop the lead; plan §8), then (sub-phase 1.4) find-or-creates the caller
-     * Contact, logs an {@code Activity(CALL, INBOUND)}, and notifies Rob + auto-acks the caller.
+     * Resolves the per-tenant {@link VoicemailExtractionStrategy} from the Twilio connection's
+     * {@code voicemailVertical} config value (absent/unknown → the default mole strategy), extracts
+     * structured lead fields from the transcript (best-effort — an AI budget/upstream failure must
+     * NOT drop the lead; plan §8), then find-or-creates the caller Contact, logs an
+     * {@code Activity(CALL, INBOUND)}, optionally creates a DRAFT {@code WorkOrder} (multi-trade
+     * verticals), and notifies Rob + auto-acks the caller.
      *
-     * <p>The extraction is wrapped in {@code onErrorResume(VoicemailExtraction.empty())}: a
-     * {@code 1200} budget-exhausted or {@code 1202} upstream error degrades to an empty
-     * extraction so the lead is still created from the raw transcript + recording.
+     * <p>The extraction is wrapped in {@code onErrorResume}: a {@code 1200} budget-exhausted or
+     * {@code 1202} upstream error degrades to an empty {@link VoicemailLeadDetails} so the lead is
+     * still created from the raw transcript + recording. (The multi-trade strategy degrades soft
+     * on its own — a failed extraction still yields a {@code GENERAL} DRAFT WO — but an
+     * <em>upstream-thrown</em> error short-circuits before that mapping runs, so the same empty
+     * carrier fallback applies here.)
      */
     private Mono<Void> handleTranscript(UUID tenantId, IntegrationConnection conn,
                                         VoicemailCallbackParams params,
                                         VoicemailTranscription transcript,
                                         TwilioVoicemailEvent savedLedger) {
-        return extractionService.extract(transcript.text())
+        String vertical = conn.getConfig() == null ? null : conn.getConfig().get("voicemailVertical");
+        VoicemailExtractionStrategy strategy = strategyResolver.forVertical(vertical);
+        return strategy.extract(transcript.text(), params)
                 .onErrorResume(e -> {
                     log.warn("Twilio voicemail CallSid {} for tenant {}: extraction failed "
                             + "(best-effort, using empty): {}", params.callSid(), tenantId,
                             e.getMessage());
-                    return Mono.just(VoicemailExtraction.empty());
+                    return Mono.just(emptyDetails());
                 })
-                .flatMap(extraction -> createLeadAndNotify(
-                        tenantId, conn, params, transcript, extraction, savedLedger));
+                .flatMap(details -> createLeadAndNotify(
+                        tenantId, conn, params, transcript, details, savedLedger));
+    }
+
+    /**
+     * An all-empty {@link VoicemailLeadDetails} (no WorkOrder) — the best-effort fallback when a
+     * strategy's extraction throws upstream. Mirrors the Phase-1 {@code VoicemailExtraction.empty()}
+     * posture: the lead is still created from the raw transcript + recording.
+     */
+    private static VoicemailLeadDetails emptyDetails() {
+        Map<String, Object> extractedJson = new HashMap<>();
+        extractedJson.put("callbackRequested", false);
+        return new VoicemailLeadDetails(null, null, null, false,
+                "Voicemail lead", extractedJson, null);
     }
 
     /**
@@ -342,20 +378,66 @@ public class TwilioVoicemailService {
     private Mono<Void> createLeadAndNotify(UUID tenantId, IntegrationConnection conn,
                                            VoicemailCallbackParams params,
                                            VoicemailTranscription transcript,
-                                           VoicemailExtraction extraction,
+                                           VoicemailLeadDetails details,
                                            TwilioVoicemailEvent savedLedger) {
-        return findOrCreateContact(tenantId, params, extraction)
-                .flatMap(contact -> logCallActivity(tenantId, contact, params, transcript, extraction)
-                        .flatMap(activity -> {
-                            savedLedger.setResolvedContactId(contact.getId());
-                            savedLedger.setCreatedActivityId(activity.getId());
-                            return voicemailEvents.save(savedLedger).thenReturn(activity);
-                        })
-                        .flatMap(activity -> notifyRob(conn, params, extraction)
-                                .then(autoAckCaller(params))
-                                .then(Mono.fromRunnable(() ->
-                                        emitVoicemailLeadCreated(tenantId, params, contact, activity)))))
+        return findOrCreateContact(tenantId, params, details)
+                .flatMap(contact -> logCallActivity(tenantId, contact, params, transcript, details)
+                        .flatMap(activity -> maybeCreateWorkOrder(tenantId, params, details)
+                                .flatMap(woId -> {
+                                    savedLedger.setResolvedContactId(contact.getId());
+                                    savedLedger.setCreatedActivityId(activity.getId());
+                                    savedLedger.setCreatedWorkOrderId(woId.orElse(null));
+                                    return voicemailEvents.save(savedLedger)
+                                            .thenReturn(woId);
+                                })
+                                .flatMap(woId -> notifyRob(conn, params, details)
+                                        .then(autoAckCaller(params))
+                                        .then(Mono.fromRunnable(() -> {
+                                            emitVoicemailLeadCreated(tenantId, params, contact, activity);
+                                            woId.ifPresent(id -> emitVoicemailWorkOrderDrafted(
+                                                    tenantId, params, contact, id, details));
+                                        }))))
+                )
                 .then();
+    }
+
+    /**
+     * Creates the DRAFT {@link WorkOrder} the strategy built (multi-trade verticals), via the
+     * <strong>unchanged {@code WorkOrderService.create}</strong> (which server-assigns the
+     * {@code workOrderNumber} via {@code WorkOrderNumberGenerator} under the already-established
+     * synthetic {@code TenantContext}, and defaults the status to DRAFT) — NOT a raw
+     * {@code workOrders.save}. Returns the new WorkOrder id (or empty when the vertical built no
+     * WorkOrder, i.e. mole).
+     *
+     * <p>Guarded on the {@link WorkOrderService} bean via {@link #workOrderServiceProvider}: on a
+     * server with {@code field-service} disabled the bean is absent, so a home-services voicemail
+     * degrades to Contact+Activity+notify (logged advisory {@code 4201}, never errors — plan §4.4).
+     */
+    private Mono<java.util.Optional<UUID>> maybeCreateWorkOrder(UUID tenantId,
+                                                                VoicemailCallbackParams params,
+                                                                VoicemailLeadDetails details) {
+        WorkOrder draft = details.draftWorkOrder();
+        if (draft == null) {
+            return Mono.just(java.util.Optional.empty());
+        }
+        WorkOrderService workOrderService = workOrderServiceProvider.getIfAvailable();
+        if (workOrderService == null) {
+            // 4201 — home-services voicemail produced a DRAFT WO but field-service/WorkOrderService
+            // is unavailable on this server. Advisory: degrade to Contact+Activity (already done),
+            // never surface to Twilio.
+            log.warn("Twilio voicemail CallSid {} for tenant {}: a DRAFT WorkOrder was extracted but "
+                    + "field-service/WorkOrderService is not available on this server — degrading to "
+                    + "Contact+Activity+notify (advisory 4201)", params.callSid(), tenantId);
+            return Mono.just(java.util.Optional.empty());
+        }
+        return workOrderService.create(draft)
+                .map(wo -> java.util.Optional.of(wo.getId()))
+                .onErrorResume(e -> {
+                    // Best-effort: a WO-create failure must not drop the already-durable lead.
+                    log.warn("Twilio voicemail CallSid {} for tenant {}: DRAFT WorkOrder create failed "
+                            + "(best-effort, lead kept): {}", params.callSid(), tenantId, e.getMessage());
+                    return Mono.just(java.util.Optional.empty());
+                });
     }
 
     /**
@@ -364,11 +446,11 @@ public class TwilioVoicemailService {
      * rewrite staff-curated data from an inbound call — the ServiceRequest-widget precedent).
      */
     private Mono<Contact> findOrCreateContact(UUID tenantId, VoicemailCallbackParams params,
-                                              VoicemailExtraction extraction) {
+                                              VoicemailLeadDetails details) {
         String from = params.from();
         if (from == null || from.isBlank()) {
             // No caller-ID number — create an anonymous contact so the lead is never dropped.
-            return contacts.save(buildContact(null, extraction));
+            return contacts.save(buildContact(null, details));
         }
         return contacts.findByTenantAndPhoneNumber(tenantId, from)
                 .next()
@@ -376,12 +458,12 @@ public class TwilioVoicemailService {
                 .defaultIfEmpty(java.util.Optional.empty())
                 .flatMap(existing -> existing.isPresent()
                         ? Mono.just(existing.get())
-                        : contacts.save(buildContact(from, extraction)));
+                        : contacts.save(buildContact(from, details)));
     }
 
-    private Contact buildContact(String fromPhone, VoicemailExtraction extraction) {
-        String name = extraction.name() != null && !extraction.name().isBlank()
-                ? extraction.name().trim() : null;
+    private Contact buildContact(String fromPhone, VoicemailLeadDetails details) {
+        String name = details.name() != null && !details.name().isBlank()
+                ? details.name().trim() : null;
         String displayName = name != null
                 ? name
                 : (fromPhone != null ? "Voicemail caller " + fromPhone : "Voicemail caller");
@@ -406,20 +488,13 @@ public class TwilioVoicemailService {
     private Mono<Activity> logCallActivity(UUID tenantId, Contact contact,
                                            VoicemailCallbackParams params,
                                            VoicemailTranscription transcript,
-                                           VoicemailExtraction extraction) {
+                                           VoicemailLeadDetails details) {
         Map<String, Object> payload = new HashMap<>();
         if (params.callSid() != null) payload.put("callSid", params.callSid());
         if (params.recordingSid() != null) payload.put("recordingSid", params.recordingSid());
         if (params.recordingUrl() != null) payload.put("recordingUrl", params.recordingUrl());
         if (params.from() != null) payload.put("fromNumber", params.from());
-        Map<String, Object> extractedJson = new HashMap<>();
-        if (extraction.name() != null) extractedJson.put("name", extraction.name());
-        if (extraction.phone() != null) extractedJson.put("phone", extraction.phone());
-        if (extraction.address() != null) extractedJson.put("address", extraction.address());
-        if (extraction.problem() != null) extractedJson.put("problem", extraction.problem());
-        if (extraction.urgency() != null) extractedJson.put("urgency", extraction.urgency());
-        extractedJson.put("callbackRequested", extraction.callbackRequested());
-        payload.put("extractedJson", extractedJson);
+        payload.put("extractedJson", details.extractedJson());
         payload.put("transcriptionSource", transcript.source().name());
 
         Activity activity = Activity.builder()
@@ -428,7 +503,7 @@ public class TwilioVoicemailService {
                 .direction(ActivityDirection.INBOUND)
                 .subjectType(SubjectType.CONTACT)
                 .subjectId(contact.getId())
-                .summary(extraction.toSummaryLine())
+                .summary(details.summaryLine())
                 .body(transcript.hasText() ? transcript.text() : "(no transcript)")
                 .payload(payload)
                 .build();
@@ -442,12 +517,12 @@ public class TwilioVoicemailService {
      * already-durable lead is never lost.
      */
     private Mono<Void> notifyRob(IntegrationConnection conn, VoicemailCallbackParams params,
-                                 VoicemailExtraction extraction) {
+                                 VoicemailLeadDetails details) {
         Map<String, String> config = conn.getConfig() == null ? Map.of() : conn.getConfig();
         String notifyEmail = config.get("notifyEmail");
         String notifyPhone = config.get("notifyPhone");
         String callbackNumber = params.from() != null ? params.from() : "(unknown)";
-        String summary = extraction.toSummaryLine();
+        String summary = details.summaryLine();
 
         Mono<Void> emailMono = Mono.empty();
         if (notifyEmail != null && !notifyEmail.isBlank()
@@ -517,6 +592,27 @@ public class TwilioVoicemailService {
         events.publish(DomainEvent.of(
                 DomainEventType.VOICEMAIL_LEAD_CREATED, tenantId,
                 contact.getId() != null ? contact.getId() : UUID.randomUUID(), payload));
+    }
+
+    /**
+     * Advisory {@code VOICEMAIL_WORK_ORDER_DRAFTED} — emitted after a multi-trade-tenant voicemail
+     * creates a DRAFT {@link WorkOrder}. Does NOT drive the WO creation (that is synchronous in
+     * {@link #maybeCreateWorkOrder}); RuleEngine / webhook fan-out subscribe. Payload:
+     * {@code {callSid, workOrderId, contactId, trade, urgency}}.
+     */
+    private void emitVoicemailWorkOrderDrafted(UUID tenantId, VoicemailCallbackParams params,
+                                               Contact contact, UUID workOrderId,
+                                               VoicemailLeadDetails details) {
+        Map<String, Object> payload = new HashMap<>();
+        if (params.callSid() != null) payload.put("callSid", params.callSid());
+        payload.put("workOrderId", workOrderId.toString());
+        if (contact.getId() != null) payload.put("contactId", contact.getId().toString());
+        Object trade = details.extractedJson().get("trade");
+        if (trade != null) payload.put("trade", trade);
+        Object urgency = details.extractedJson().get("urgency");
+        if (urgency != null) payload.put("urgency", urgency);
+        events.publish(DomainEvent.of(
+                DomainEventType.VOICEMAIL_WORK_ORDER_DRAFTED, tenantId, workOrderId, payload));
     }
 
     private void emitVoicemailReceived(UUID tenantId, VoicemailCallbackParams params) {

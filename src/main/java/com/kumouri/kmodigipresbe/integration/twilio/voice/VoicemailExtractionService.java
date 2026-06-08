@@ -22,30 +22,39 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Extracts structured lead fields from a voicemail transcript via the Anthropic Messages API
- * (Phase 1 — NMM voicemail-to-lead). A <strong>new additive service that mirrors
- * {@link com.kumouri.kmodigipresbe.service.ai.AnthropicAiAssistService} exactly</strong> in
- * shape — per-tenant API key from {@code IntegrationConnection(provider="anthropic").secrets.apiKey}
- * with a {@code kmosf.ai.anthropic.house-key} fallback, the {@link AiUsageRecorder} budget gate
- * BEFORE the call + spend record AFTER, and a configurable base-url
- * ({@code kmosf.ai.anthropic.base-url}, default the real Anthropic endpoint, OVERRIDDEN to
- * WireMock in every test — §7).
+ * The <strong>reusable</strong> Anthropic Messages <strong>text</strong> transport for voicemail
+ * extraction (HS-1 — Home Services front desk), generalized from the mole-specific Phase-1
+ * extractor so every vertical can share one extract core. Exactly the
+ * {@link com.kumouri.kmodigipresbe.service.ai.vision.AiVisionService} relationship, one layer up:
+ * the per-vertical {@code …ExtractionStrategy} classes (mole, multi-trade) are the thin callers and
+ * this owns the transport.
  *
- * <p>It does <strong>NOT</strong> modify {@code AnthropicAiAssistService} (that reused core
- * stays empty-diff vs {@code main}); this is a sibling caller with its own strict
- * voicemail-extraction system prompt that asks the model to return ONLY JSON
- * {@code {name, phone, address, problem, urgency, callbackRequested}}. Parsing is
- * <strong>defensive</strong>: a missing/blank field, fenced JSON, or a non-200/parse failure
- * degrades to {@link VoicemailExtraction#empty()} rather than failing the ingest — AI is
- * triage, not truth (plan §8), and the raw transcript + recording are always attached so Rob
- * can verify.
+ * <p>Same shape as {@code AiVisionService} / {@code AnthropicAiAssistService}: per-tenant API key
+ * from {@code IntegrationConnection(provider="anthropic").secrets.apiKey} with a
+ * {@code kmosf.ai.anthropic.house-key} fallback, the {@link AiUsageRecorder} budget gate BEFORE the
+ * call + spend record AFTER, and a configurable base-url ({@code kmosf.ai.anthropic.base-url},
+ * default the real Anthropic endpoint, OVERRIDDEN to WireMock in every test — §7).
+ *
+ * <p>Unlike the per-vertical callers, the {@code model} and {@code systemPrompt} are
+ * <strong>method parameters</strong> of {@link #extractRaw}: each strategy owns its own model +
+ * prompt config (there is no model {@code @Value} here). The user message wraps the transcript with
+ * the fixed {@code "Voicemail transcript:\n\n"} prefix — identical for every vertical, so the wire
+ * request stays <strong>byte-identical</strong> for the mole caller (model {@code claude-haiku-4-5},
+ * {@code max_tokens} 512, system = the mole prompt) and the Phase-1 NMM IT WireMock stub +
+ * {@code verify(1, ...)} are unchanged.
+ *
+ * <p>{@link #extractRaw} returns the model's <strong>raw parsed JSON</strong> ({@link JsonNode},
+ * open schema), exactly the {@code AiVisionService.extract} return shape — each strategy maps it
+ * into its own record. Parsing is <strong>defensive</strong>: a blank transcript short-circuits to
+ * an empty {@code ObjectNode} without spending; a blank/fenced/prose-wrapped or non-200/parse-failure
+ * answer degrades to an empty {@code ObjectNode} rather than throwing — AI is triage, not truth
+ * (plan §8), and the raw transcript + recording are always attached so a human can verify.
  *
  * <p>Error codes are reused, not re-allocated: the budget gate owns {@code 1200/1201}, the
- * Anthropic upstream non-200 is {@code 1202}, missing-key is {@code 1203} (all from the AI
- * range, surfaced by {@code AiUsageRecorder} / the same call shape as the exemplar). The
- * voicemail pipeline calls this <em>best-effort</em> (a budget-exhausted {@code 1200} or
- * upstream {@code 1202} is caught upstream and the lead is still created from the raw
- * transcript) so an AI outage never drops a lead.
+ * Anthropic upstream non-200 is {@code 1202}, missing-key is {@code 1203} (all from the AI range).
+ * The voicemail pipeline calls the strategies <em>best-effort</em> (a budget-exhausted {@code 1200}
+ * or upstream {@code 1202} is caught upstream and the lead is still created from the raw transcript)
+ * so an AI outage never drops a lead.
  */
 @Slf4j
 @Service
@@ -58,24 +67,11 @@ public class VoicemailExtractionService {
     private static final BigDecimal SONNET_INPUT_PER_MILLION = new BigDecimal("3.00");
     private static final BigDecimal SONNET_OUTPUT_PER_MILLION = new BigDecimal("15.00");
 
-    private static final String SYSTEM_PROMPT =
-            "You extract structured lead details from the transcript of a voicemail left for a "
-            + "pest-control / mole-removal business. Respond with ONLY a single minified JSON "
-            + "object and nothing else — no prose, no markdown, no code fences. The object MUST "
-            + "have exactly these keys: \"name\" (the caller's name, or null), \"phone\" (a "
-            + "callback number stated in the message, or null), \"address\" (the service "
-            + "address, or null), \"problem\" (a short description of the pest/mole problem, or "
-            + "null), \"urgency\" (the caller's stated urgency such as \"high\"/\"this week\", or "
-            + "null), and \"callbackRequested\" (boolean true if the caller asked to be called "
-            + "back, else false). Use null for any field not present in the transcript. Do not "
-            + "invent values.";
-
     private final WebClient http;
     private final ObjectMapper objectMapper;
     private final IntegrationConnectionRepository connections;
     private final AiUsageRecorder usageRecorder;
     private final String houseKey;
-    private final String extractionModel;
 
     public VoicemailExtractionService(
             WebClient.Builder webClientBuilder,
@@ -83,32 +79,37 @@ public class VoicemailExtractionService {
             IntegrationConnectionRepository connections,
             AiUsageRecorder usageRecorder,
             @Value("${kmosf.ai.anthropic.base-url:https://api.anthropic.com/v1/messages}") String baseUrl,
-            @Value("${kmosf.ai.anthropic.house-key:}") String houseKey,
-            @Value("${kmosf.voicemail.extraction-model:claude-haiku-4-5}") String extractionModel) {
+            @Value("${kmosf.ai.anthropic.house-key:}") String houseKey) {
         this.http = webClientBuilder.baseUrl(baseUrl).build();
         this.objectMapper = objectMapper;
         this.connections = connections;
         this.usageRecorder = usageRecorder;
         this.houseKey = houseKey == null ? "" : houseKey;
-        this.extractionModel = extractionModel;
     }
 
     /**
-     * Extracts structured fields from the transcript. Mirrors
-     * {@code AnthropicAiAssistService.call}: tenant key → budget gate → POST → record spend.
-     * A blank transcript short-circuits to {@link VoicemailExtraction#empty()} without spending.
+     * Runs the shared extract transport for the given {@code model} + {@code systemPrompt} and
+     * returns the model's raw parsed JSON ({@link JsonNode}). Mirrors
+     * {@code AiVisionService.extract}: tenant key → budget gate → POST → record spend → defensive
+     * parse. A blank transcript short-circuits to an empty {@code ObjectNode} without spending (and
+     * without requiring a {@code TenantContext}); a blank/non-JSON/parse-failure answer also
+     * degrades to an empty {@code ObjectNode} (never throws).
+     *
+     * @param transcript   the voicemail transcript (blank → empty object, no spend)
+     * @param model        the Anthropic model id the calling strategy chose
+     * @param systemPrompt the calling strategy's system prompt
      */
-    public Mono<VoicemailExtraction> extract(String transcript) {
+    public Mono<JsonNode> extractRaw(String transcript, String model, String systemPrompt) {
         if (transcript == null || transcript.isBlank()) {
-            return Mono.just(VoicemailExtraction.empty());
+            return Mono.just(objectMapper.createObjectNode());
         }
         return TenantContextHolder.required()
                 .flatMap(ctx -> resolveKey(ctx.tenantId()))
                 .flatMap(key -> usageRecorder.checkBudget().thenReturn(key))
-                .flatMap(key -> postMessages(key, transcript))
+                .flatMap(key -> postMessages(key, transcript, model, systemPrompt))
                 .flatMap(result -> usageRecorder.record(
-                                result.inputTokens, result.outputTokens, estimateUsd(result))
-                        .thenReturn(parseExtraction(result.text)));
+                                result.inputTokens, result.outputTokens, estimateUsd(model, result))
+                        .thenReturn(parseJson(result.text)));
     }
 
     private Mono<String> resolveKey(UUID tenantId) {
@@ -123,11 +124,12 @@ public class VoicemailExtractionService {
                         : Mono.just(houseKey)));
     }
 
-    private Mono<CompletionResult> postMessages(String apiKey, String transcript) {
+    private Mono<CompletionResult> postMessages(String apiKey, String transcript, String model,
+                                                String systemPrompt) {
         Map<String, Object> body = new HashMap<>();
-        body.put("model", extractionModel);
+        body.put("model", model);
         body.put("max_tokens", 512);
-        body.put("system", SYSTEM_PROMPT);
+        body.put("system", systemPrompt);
         body.put("messages", List.of(Map.of(
                 "role", "user",
                 "content", "Voicemail transcript:\n\n" + transcript)));
@@ -165,32 +167,26 @@ public class VoicemailExtractionService {
     }
 
     /**
-     * Parses the model's JSON answer into a {@link VoicemailExtraction}. Tolerant of code
-     * fences and surrounding prose (strips to the first {@code {...}} block); any parse failure
-     * degrades to {@link VoicemailExtraction#empty()} (logged) — never throws.
+     * Parses the model's answer into a raw {@link JsonNode} (open schema). Tolerant of code fences
+     * and surrounding prose (strips to the first {@code {...}} block); any blank/non-JSON/parse
+     * failure degrades to an empty {@code ObjectNode} (logged) — never throws.
      */
-    private VoicemailExtraction parseExtraction(String text) {
+    private JsonNode parseJson(String text) {
         if (text == null || text.isBlank()) {
-            return VoicemailExtraction.empty();
+            return objectMapper.createObjectNode();
         }
         String json = extractJsonObject(text);
         if (json == null) {
-            log.debug("Voicemail extraction: model response was not JSON; using empty extraction");
-            return VoicemailExtraction.empty();
+            log.debug("Voicemail extraction: model response was not JSON; using empty object");
+            return objectMapper.createObjectNode();
         }
         try {
             JsonNode node = objectMapper.readTree(json);
-            return new VoicemailExtraction(
-                    textOrNull(node, "name"),
-                    textOrNull(node, "phone"),
-                    textOrNull(node, "address"),
-                    textOrNull(node, "problem"),
-                    textOrNull(node, "urgency"),
-                    node.path("callbackRequested").asBoolean(false));
+            return node == null || node.isMissingNode() ? objectMapper.createObjectNode() : node;
         } catch (Exception ex) {
-            log.debug("Voicemail extraction: JSON parse failed ({}); using empty extraction",
+            log.debug("Voicemail extraction: JSON parse failed ({}); using empty object",
                     ex.getMessage());
-            return VoicemailExtraction.empty();
+            return objectMapper.createObjectNode();
         }
     }
 
@@ -202,15 +198,8 @@ public class VoicemailExtractionService {
         return text.substring(start, end + 1);
     }
 
-    private static String textOrNull(JsonNode node, String field) {
-        JsonNode v = node.path(field);
-        if (v.isMissingNode() || v.isNull()) return null;
-        String s = v.asText(null);
-        return (s == null || s.isBlank()) ? null : s;
-    }
-
-    private BigDecimal estimateUsd(CompletionResult result) {
-        boolean haiku = extractionModel != null && extractionModel.toLowerCase().contains("haiku");
+    private BigDecimal estimateUsd(String model, CompletionResult result) {
+        boolean haiku = model != null && model.toLowerCase().contains("haiku");
         BigDecimal inPer = haiku ? HAIKU_INPUT_PER_MILLION : SONNET_INPUT_PER_MILLION;
         BigDecimal outPer = haiku ? HAIKU_OUTPUT_PER_MILLION : SONNET_OUTPUT_PER_MILLION;
         BigDecimal input = inPer.multiply(BigDecimal.valueOf(result.inputTokens))

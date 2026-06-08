@@ -334,6 +334,29 @@ import java.util.UUID;
  *       {@code 3500}/{@code 3502}/{@code 3503}/{@code 3505}/{@code 3506} and
  *       {@code 3511}-{@code 3517} surfaced unchanged by the reused {@code TimeEntryService} /
  *       {@code ExpenseService} on the contractor self-scoped time/expense paths.</li>
+ *   <li>{@code 4200-4219} — <em>HS-1 (Home Services — "Front Desk That Never Sleeps")</em>:
+ *       multi-trade voicemail → DRAFT WorkOrder. The free band above Phase J (which ends at
+ *       {@code 4160}; {@code 4100-4199} is Phase J's reserved block). {@code 4200} multi-trade
+ *       extraction strategy misconfigured — an explicitly-set {@code voicemailVertical} value that
+ *       is not a registered strategy (defensive 500; in practice the
+ *       {@code VoicemailExtractionStrategyResolver} defaults to mole-pest and logs, so this is
+ *       reserved for an explicitly-bad config rather than thrown today); {@code 4201}
+ *       home-services voicemail produced a DRAFT WorkOrder but {@code field-service} /
+ *       {@code WorkOrderService} is unavailable on this server — logged advisory, <strong>not</strong>
+ *       surfaced to Twilio (the pipeline degrades to Contact+Activity+notify; the code is reserved
+ *       for the admin/health surface); {@code 4202} Missed-Call Inbox read requested but
+ *       home-services is not enabled for the tenant (404 — surfaced via the shared
+ *       {@code TenantModuleRegistry.requireEnabled} {@code 1130}/{@code 1132} module-gate codes;
+ *       mirrors the {@code 2700}/{@code 3930} not-enabled posture). Reserved for HS growth:
+ *       {@code 4203-4219} (HS-2 will claim {@code 4210-4214} MMS/vision; HS-3 {@code 4215-4219}
+ *       forward/booking-link). Reused (NOT re-allocated): {@code 1200-1203} (AI budget gate +
+ *       Anthropic call failure + missing-key — surfaced unchanged by the shared
+ *       {@code VoicemailExtractionService} transport the per-vertical strategies call);
+ *       {@code 4000-4003} (Twilio sig/not-connected/CallSid/tenant-id — the voicemail webhook still
+ *       owns these); {@code 1330}/{@code 1331}/{@code 1332} ({@code WorkOrderService} WO-not-found /
+ *       terminal / number-generation — the reused {@code WorkOrderService.create} path);
+ *       {@code 2530-2532} (Twilio SMS — reused {@code TwilioSmsService} on the notify + auto-ack
+ *       paths); {@code 1300} Activity-not-found (reused {@code ActivityCrudService}).</li>
  * </ul>
  */
 @Slf4j
