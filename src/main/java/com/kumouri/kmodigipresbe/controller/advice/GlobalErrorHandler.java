@@ -458,6 +458,29 @@ import java.util.UUID;
  *       second booking. The {@code WaitlistWidgetController} + {@code TwilioInboundSmsController} are
  *       {@code @ConditionalOnProperty}-gated, so they are absent from the generated OpenAPI spec when the
  *       module is off (the HS / {@code NoShowRiskController} precedent).</li>
+ *   <li>{@code 4240-4244} — <em>ChairFill CF-4 (Personal-care / salon flagship)</em>: AI review-reply,
+ *       salon-generalized + RAG voice + the reused approval queue (D4). The
+ *       {@code SalonReviewReplyService} drafts an on-brand, salon-voiced reply (a brand-tone system
+ *       prompt + RAG-retrieved exemplar past <em>approved</em> replies) by calling the unchanged
+ *       {@code GbpReplyDraftService}'s additive overload, and parks it DRAFTED in the
+ *       <strong>same {@code GbpReviewReply} approval queue NMM uses</strong> — the reused
+ *       {@code GbpReviewReplyAdminController} approves (posts, when {@code google-business} is wired,
+ *       or copy-ready) / skips it. <strong>Never auto-posted.</strong> The
+ *       {@code SalonReviewReplyController} paste-in endpoint ({@code POST /chairfill/reviews/draft},
+ *       STAFF-gated + module-gated) is the demo path (no live Google OAuth). <strong>CF-4 mints ONE
+ *       new code:</strong> {@code 4240} a paste-in submission with a blank review text (400 — nothing
+ *       to draft a reply to). {@code 4241-4244} reserved for CF-4 growth. <strong>Best-effort</strong>:
+ *       an exemplar-retrieval failure → no exemplars; a Claude failure ({@code 1200}/{@code 1202}/
+ *       {@code 1203}) → a generic on-brand fallback draft — never a thrown error, never a blank, never
+ *       a dropped review. Reused (NOT re-allocated): {@code 1200-1203} (AI budget gate / Anthropic
+ *       non-200 / missing-key, via the unchanged {@code GbpReplyDraftService}); {@code 4032}/{@code 4033}
+ *       (the reused admin approve/skip not-found / not-DRAFTED); {@code 4030}/{@code 4031} (the reused
+ *       {@code GbpApiClient.postReply} on approve→post for a GBP-wired salon); {@code 1130}/{@code 1132}
+ *       (the shared {@code TenantModuleRegistry.requireEnabled} module gate); {@code 1800} (the
+ *       STAFF {@code RoleGuard}). <strong>NMM byte-equivalent:</strong> the GBP poller/ledger/admin
+ *       queue/drafting are unchanged; the salon prompt + RAG exemplars are additive + per-tenant +
+ *       module-gated. The {@code SalonReviewReplyController} is {@code @ConditionalOnProperty}-gated,
+ *       so it is absent from the generated OpenAPI spec when the module is off.</li>
  * </ul>
  */
 @Slf4j

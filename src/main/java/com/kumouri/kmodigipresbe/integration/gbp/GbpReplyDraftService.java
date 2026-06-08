@@ -90,17 +90,53 @@ public class GbpReplyDraftService {
     }
 
     /**
-     * Drafts a reply to the given review. Mirrors {@code AnthropicAiAssistService.call}: tenant key
-     * → budget gate → POST → record spend → return the trimmed reply text.
+     * Drafts a reply to the given review using the tenant/house default system prompt and no
+     * exemplars. Mirrors {@code AnthropicAiAssistService.call}: tenant key → budget gate → POST →
+     * record spend → return the trimmed reply text.
+     *
+     * <p><strong>Byte-equivalent for NMM/GBP:</strong> this is the original single-arg entry point;
+     * it delegates to {@link #draftReply(GbpReview, String, java.util.List)} with a {@code null}
+     * prompt-override (→ the tenant/house default system prompt, exactly as before) and {@code null}
+     * exemplars (→ today's user prompt verbatim). The GBP poller/admin path is unchanged.
      */
     public Mono<String> draftReply(GbpReview review) {
+        return draftReply(review, null, null);
+    }
+
+    /**
+     * Drafts a reply, optionally overriding the system prompt and prepending a few on-brand
+     * exemplar past replies to the user message. <strong>Additive, ChairFill CF-4 generalization
+     * (D4):</strong> a {@code null}/blank {@code systemPromptOverride} falls back to the configured
+     * {@code kmosf.gbp.reply-system-prompt} (or the built-in default) — so the existing GBP/NMM call
+     * stays byte-equivalent — while the salon reuse passes a brand-tone prompt + RAG-retrieved
+     * exemplars. {@code null}/empty {@code exemplars} reproduces today's user prompt exactly.
+     *
+     * @param review               the review to reply to
+     * @param systemPromptOverride a per-call system prompt ({@code null}/blank = the configured/default)
+     * @param exemplars            a few of the salon's own past approved replies for voice grounding
+     *                             ({@code null}/empty = none; the GBP/NMM path)
+     */
+    public Mono<String> draftReply(GbpReview review, String systemPromptOverride,
+                                   List<ReplyExemplar> exemplars) {
         return TenantContextHolder.required()
                 .flatMap(ctx -> resolveKey(ctx.tenantId()))
                 .flatMap(key -> usageRecorder.checkBudget().thenReturn(key))
-                .flatMap(key -> postMessages(key, review))
+                .flatMap(key -> postMessages(key, review, systemPromptOverride, exemplars))
                 .flatMap(result -> usageRecorder.record(
                                 result.inputTokens, result.outputTokens, estimateUsd(result))
                         .thenReturn(result.text.trim()));
+    }
+
+    /**
+     * A single on-brand exemplar — a past review and the approved reply the business gave it — used
+     * to ground a new draft in the business's own established voice (ChairFill CF-4 RAG, D4). Carries
+     * just enough to teach tone: the prior review's rating + comment and the reply that was posted.
+     *
+     * @param rating       the prior review's star rating (nullable)
+     * @param reviewText   the prior review's comment (nullable)
+     * @param approvedReply the reply that was approved/posted for it (the voice signal)
+     */
+    public record ReplyExemplar(Integer rating, String reviewText, String approvedReply) {
     }
 
     private Mono<String> resolveKey(UUID tenantId) {
@@ -115,14 +151,16 @@ public class GbpReplyDraftService {
                         : Mono.just(houseKey)));
     }
 
-    private Mono<CompletionResult> postMessages(String apiKey, GbpReview review) {
+    private Mono<CompletionResult> postMessages(String apiKey, GbpReview review,
+                                                String systemPromptOverride,
+                                                List<ReplyExemplar> exemplars) {
         Map<String, Object> body = new HashMap<>();
         body.put("model", draftModel);
         body.put("max_tokens", 512);
-        body.put("system", systemPrompt());
+        body.put("system", systemPrompt(systemPromptOverride));
         body.put("messages", List.of(Map.of(
                 "role", "user",
-                "content", buildUserPrompt(review))));
+                "content", buildUserPrompt(review, exemplars))));
         return http.post()
                 .uri("")
                 .header("Accept", MediaType.APPLICATION_JSON_VALUE)
@@ -161,12 +199,48 @@ public class GbpReplyDraftService {
         return Mono.just(new CompletionResult(text, inputTokens, outputTokens));
     }
 
-    private String systemPrompt() {
+    /**
+     * Resolves the effective system prompt. A per-call {@code override} wins; otherwise the
+     * configured {@code kmosf.gbp.reply-system-prompt}; otherwise the built-in default. The
+     * single-arg {@code draftReply} passes {@code null} → the original configured/default behavior
+     * (NMM/GBP byte-equivalent).
+     */
+    private String systemPrompt(String override) {
+        if (override != null && !override.isBlank()) {
+            return override;
+        }
         return systemPromptOverride.isBlank() ? DEFAULT_SYSTEM_PROMPT : systemPromptOverride;
     }
 
-    private static String buildUserPrompt(GbpReview review) {
-        StringBuilder sb = new StringBuilder("Draft a reply to this Google review.\n\n");
+    /**
+     * Builds the user message. With {@code null}/empty {@code exemplars} this is byte-equivalent to
+     * the original GBP/NMM prompt. With exemplars (ChairFill CF-4 RAG) a short "here is how this
+     * business has replied to past reviews" block is prepended for on-brand voice grounding.
+     */
+    private static String buildUserPrompt(GbpReview review, List<ReplyExemplar> exemplars) {
+        StringBuilder sb = new StringBuilder();
+        if (exemplars != null && !exemplars.isEmpty()) {
+            sb.append("Here are a few past reviews this business received and the on-brand replies "
+                    + "it gave. Match this voice and style (do NOT copy them verbatim):\n");
+            int i = 1;
+            for (ReplyExemplar ex : exemplars) {
+                if (ex == null || ex.approvedReply() == null || ex.approvedReply().isBlank()) {
+                    continue;
+                }
+                sb.append("\nExample ").append(i++).append(":\n");
+                if (ex.rating() != null) {
+                    sb.append("- Review (").append(ex.rating()).append(" out of 5): ");
+                } else {
+                    sb.append("- Review: ");
+                }
+                sb.append(ex.reviewText() != null && !ex.reviewText().isBlank()
+                                ? ex.reviewText() : "(star-only)")
+                        .append('\n');
+                sb.append("- Reply given: ").append(ex.approvedReply().trim()).append('\n');
+            }
+            sb.append("\n---\n\n");
+        }
+        sb.append("Draft a reply to this Google review.\n\n");
         sb.append("Reviewer: ")
                 .append(review.reviewerName() != null ? review.reviewerName() : "(anonymous)")
                 .append('\n');

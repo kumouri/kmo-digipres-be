@@ -17,8 +17,13 @@ import com.kumouri.kmodigipresbe.module.chairfill.gapfill.WaitlistMatchService;
 import com.kumouri.kmodigipresbe.module.chairfill.model.NoShowRisk;
 import com.kumouri.kmodigipresbe.module.chairfill.model.WaitlistEntryRepository;
 import com.kumouri.kmodigipresbe.module.chairfill.model.WaitlistOfferRepository;
+import com.kumouri.kmodigipresbe.module.chairfill.reviews.LedgerReplyExemplarSource;
+import com.kumouri.kmodigipresbe.module.chairfill.reviews.ReplyExemplarSource;
+import com.kumouri.kmodigipresbe.module.chairfill.reviews.SalonReviewReplyService;
 import com.kumouri.kmodigipresbe.module.chairfill.scoring.NoShowRiskScoringService;
+import com.kumouri.kmodigipresbe.integration.gbp.GbpReplyDraftService;
 import com.kumouri.kmodigipresbe.integration.twilio.InboundSmsService;
+import com.kumouri.kmodigipresbe.repository.gbp.GbpReviewReplyRepository;
 import com.kumouri.kmodigipresbe.module.salonspa.SalonSpaAutoConfiguration;
 import com.kumouri.kmodigipresbe.module.salonspa.repository.BookingRepository;
 import com.kumouri.kmodigipresbe.module.salonspa.repository.ServiceMenuRepository;
@@ -75,7 +80,17 @@ import java.util.List;
  *       booking via the unchanged {@code SalonBookingService.create}, loser → an apology. The net-new
  *       signature-verified inbound-SMS webhook ({@link InboundSmsService}) carries the YES and a STOP →
  *       {@code sms-opt-out} (closing the CF-2 TCPA follow-up).</li>
- *   <li>CF-4: AI review-reply, salon-generalized.</li>
+ *   <li><strong>CF-4 (this PR):</strong> AI review-reply, salon-generalized (D4) — the
+ *       {@link SalonReviewReplyService} drafts an on-brand, salon-voiced reply (a brand-tone system
+ *       prompt + RAG-retrieved exemplar past <em>approved</em> replies via the
+ *       {@link ReplyExemplarSource}) by calling the unchanged {@code GbpReplyDraftService}'s additive
+ *       overload, and parks it DRAFTED in the <strong>same {@code GbpReviewReply} approval queue NMM
+ *       uses</strong> (the reused {@code GbpReviewReplyAdminController} approves/skips it — never
+ *       auto-posted). The {@link com.kumouri.kmodigipresbe.module.chairfill.controller.SalonReviewReplyController}
+ *       paste-in endpoint is the demo path (no live Google OAuth). NMM/GBP stays byte-equivalent
+ *       (its single-arg {@code draftReply} call is unchanged; the salon prompt/exemplars are
+ *       additive + per-tenant). Best-effort: an exemplar/Claude failure degrades to a generic
+ *       on-brand draft.</li>
  *   <li>CF-5: FE surfaces (separate repo).</li>
  * </ul>
  */
@@ -266,5 +281,50 @@ public class ChairFillAutoConfiguration {
             ContactRepository contactRepository,
             WaitlistClaimService waitlistClaimService) {
         return new InboundSmsService(connections, contactRepository, waitlistClaimService);
+    }
+
+    // ── CF-4: AI review-reply, salon-generalized + RAG voice + the reused approval queue ──
+
+    /**
+     * The default {@link ReplyExemplarSource} (CF-4 RAG, D4): retrieves the salon's own
+     * <strong>approved (POSTED)</strong> {@code GbpReviewReply} rows — the literal corpus of past
+     * approved replies — as on-brand voice exemplars, ranked by rating proximity to the new review.
+     * Backed by the ledger (not the Atlas vector spine) so it is robust in CI / on a fresh cluster;
+     * the {@link ReplyExemplarSource} seam keeps a future vector-backed source a drop-in.
+     *
+     * <p>{@code @ConditionalOnBean(ReplyExemplarSource.class)} is NOT used here so a deployment may
+     * override with its own {@code ReplyExemplarSource} {@code @Bean} (e.g. a vector-backed one).
+     */
+    @Bean
+    @ConditionalOnBean(SalonBookingService.class)
+    public ReplyExemplarSource chairFillReplyExemplarSource(GbpReviewReplyRepository reviewReplies) {
+        return new LedgerReplyExemplarSource(reviewReplies);
+    }
+
+    /**
+     * The salon review-reply drafter + queue service (CF-4). Generalizes the shipped GBP review-reply
+     * spine per D4: it calls the unchanged {@link GbpReplyDraftService} (transport/budget/parse/codes
+     * reused) with a salon brand-tone system prompt + RAG exemplars, and parks the draft DRAFTED in
+     * the same {@code GbpReviewReply} approval queue NMM uses (the reused admin surface
+     * approves/skips — never auto-posted). Best-effort drafting (Claude/exemplar failure → a generic
+     * on-brand draft). The {@code GbpReplyDraftService} dependency is the always-present
+     * component-scanned {@code @Service}; NMM is byte-equivalent (it uses the single-arg overload).
+     *
+     * @param brandTonePrompt   per-tenant brand-voice hint appended to the salon base system prompt
+     * @param exemplarsEnabled  toggle for the RAG-exemplar enrichment (default on; best-effort)
+     * @param exemplarLimit     how many past approved replies to ground the draft in
+     */
+    @Bean
+    @ConditionalOnBean(SalonBookingService.class)
+    public SalonReviewReplyService chairFillSalonReviewReplyService(
+            GbpReplyDraftService gbpReplyDraftService,
+            ReplyExemplarSource replyExemplarSource,
+            GbpReviewReplyRepository reviewReplies,
+            DomainEventPublisher eventPublisher,
+            @Value("${kmosf.chairfill.review-system-prompt:}") String brandTonePrompt,
+            @Value("${kmosf.chairfill.review-exemplars-enabled:true}") boolean exemplarsEnabled,
+            @Value("${kmosf.chairfill.review-exemplar-count:3}") int exemplarLimit) {
+        return new SalonReviewReplyService(gbpReplyDraftService, replyExemplarSource, reviewReplies,
+                eventPublisher, brandTonePrompt, exemplarsEnabled, exemplarLimit);
     }
 }
