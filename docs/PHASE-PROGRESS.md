@@ -414,3 +414,95 @@ the approved text). For a live client that wants auto-posting, a per-channel pub
 the social platforms' APIs, or the GBP post path for review replies) would be a separate add-on behind the same
 DRAFTED→APPROVED queue. Vision + text both need the Anthropic house/per-tenant key + a per-tenant AI budget
 (already on the RE go-live ledger, plan §9). No live MLS/IDX feed (decision 6).
+
+---
+
+# RE-5a — Real Estate Concierge: staff-facing conversation read (transcript + citations + lead) — Progress Ledger
+
+> Branch `realestate-concierge-phase-5a-conversation-read` (off `main` @ `3c85104`, RE-1..RE-4 merged).
+> Spec: `~/.claude/plans/real-estate-concierge-flagship.md` RE-5 (the FE) — RE-5a is the BE read that backs the
+> RE-5b transcript + citation viewer + lead pipeline. Error band: **4270-4274** (mints only 4270; the rest
+> reserved). A **pure read** — no Anthropic, no Twilio, no external; purely additive over the RE-1..RE-3
+> collections.
+
+## Goal (RE-5a)
+
+A staff-facing read so the RE-5b FE can show the concierge's work: the **list** of `ConciergeConversation`s
+(per listing — buyer, state, lead tier, last activity) and a single conversation's **detail** (the
+`ConciergeTurn` transcript with the per-answer **citations**, the accumulated `BuyerQualification`, and the
+linked `Deal`/lead tier). RE-1..RE-3 built the conversation model + the inbound router but exposed no admin
+read — this adds one. RE-1..RE-4 + ChairFill + the scorer stay byte-equivalent.
+
+## Design as built
+
+- **Two read endpoints (the `ListingController` / `WaitlistBoardController` precedent).**
+  `ConciergeConversationController` (`@RestController` `/realestate/conversations`,
+  `@ConditionalOnProperty(kmosf.modules.realestate.enabled)`): `GET /realestate/conversations` (list, newest
+  activity first, optional `?listingId=` filter) returns a lean `ConciergeConversationSummaryDTO` per thread
+  (id, listingId, contactId, dealId, state, leadTier, turnCount, optedOut, lastActivityAt);
+  `GET /realestate/conversations/{id}` returns the `ConciergeConversationDetailDTO` (the ordered `TurnDTO`
+  transcript with per-assistant-turn `CitationDTO`s, the `QualificationDTO`, the linked dealId/meetingId +
+  resolved leadTier). Both STAFF + module gated; the by-id fetch is **tenant-scoped** (`4270`/404 on a
+  missing / not-owned conversation — the RE-1 `ListingService` `4253` not-found posture).
+- **Lead-tier enrichment (the one cross-collection read).** The conversation links a buyer `contactId`; the
+  controller resolves the Contact and reads `leadScore.tier()` (HOT/WARM/COLD — the **same** tier the RE-2
+  `LeadHandoffService` keys on), or null when there is no contact yet (RE-2 not run) or the contact is
+  unscored (no nightly score yet). Best-effort: a missing contact never fails the read.
+- **Lean projection, no document leakage.** The DTOs are flat records (the `WaitlistBoardEntryDTO` /
+  `MissedCallInboxItemDTO` posture); the RE-3 booking-internal `offeredSlots` and the `@Version` are omitted;
+  `buyerPhone` is surfaced as agent panel context. `from(...)` mappers are null-safe (a conversation with no
+  qualification → a null `QualificationDTO`; null turns/citations → empty lists).
+- **Additive repo finders.** `ConciergeConversationRepository` gains
+  `findByTenantIdOrderByLastInboundAtDesc` (the tenant-wide list) and `findByIdAndTenantId` (the tenant-scoped
+  detail fetch). The existing per-listing finder backs the `?listingId=` filter. No existing finder changed.
+
+## Files
+
+### New — module
+- `controller/ConciergeConversationController.java` (STAFF + module-gated list + detail reads)
+- `controller/dto/ConciergeConversationSummaryDTO.java` (the list-row projection)
+- `controller/dto/ConciergeConversationDetailDTO.java` (the detail projection + nested `TurnDTO` /
+  `CitationDTO` / `QualificationDTO` records)
+
+### Edited (additive; RE-1..RE-4 + ChairFill + scorer byte-equivalent)
+- `model/ConciergeConversationRepository.java` (+`findByTenantIdOrderByLastInboundAtDesc`,
+  +`findByIdAndTenantId`)
+- `controller/advice/GlobalErrorHandler.java` (+4270-4274 doc band)
+
+### Tests
+- `src/test/java/.../module/realestate/RealEstateConciergeConversationReadIT.java` — (1) list returns the
+  tenant's conversations newest-activity first, projected, with leadTier resolved off the buyer Contact (HOT;
+  null for a contactless thread); (2) `?listingId=` narrows to one listing's threads; (3) detail returns the
+  ordered transcript + the assistant turn's citation (disclosureType/contentPreview/score) + the accumulated
+  qualification + dealId + leadTier; (4) detail on a missing conversation → 4270/404; (5) a non-realestate
+  tenant → 1132 module-gate; (6) a non-staff role → 1800; (7) tenant isolation — another tenant's
+  conversation never leaks (absent from the list + 4270 on its id). Pure Mongo-seeded (the `WaitlistBoardIT`
+  JWT pattern + the `RealEstateQualificationIT` Deal/Contact seeding) — no WireMock, no Twilio.
+
+## Validation status
+
+- `./gradlew compileJava compileTestJava` — GREEN.
+- `./gradlew cleanTest test --tests "*ConciergeConversation*IT" --tests "*RealEstateConciergeIT"
+  --tests "*RealEstateQualificationIT" --tests "*RealEstateShowingBookingIT" --tests "*RealEstateMarketingStudioIT"
+  --tests "*OpenApiEndpointIT"` — **GREEN**. Per-class (tests/failures/errors):
+  RealEstateConciergeConversationReadIT 7/0/0; RealEstateConciergeIT 5/0/0; RealEstateQualificationIT 5/0/0;
+  RealEstateShowingBookingIT 4/0/0; RealEstateMarketingStudioIT 5/0/0; OpenApiEndpointIT 2/0/0.
+
+## Hard gates
+
+1. RE-1..RE-4 + ChairFill + the lead-scorer all **byte-equivalent** (RE-1..RE-4 ITs re-run green). RE-5a is a
+   purely additive read controller + DTOs + two additive repo finders; it touches no inbound-SMS / concierge /
+   qualification / marketing / scoring path.
+2. Module-gated, blast-radius zero; a non-realestate tenant → 1132 not-enabled (the `WaitlistBoardController`
+   posture). The controller is `@ConditionalOnProperty`-gated → **absent from the OpenAPI spec** when off
+   (verified: `docs/api/openapi.json` unchanged, `realestate/conversations` absent from the spec).
+3. Tenant-scoped read — a conversation can never be fetched for a foreign tenant (4270 on the by-id fetch;
+   tenant isolation asserted on both list + detail). Error band **4270-4274** (mints only 4270); reuse
+   1130/1132 (module gate), 1800 (STAFF `RoleGuard`).
+
+## Go-live note
+
+A pure read — nothing to flip for go-live. The RE-5b FE hand-writes its typed client against the two response
+shapes (`ConciergeConversationSummaryDTO` list rows + the `ConciergeConversationDetailDTO` detail with nested
+`TurnDTO`/`CitationDTO`/`QualificationDTO`). The `leadTier` is null for unscored/contactless threads — the FE
+renders "unscored".

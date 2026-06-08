@@ -596,6 +596,24 @@ import java.util.UUID;
  *       stub for the photo bytes). <strong>RE-1/RE-2/RE-3 + ChairFill + the scorer byte-equivalent:</strong>
  *       RE-4 is a purely additive agent-triggered surface + two additive {@code @Bean}s; it touches no
  *       inbound-SMS / concierge / scoring path.</li>
+ *   <li>{@code 4270-4274} — <em>Real Estate Concierge RE-5a (flagship #3)</em>: the
+ *       <strong>staff-facing concierge conversation read</strong> backing the RE-5b transcript +
+ *       citation viewer + lead panel. Two {@code @ConditionalOnProperty}-gated read endpoints on
+ *       {@code ConciergeConversationController} ({@code GET /realestate/conversations} list +
+ *       {@code GET /realestate/conversations/{id}} detail), absent from the OpenAPI spec when the
+ *       module is off (the {@code ListingController} precedent). All gated on
+ *       {@code kmosf.modules.realestate.enabled}. A pure read over the RE-1..RE-3 collections — it
+ *       mints only {@code 4270} conversation not found / not owned (the tenant-scoped by-id fetch, the
+ *       RE-1 {@code ListingService} {@code 4253} not-found posture, 404); {@code 4271-4274} reserved for
+ *       RE-5a read growth. Reused (NOT re-allocated): {@code 1130}/{@code 1132} module gate (a
+ *       non-realestate tenant → the shared not-enabled response, the {@code WaitlistBoardController}
+ *       1132 posture); {@code 1800} STAFF {@code RoleGuard}. The {@code leadTier} enrichment reads the
+ *       buyer {@code Contact}'s {@code leadScore} (the same HOT/WARM/COLD the RE-2 hot-handoff keys on),
+ *       null when the buyer is unscored / not yet materialized; a missing contact never fails the read.
+ *       <strong>No external in tests</strong> (a pure Mongo-seeded read — no WireMock, no Twilio).
+ *       <strong>RE-1..RE-4 + ChairFill + the scorer byte-equivalent:</strong> RE-5a is a purely
+ *       additive read controller + DTOs + two additive repo finders; it touches no inbound-SMS /
+ *       concierge / qualification / marketing / scoring path.</li>
  * </ul>
  */
 @Slf4j
