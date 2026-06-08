@@ -29,4 +29,13 @@ public interface GbpReviewReplyRepository
             UUID tenantId, GbpReviewReply.Status status);
 
     Mono<GbpReviewReply> findByTenantIdAndId(UUID tenantId, UUID id);
+
+    /**
+     * The tenant's approved (POSTED) replies, most-recent first — the corpus the ChairFill CF-4
+     * {@code SalonReviewReplyService} retrieves a few exemplars from to ground a new draft in the
+     * salon's own established voice (RAG over past approved replies, D4). Carries an explicit
+     * {@code tenantId} predicate (the marker does NOT auto-scope derived finders).
+     */
+    Flux<GbpReviewReply> findByTenantIdAndStatusOrderByPostedAtDesc(
+            UUID tenantId, GbpReviewReply.Status status);
 }

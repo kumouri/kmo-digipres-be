@@ -805,3 +805,124 @@ when the module is off (the `NoShowRiskController` / HS precedent — and `OpenA
 - **STOP closes the CF-2 TCPA follow-up.** CF-2's ledger noted "an inbound-STOP webhook [is] a clean
   follow-up"; CF-3's inbound-SMS route now sets the `sms-opt-out` tag on STOP, so the CF-2 consent gate is
   honored end-to-end.
+
+---
+
+# CF-4 — ChairFill AI review-reply, salon-generalized + RAG voice + the reused approval queue — Progress Ledger
+
+> Off `main` @ `28e6bdf` (CF-1/CF-2/CF-3 merged). Branch
+> `chairfill-salon-flagship-phase-4-review-reply`. Spec: `~/.claude/plans/chairfill-salon-flagship.md`
+> CF-4 + decision D4. The last BE sub-phase of ChairFill (CF-5 is the FE pass, separate repo).
+
+## Goal
+
+Bring the shipped GBP review-reply capability to salons: a customer review -> a Claude-drafted,
+**on-brand salon-voiced** reply (RAG-grounded in the salon's own past approved replies) -> the
+**reused staff approval queue** (draft -> approve/skip; approve posts via GBP when wired, else
+copy-ready). A **paste-in** entry is the demo path (no live Google OAuth). **NMM's GBP review-reply
+flow stays byte-equivalent**; never auto-post; module-gated; best-effort drafting.
+
+## Design (D4 — generalize, don't fork the transport)
+
+- **`GbpReplyDraftService` (the shipped transport) generalized additively.** Added an overload
+  `draftReply(GbpReview, String systemPromptOverride, List<ReplyExemplar> exemplars)`; the original
+  single-arg `draftReply(review)` now delegates with `(review, null, null)`. `systemPrompt(null)`
+  returns the exact configured/default GBP prompt; `buildUserPrompt(review, null)` is the verbatim
+  original user message (the exemplar block is fully guarded by `exemplars != null && !isEmpty()`).
+  **NMM/GBP is byte-equivalent by construction** — `GbpReplyDraftServiceIT` passes UNCHANGED, plus a
+  dedicated CF-4 byte-equivalence test asserts the single-arg call sends the GBP default prompt and
+  NO exemplar block. New nested `record ReplyExemplar(Integer rating, String reviewText, String
+  approvedReply)`.
+- **`SalonReviewReplyService`** (module-gated `@Bean`, sibling posture) is the salon brain: builds a
+  salon brand-tone system prompt (a warm stylist/salon base + the per-tenant
+  `kmosf.chairfill.review-system-prompt` hint), retrieves a few RAG exemplars (best-effort), calls
+  the unchanged transport's overload, and parks the draft **DRAFTED in the same `GbpReviewReply`
+  queue NMM uses**. Ledger-insert-FIRST (the unique `tenant_review_idx` exactly-once backstop);
+  idempotent on the review id (a paste-in with no id mints a synthetic `pasted/<uuid>`). Best-effort:
+  a Claude failure (1200/1202/1203) -> a sentiment-aware **generic on-brand fallback draft** (never
+  blank, never thrown, never a dropped review). **Never calls `postReply`** — posting is staff-only
+  on the reused admin surface.
+- **RAG over past approved replies** via a small `ReplyExemplarSource` seam. The shipped default
+  `LedgerReplyExemplarSource` retrieves the tenant's own **POSTED** `GbpReviewReply` rows (the literal
+  corpus of approved replies), ranked by rating proximity to the new review (a 1-star reply best
+  models tone for another 1-star), capped via `take(25)` then `limit`. Best-effort by contract (a
+  query failure -> empty list). New finder `findByTenantIdAndStatusOrderByPostedAtDesc`.
+- **Paste-in surface** `SalonReviewReplyController` (`POST /chairfill/reviews/draft`): STAFF-gated
+  (`RoleGuard`) + module-gated (`TenantModuleRegistry.requireEnabled` + `@ConditionalOnProperty`),
+  `4240` on a blank review text, returns the queued `GbpReviewReply`. The **reused**
+  `GbpReviewReplyAdminController` (`GET /gbp/review-replies`, `POST /{id}/post`|`/{id}/skip`) lists,
+  approves, or skips it — unchanged.
+
+## Files
+
+**Modified (4):**
+- `integration/gbp/GbpReplyDraftService.java` — additive overload + `ReplyExemplar` record;
+  byte-equivalent single-arg delegation.
+- `repository/gbp/GbpReviewReplyRepository.java` — `findByTenantIdAndStatusOrderByPostedAtDesc`
+  (the exemplar corpus finder).
+- `module/chairfill/ChairFillAutoConfiguration.java` — CF-4 `@Bean`s (`ReplyExemplarSource`,
+  `SalonReviewReplyService`) + class-javadoc CF-4 bullet.
+- `controller/advice/GlobalErrorHandler.java` — the `4240-4244` band doc (one minted code: `4240`).
+
+**Created (5):**
+- `module/chairfill/reviews/ReplyExemplarSource.java` — the pluggable RAG seam (best-effort contract).
+- `module/chairfill/reviews/LedgerReplyExemplarSource.java` — the shipped ledger-backed default.
+- `module/chairfill/reviews/SalonReviewReplyService.java` — the drafter + queue brain.
+- `module/chairfill/controller/SalonReviewReplyController.java` — the paste-in endpoint.
+- `src/test/.../module/chairfill/SalonReviewReplyIT.java` — the CF-4 IT (8 tests).
+
+## Validation
+
+`./gradlew compileJava compileTestJava` clean. Then force-clean:
+`./gradlew cleanTest test --tests "*SalonReviewReplyIT" --tests "*GbpReplyDraftServiceIT" --tests
+"*GbpReviewReplyAdminIT" --tests "*GbpReviewPollerIT" --tests "*GapFillWaitlistIT" --tests
+"*RiskTieredPreventionIT" --tests "*NoShowRiskScoringIT" --tests "*OpenApiEndpointIT"` ->
+**BUILD SUCCESSFUL**, per-class tests/failures/errors: SalonReviewReplyIT 8/0/0,
+GbpReplyDraftServiceIT 4/0/0, GbpReviewReplyAdminIT 6/0/0, GbpReviewPollerIT 2/0/0,
+GapFillWaitlistIT 11/0/0, RiskTieredPreventionIT 5/0/0, NoShowRiskScoringIT 8/0/0,
+OpenApiEndpointIT 2/0/0 — **46/0/0**.
+
+CF-4 IT cases: (1) `pasteIn_draftsSalonVoicedReply_withBrandTonePromptAndExemplar` — a salon paste-in
+-> DRAFTED in the queue, the Claude request carrying the **salon brand-tone prompt** + a **RAG
+exemplar** past approved reply (asserted via `matchingJsonPath`); (2)
+`approve_postsReply_andLeavesQueue` — approve via the reused admin endpoint -> POSTED, PUT to GBP,
+leaves the DRAFTED queue; (3) `skip_marksSkipped_andLeavesQueue` — skip -> SKIPPED, no Google call,
+leaves the queue; (4) `claudeFailure_fallsBackToGenericDraft_noError` — a WireMock 500 -> a non-blank
+**generic on-brand** draft (no error, still DRAFTED); (5) `nonChairfillTenant_pasteIn_isModuleGated_1132`
+— a tenant without `chairfill` -> 1132, no row, no Claude call; (6) `pasteIn_blankComment_4240`;
+(7) `pasteIn_nonStaff_isForbidden_1800`; (8) **`nmmByteEquivalence_singleArgDraft_usesGbpDefaultPrompt_noExemplars`**
+— the unchanged single-arg `draftReply(review)` sends the GBP default prompt + NO exemplar block (the
+NMM regression guard, alongside the unchanged GBP ITs).
+
+## OpenAPI
+
+`SalonReviewReplyController` is `@ConditionalOnProperty(kmosf.modules.chairfill.enabled)`-gated, so it
+is absent from the generated spec when the module is off (the `NoShowRiskController`/`WaitlistWidgetController`
+precedent — `OpenApiEndpointIT` runs without `chairfill.enabled=true`). Confirmed `docs/api/openapi.json`
+contains no `chairfill/reviews` path and is left at HEAD; `OpenApiEndpointIT` passes (2/0/0).
+
+## Deviations / surprises
+
+- **RAG source is the POSTED-reply ledger, not the Atlas vector spine (`RagRetrievalService`).** The
+  plan D4 suggested grounding exemplars "via the shipped `RagRetrievalService`/`AskAiService` spine."
+  That path requires a live OpenAI embedding call + a Mongo **Atlas** Vector Search index — neither
+  exists in CI / a fresh cluster (it falls back to empty there), so it would always yield zero
+  exemplars in the demo + tests. The shipped default instead retrieves the tenant's own **POSTED**
+  `GbpReviewReply` rows — which IS the literal "salon's past approved replies" corpus D4 names — and
+  is robust everywhere. The `ReplyExemplarSource` interface is the seam: a future vector-backed source
+  is a drop-in `@Bean` override with zero change to the drafter, the queue, or NMM. This keeps the
+  hard gate ("RAG over the salon's past approved replies") satisfied more directly while staying
+  testable + demo-defensible. (The plan itself hedges: "defensive/best-effort; a RAG/Claude failure ->
+  a sensible generic draft, never blocks.")
+- **No new ledger model.** CF-4 reuses `GbpReviewReply` (the ledger doubles as the approval queue), so
+  paste-in drafts and GBP-polled drafts share one queue + one admin surface. A paste-in with no
+  caller id gets a synthetic `pasted/<uuid>` reviewId so each manual paste is a distinct queue row
+  (and re-submitting the same id is idempotent — returns the existing draft).
+- **Approve->post reuses the GBP path verbatim.** A salon with a `google-business` connection
+  approves->posts through the unchanged `GbpReviewReplyAdminService.post` (PUT to GBP); one WITHOUT a
+  connection edits the on-brand draft and copies it into the GBP console (copy-ready) — the de-risked
+  paste-in posture. No second posting path was added.
+- **Low-severity benign race (documented, not fixed).** Two simultaneous paste-ins of the *same*
+  review id could both reload the row before either drafts, attempting two Claude calls (last save
+  wins, one queue row — no duplicate). Acceptable for a low-concurrency staff paste-in PoC; not worth
+  a lock.
