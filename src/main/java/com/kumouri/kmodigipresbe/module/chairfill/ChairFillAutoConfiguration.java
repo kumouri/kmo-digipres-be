@@ -14,6 +14,7 @@ import com.kumouri.kmodigipresbe.module.chairfill.automation.RiskTieredPreventio
 import com.kumouri.kmodigipresbe.module.chairfill.gapfill.GapFillService;
 import com.kumouri.kmodigipresbe.module.chairfill.gapfill.WaitlistClaimService;
 import com.kumouri.kmodigipresbe.module.chairfill.gapfill.WaitlistMatchService;
+import com.kumouri.kmodigipresbe.module.chairfill.gapfill.WaitlistOfferExpiryService;
 import com.kumouri.kmodigipresbe.module.chairfill.model.NoShowRisk;
 import com.kumouri.kmodigipresbe.module.chairfill.model.WaitlistEntryRepository;
 import com.kumouri.kmodigipresbe.module.chairfill.model.WaitlistOfferRepository;
@@ -281,6 +282,23 @@ public class ChairFillAutoConfiguration {
             ContactRepository contactRepository,
             WaitlistClaimService waitlistClaimService) {
         return new InboundSmsService(connections, contactRepository, waitlistClaimService);
+    }
+
+    /**
+     * The stale-offer expiry sweeper (CF-3 follow-up) — a config-driven {@code @Scheduled} cron (default
+     * nightly 03:15) that flips every {@code OFFERED}
+     * {@link com.kumouri.kmodigipresbe.module.chairfill.model.WaitlistOffer} whose {@code expiresAt} has
+     * passed to {@code EXPIRED}. Without it the offer ledger accumulates perpetually-{@code OFFERED} rows
+     * that are actually dead (the inbound-YES {@code resolveOpenOffer} gate already excludes them, so this
+     * is pure ledger hygiene — no claimability change). Best-effort + blast-radius-zero (chairfill tenants
+     * only), and {@link ConditionalOnBean}({@link SalonBookingService}.class) like the rest of the module.
+     */
+    @Bean
+    @ConditionalOnBean(SalonBookingService.class)
+    public WaitlistOfferExpiryService chairFillWaitlistOfferExpiryService(
+            TenantRepository tenantRepository,
+            WaitlistOfferRepository offerRepository) {
+        return new WaitlistOfferExpiryService(tenantRepository, offerRepository);
     }
 
     // ── CF-4: AI review-reply, salon-generalized + RAG voice + the reused approval queue ──
