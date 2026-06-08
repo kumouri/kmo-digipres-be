@@ -651,6 +651,27 @@ import java.util.UUID;
  *       only {@code AppointmentRepository} / {@code ContactRepository} / the shipped {@code Sequence} engine,
  *       touches no salon {@code Booking} / deposit path, and the copy is provably generic (a release-blocking
  *       IT asserts a forbidden clinical/provider-token set is absent from every outbound body).</li>
+ *   <li>{@code 4285-4289} — <em>FrontDesk IQ FD-3 (Health-practices flagship #4)</em>: PHI-free
+ *       voicemail-to-callback. A new {@code HealthFrontDeskExtractionStrategy}
+ *       ({@code voicemailVertical="health-frontdesk"}) reuses the HS-1 voicemail seam end-to-end
+ *       ({@code VoicemailExtractionStrategyResolver} + {@code VoicemailExtractionService} +
+ *       {@code TwilioVoicemailService}) to turn an after-hours health-practice voicemail into a
+ *       <strong>logistics-only</strong> extraction (name / callback number / intent bucket — never a
+ *       symptom/diagnosis/medication) and a front-desk callback {@code Activity(CALL, INBOUND)} +
+ *       best-effort notify. <strong>FD-3 mints NO new error codes</strong> — it reuses AI
+ *       {@code 1200-1203} (the {@code VoicemailExtractionService} budget gate / upstream non-200 /
+ *       missing-key, all degraded best-effort so a callback is never dropped), Twilio signature
+ *       {@code 4000-4003} (the {@code TwilioVoicemailService} verify, unchanged), and {@code 1300}
+ *       Activity-create. The whole {@code 4285-4289} band is reserved for FD-3 growth.
+ *       <strong>The headline is the PHI boundary, enforced by construction (fence F2):</strong> the
+ *       single divergence from the shipped seam is the additive default-{@code true}
+ *       {@code VoicemailExtractionStrategy.persistTranscript()} bit — mole + multi-trade do not
+ *       override it (so {@code TwilioVoicemailIT} / {@code HomeServicesVoicemailIT} stay
+ *       byte-equivalent), while the health strategy returns {@code false} so the raw transcript is
+ *       NEVER stored on {@code Activity.body} (a redaction marker is) and the recording pointer is
+ *       omitted; a release-blocking IT asserts the stored health-voicemail Activity contains none of
+ *       the raw transcript text and no clinical token. NMM / Home-Services / ChairFill / Real Estate
+ *       are byte-equivalent.</li>
  * </ul>
  */
 @Slf4j
