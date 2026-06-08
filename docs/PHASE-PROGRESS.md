@@ -341,3 +341,145 @@ Telephony is fully stubbed in tests. Real go-live requires, as separate human/ex
 - an **A2P 10DLC campaign** approved for the **caller-facing** booking-link SMS (application-to-person
   traffic to US numbers is carrier-filtered until the campaign is registered). The owner-notify SMS
   (to the business's own phone) is lower-risk; the booking-link SMS is the 10DLC-gated piece.
+
+---
+
+# CF-1 — ChairFill no-show risk model + `BOOKING_RISK_SCORED` — Progress Ledger
+
+> Branch `chairfill-salon-flagship-phase-1-noshow-risk` (off `main` after the Home Services flagship
+> merged). Spec: `~/.claude/plans/chairfill-salon-flagship.md` §3 (CF-1 detail), D1 (no-show model
+> fork), D3 (module enablement), §3.3 (ITs), error band `4220-4224`.
+
+## Goal
+
+A nightly, per-tenant, ML no-show-risk score stamped on each **upcoming** salon `Booking`, emitting
+`BOOKING_RISK_SCORED`. A new **chairfill** module rides the shipped salon-spa module. **The shipped
+lead-scoring (`LeadScoringV2Service`/`LeadScore`/`LeadScoringJob`) and NMM are UNTOUCHED** — CF-1 is a
+*parallel* service/model, chairfill-module-gated (default OFF). Blast radius zero.
+
+## Design as built (mirror of `LeadScoringV2Service`, D1)
+
+- **`NoShowRiskScoringService`** (new `module/chairfill/scoring/`) — same machine as the lead-scorer:
+  nightly `@Scheduled(cron=…02:30)` per-tenant; a `>= MIN_BOOKINGS_FOR_MODEL (40)`-sample
+  model-vs-rules gate; `smile.classification.LogisticRegression.fit(x,y)` + `predict(f,posterior)`;
+  a `NoShowScoringJob` ledger (PENDING→RUNNING→DONE/FAILED); the CPU work on
+  `Schedulers.boundedElastic()` via `Mono.fromCallable`; emits the domain event per scored booking.
+  Hand-wired as a `@Bean` in `ChairFillAutoConfiguration` (the salon-spa `@Bean` pattern), so it does
+  not exist unless `kmosf.modules.chairfill.enabled=true`.
+- **Scored entity:** upcoming `Booking` (`CONFIRMED|PENDING_DEPOSIT`, `scheduledStart > now`).
+- **Training label (per *terminal* booking):** `NO_SHOW = 1` / `COMPLETED = 0`; CANCELLED excluded.
+  Predicted score = P(no-show). *Label polarity is the mirror-image of the lead-scorer's WON=1 —
+  documented in code + the `NoShowRisk` Javadoc to avoid a sign bug.*
+- **Feature vector (8, all derivable from `Booking` + `ServiceMenuItem` + history):**
+  `[priorNoShowRate, priorBookingCount, leadTimeHours, dayOfWeek, hourOfDay, priceBand, depositOnFile,
+  daysSinceLastVisit]`. Training features are computed **as-of each terminal booking's scheduledStart
+  using only strictly-earlier history** (no future leakage); scoring features use the contact's full
+  terminal history as-of now. The model trains only when `>= 40` terminal bookings AND both classes
+  are present (a single-class set can't fit a `LogisticRegression`).
+- **Tiers:** new `NoShowRisk(riskScore, riskTier∈{LOW,MEDIUM,HIGH}, source, computedAt)` embedded
+  nullable on `Booking` (the `Contact.leadScore` precedent). Thresholds `>=0.6 HIGH, >=0.35 MEDIUM,
+  else LOW`, config-tunable (`kmosf.chairfill.noshow-scoring.{high,medium}-threshold`).
+- **Cold-start rules (the night-one path), evaluated in priority order:** HIGH if
+  `priorNoShowRate >= 0.34` OR (`leadTimeHours > 336h` AND no deposit) — checked *first* so a far-out
+  un-deposited booking is HIGH even with no history; then INSUFFICIENT_DATA→LOW for a first-timer with
+  no prior bookings, no prior visit, and no deposit (never punish zero evidence); then MEDIUM for
+  `priorNoShowRate > 0` OR a *real* lapsed client (`priorBookingCount > 0` AND `daysSinceLastVisit >
+  90` — gated on real history so the 365-day no-visit sentinel never trips it); else LOW.
+
+## Invariants
+
+- **Lead-scoring untouched + regression-proof:** zero edit to `LeadScoringV2Service`/`LeadScore`/
+  `LeadScoringJob`; `LeadScoringV2IT` (4) + `LeadScoringControllerIT` (3) pass UNCHANGED. A dedicated
+  `leadScoringUntouched` CF-1 test asserts a no-show run writes no `LeadScoringJob` / `Contact`.
+- **Blast radius zero (D3):** the chairfill module is `@ConditionalOnProperty` (default OFF) +
+  `@ConditionalOnBean(SalonBookingService.class)` (no-ops if salon-spa is off) + `Tenant.enabledModules`
+  membership; `nightlyRun` filters to ACTIVE tenants whose `enabledModules` contains `"chairfill"`. A
+  `moduleDisabled_skipsTenant` test proves a non-chairfill tenant is skipped (no stamp, no job).
+- **Cold-start:** under 40 terminal bookings a salon gets the transparent rules fallback (source
+  surfaced) so a brand-new salon gets value night one.
+- **Reactive/blocking discipline:** Smile train/predict + the feature grouping run on
+  `boundedElastic`, never the Netty loop (the lead-scorer precedent).
+- **Error band `4220-4224`:** `4220` chairfill-not-enabled (via shared `requireEnabled` 1130/1132);
+  `4221` retrain-already-running (409); `4222-4224` reserved. Scoring is pure ML — no AI-budget
+  (1200-1203) path, zero per-booking token cost.
+- The `Booking.noShowRisk` field is additive + nullable; only upcoming bookings are saved+emitted
+  (terminal bookings are never re-stamped — `onlyUpcomingScored_terminalUntouched` proves it).
+
+## Files
+
+**Created:**
+- `module/chairfill/ChairFillAutoConfiguration.java` (module key `"chairfill"`, `ModuleDefinition`,
+  `@Bean NoShowRiskScoringService` gated `@ConditionalOnBean(SalonBookingService.class)`).
+- `module/chairfill/model/{NoShowRisk, NoShowRiskTier, NoShowScoringJob}.java`.
+- `repository/NoShowScoringJobRepository.java` (mirror of `LeadScoringJobRepository`).
+- `module/chairfill/scoring/NoShowRiskScoringService.java` (the fork).
+- `module/chairfill/controller/NoShowRiskController.java` (`@ConditionalOnProperty` + `requireEnabled`;
+  `POST /chairfill/risk/retrain`, `GET /chairfill/risk/bookings?from&to`).
+- `src/test/.../module/chairfill/NoShowRiskScoringIT.java` (8 cases).
+
+**Modified (surgical, additive):**
+- `module/salonspa/model/Booking.java` — add nullable `NoShowRisk noShowRisk`.
+- `module/salonspa/repository/BookingRepository.java` — add `findAllByTenantId` +
+  `findByTenantIdAndScheduledStartBetween` (explicit-param derived queries; the nightly job has no
+  request context).
+- `module/salonspa/repository/ServiceMenuRepository.java` — add `findAllByTenantId`.
+- `automation/DomainEventType.java` — add `BOOKING_RISK_SCORED` (advisory).
+- `controller/advice/GlobalErrorHandler.java` — document the `4220-4224` band.
+- `META-INF/spring/…AutoConfiguration.imports` — register `ChairFillAutoConfiguration`.
+- `application.properties` — `kmosf.modules.chairfill.enabled` global toggle (default false).
+
+## Sub-steps
+
+| Sub-step | Status | Build | Notes |
+|---|---|---|---|
+| SP1 — model + repo + Booking field + event + error band + module skeleton + scorer + controller | done | compileJava OK | mirror of LeadScoringV2Service; chairfill bean gated |
+| SP2 — `NoShowRiskScoringIT` (8 cases) + rules-ordering fix (HIGH-before-no-history; lapsed gated on real history) + full gate-suite re-run | done | full suite GREEN | context-free `mongo.findById` reads (BookingRepository.findById auto-filters) |
+
+## Test result — BUILD SUCCESSFUL
+
+`./gradlew cleanTest test --tests "*NoShowRiskScoringIT" --tests "*LeadScoring*"
+--tests "*SalonBooking*IT" --tests "*OpenApiEndpointIT"` (Docker up). `*SalonBooking*IT` matched no
+class — **the salon-spa module shipped with no dedicated ITs**, so `NoShowRiskScoringIT` (which seeds,
+re-saves, and reads `Booking`s with the new field) is the de-facto Booking-serialization regression
+proof, alongside the full app-context boot it forces.
+
+| Class | tests | failures | errors | skipped |
+|---|---|---|---|---|
+| `NoShowRiskScoringIT` (CF-1, new) | 8 | 0 | 0 | 0 |
+| `LeadScoringV2IT` (lead-scorer regression — UNCHANGED) | 4 | 0 | 0 | 0 |
+| `LeadScoringControllerIT` (lead-scorer regression — UNCHANGED) | 3 | 0 | 0 | 0 |
+| `OpenApiEndpointIT` | 2 | 0 | 0 | 0 |
+| **TOTAL** | **17** | **0** | **0** | **0** |
+
+`NoShowRiskScoringIT` cases: (1) `tenantWith40TerminalBookings_usesModel` — 50 terminal bookings (both
+classes) → upcoming bookings score `source=MODEL`, riskScore∈[0,1]; (2) `tenantBelowThreshold_usesRulesFallback`
+— a prior-no-show contact → HIGH (rules), a new-with-deposit booking → LOW, never `MODEL`; (3)
+`coldStartLongLeadNoDeposit_isHigh_andFirstTimerNoEvidence_isLow` — 20-day-out no-deposit first-timer →
+HIGH, short-lead no-evidence first-timer → INSUFFICIENT_DATA/LOW; (4) `scoresStableAcrossRuns` — two
+runs give identical riskScore (rules determinism); (5) `emitsBookingRiskScored` — one event per scored
+booking with payload keys {bookingId, contactId, staffMemberId, riskTier, riskScore, source}; (6)
+`onlyUpcomingScored_terminalUntouched` — COMPLETED/NO_SHOW/CANCELLED bookings keep `noShowRisk==null`;
+(7) `moduleDisabled_skipsTenant` — a tenant without `"chairfill"` in enabledModules is skipped by
+`nightlyRun` (no stamp, no job for that tenant); (8) `leadScoringUntouched` — the run writes no
+`LeadScoringJob`/`Contact` for the tenant.
+
+### OpenAPI
+`NoShowRiskController` is `@ConditionalOnProperty(chairfill)`, so — like every other gated opt-in-module
+controller — it is absent from the spec `OpenApiEndpointIT` generates (that context runs with chairfill
+OFF; verified `grep -c chairfill build/openapi/openapi.json` == 0). `docs/api/openapi.json` unchanged at
+HEAD; `OpenApiEndpointIT` passes (2/0/0).
+
+### Deviations / surprises
+- **No salon-spa ITs exist on `main`.** The plan's `--tests "*SalonBooking*IT"` gate matched zero
+  classes (confirmed by globbing `src/test`). The new CF-1 IT exercises Booking persistence with the
+  added field, covering the serialization-regression concern the gate intended; reported as the
+  honest state rather than inventing a salon IT.
+- **`@CreatedDate` auditing overwrites a pre-set `createdAt`.** Spring Data stamps `createdAt` on
+  insert regardless of the supplied value, which would clamp `leadTimeHours` to 0 for past-dated
+  seed bookings. The IT patches `createdAt` via a direct `mongo.updateFirst` after save so the feature
+  vector (and the determinism test) are honest. Production is unaffected (real bookings' createdAt is
+  genuinely their creation instant).
+- **`BookingRepository.findById` auto-tenant-filters** (the `TenantScopedSimpleReactiveMongoRepository`
+  override) and so `required()`s a request context the test doesn't have → the IT reads via
+  `mongo.findById(id, Booking.class)`. The nightly job itself reads via the explicit-param
+  `findAllByTenantId` (added), which bypasses the auto-filter — the lead-scorer precedent.
