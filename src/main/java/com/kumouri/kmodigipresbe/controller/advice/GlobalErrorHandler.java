@@ -414,6 +414,22 @@ import java.util.UUID;
  *       not drive any core mutation; CF-2 will subscribe). The {@code NoShowRiskController} is
  *       {@code @ConditionalOnProperty}-gated, so it is absent from the generated OpenAPI spec when the
  *       module is off (the HS precedent).</li>
+ *   <li>{@code 4225-4229} — <em>ChairFill CF-2 (Personal-care / salon flagship)</em>: risk-tiered
+ *       prevention. The {@code RiskTieredPreventionService} subscriber on {@code BOOKING_RISK_SCORED}
+ *       (HIGH ⇒ require a deposit via the reused salon deposit path + an extra confirmation SMS;
+ *       LOW/MEDIUM ⇒ a single Claude-personalized reminder SMS) + the owner-tunable
+ *       {@code ChairFillReminderAutomation} baseline WorkflowRule seeder. <strong>CF-2 mints NO new
+ *       error codes</strong> — it is a fully best-effort, additive subscriber (a Claude / Twilio /
+ *       deposit failure logs + degrades, never surfaces an HTTP error). The band {@code 4225-4229}
+ *       is RESERVED for future CF-2 growth. Reused (NOT re-allocated): the AI band {@code 1200-1203}
+ *       (budget gate / Anthropic non-200 / missing-key, via the {@code ReminderCopyService} sibling
+ *       of {@code GbpReplyDraftService}); the Twilio SMS codes {@code 2530-2532} (and the
+ *       {@code IntegrationConnectionService} {@code 2501} missing-connection — all swallowed
+ *       best-effort by the subscriber); the salon deposit/booking {@code 2900} (the reused
+ *       {@code SalonBookingService.requireDepositNow} path mints a DRAFT {@code Invoice} exactly like
+ *       create-time). TCPA-safe: a {@value com.kumouri.kmodigipresbe.module.chairfill.automation.RiskTieredPreventionService#SMS_OPT_OUT_TAG}
+ *       contact tag (honors STOP) + a per-contact rolling frequency cap gate every send; the
+ *       {@code ReminderLog} ledger (unique per (tenant, booking)) makes a re-fired event a no-op.</li>
  * </ul>
  */
 @Slf4j
