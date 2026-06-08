@@ -481,6 +481,17 @@ import java.util.UUID;
  *       queue/drafting are unchanged; the salon prompt + RAG exemplars are additive + per-tenant +
  *       module-gated. The {@code SalonReviewReplyController} is {@code @ConditionalOnProperty}-gated,
  *       so it is absent from the generated OpenAPI spec when the module is off.</li>
+ *   <li>{@code 4245-4249} — <em>ChairFill CF-5a (Personal-care / salon flagship)</em>: the
+ *       staff-facing waitlist-board read ({@code WaitlistBoardController} —
+ *       {@code GET /chairfill/waitlist/board|entries|offers}) backing the CF-5 board FE. A pure read
+ *       over the CF-3 {@code WaitlistEntry}/{@code WaitlistOffer} collections: the OPEN entries +
+ *       recent offers (with status), newest first. <strong>CF-5a mints NO new error code</strong> —
+ *       it reuses the shared {@code TenantModuleRegistry.requireEnabled} module gate ({@code 1130}/
+ *       {@code 1132}, the {@code 4220}/{@code 4202}/{@code 2700}/{@code 3930} not-enabled posture) and
+ *       the {@code RoleGuard} STAFF gate ({@code 1800}). The band {@code 4245-4249} is RESERVED for
+ *       future board-read growth. The {@code WaitlistBoardController} is
+ *       {@code @ConditionalOnProperty}-gated, so it is absent from the generated OpenAPI spec when the
+ *       module is off (the {@code NoShowRiskController}/{@code SalonReviewReplyController} precedent).</li>
  * </ul>
  */
 @Slf4j

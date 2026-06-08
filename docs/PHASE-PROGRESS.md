@@ -926,3 +926,90 @@ contains no `chairfill/reviews` path and is left at HEAD; `OpenApiEndpointIT` pa
   review id could both reload the row before either drafts, attempting two Claude calls (last save
   wins, one queue row — no duplicate). Acceptable for a low-concurrency staff paste-in PoC; not worth
   a lock.
+
+# CF-5a — ChairFill waitlist-board read API (backing the CF-5 board FE) — Progress Ledger
+
+## Goal
+
+A small, additive, staff-facing **read** endpoint so the CF-5 waitlist board FE can show the salon's
+current gap-fill state: the OPEN `WaitlistEntry` rows (clients waiting) + recent `WaitlistOffer` rows
+(who's been offered what, with status OFFERED/CLAIMED/SUPERSEDED/EXPIRED), newest first. CF-3 mints
+these rows but exposed no admin read; this fills that gap. Purely additive — CF-1..CF-4 behavior
+unchanged.
+
+## Design as built (mirror of `NoShowRiskController` + `SalonReviewReplyController`)
+
+- **`WaitlistBoardController`** (`module/chairfill/controller/`), `@RequestMapping("/chairfill/waitlist")`,
+  `@ConditionalOnProperty(prefix="kmosf.modules.chairfill", name="enabled")`. Three GETs (base-path
+  `/api/v1`):
+  - `GET /chairfill/waitlist/board` — the one-shot envelope `WaitlistBoardDTO { openEntries[], recentOffers[] }`
+    (the FE's primary call); `?offerLimit=` caps the recent-offers slice (default 50).
+  - `GET /chairfill/waitlist/entries` — just the OPEN entries (`WaitlistBoardEntryDTO[]`), newest join first.
+  - `GET /chairfill/waitlist/offers?limit=` — just the recent offers (`WaitlistOfferDTO[]`, all statuses),
+    newest sent first, capped (default 50).
+- **Gate** (per handler, via a shared `guard()`): `TenantModuleRegistry.requireEnabled("chairfill")`
+  (1130/1132 module gate — the 4220/4202/2700/3930 not-enabled posture) **then**
+  `RoleGuard.requireRole("STAFF")` (1800) — the CF-4 order.
+- **Lean DTOs** (`controller/dto/`): flat projections of the entity fields (the `MissedCallInboxItemDTO`
+  precedent — **no cross-collection join**). `WaitlistBoardEntryDTO` surfaces `contactId` /
+  `preferredStaffMemberId` / service-filter / time window / smsOptIn / notes / createdAt;
+  `WaitlistOfferDTO` surfaces the offer fields incl. the already-denormalized `contactPhone` +
+  `serviceMenuItemName` and the `status` enum. The FE resolves the ids against contacts/staff it
+  already loads.
+- **Additive repo finders:** `WaitlistEntryRepository.findByTenantIdAndStatusOrderByCreatedAtDesc`
+  (the board loads OPEN, newest first; the gap-fill keeps the existing unordered finder) +
+  `WaitlistOfferRepository.findByTenantIdOrderBySentAtDesc` (recent offers; controller `.take(cap)`).
+
+## Files
+
+- **NEW** `module/chairfill/controller/WaitlistBoardController.java`
+- **NEW** `module/chairfill/controller/dto/WaitlistBoardDTO.java`
+- **NEW** `module/chairfill/controller/dto/WaitlistBoardEntryDTO.java`
+- **NEW** `module/chairfill/controller/dto/WaitlistOfferDTO.java`
+- **NEW** `src/test/.../module/chairfill/WaitlistBoardIT.java`
+- **MOD** `module/chairfill/model/WaitlistEntryRepository.java` (+1 ordered finder)
+- **MOD** `module/chairfill/model/WaitlistOfferRepository.java` (+1 ordered finder)
+- **MOD** `controller/advice/GlobalErrorHandler.java` (CF-5a `4245-4249` reserved-band doc entry)
+
+## Error codes
+
+**CF-5a mints NO new error code.** The read reuses the shared `TenantModuleRegistry.requireEnabled`
+module gate (1130/1132) and the `RoleGuard` STAFF gate (1800). The band **`4245-4249`** is RESERVED
+(documented in `GlobalErrorHandler`) for future board-read growth.
+
+## Validation — BUILD SUCCESSFUL
+
+`./gradlew compileJava compileTestJava` → clean. Then force-clean targeted suite:
+`./gradlew cleanTest test --tests "*WaitlistBoard*IT" --tests "*GapFillWaitlistIT" --tests
+"*SalonReviewReplyIT" --tests "*NoShowRiskScoringIT" --tests "*OpenApiEndpointIT"` → **BUILD
+SUCCESSFUL**. Per-class (from `build/test-results/test/*.xml`):
+
+- `WaitlistBoardIT` — tests=6, failures=0, errors=0 (NEW)
+- `GapFillWaitlistIT` (CF-3) — tests=11, failures=0, errors=0
+- `SalonReviewReplyIT` (CF-4) — tests=8, failures=0, errors=0
+- `NoShowRiskScoringIT` (CF-1) — tests=8, failures=0, errors=0
+- `OpenApiEndpointIT` — tests=2, failures=0, errors=0
+
+`WaitlistBoardIT` coverage: (1) `board` returns OPEN entries + recent offers with correct projection,
+OPEN-only filtering (FULFILLED excluded), newest-first ordering, offer status surfaced;
+(2) `entries` OPEN-only newest-first (CANCELLED excluded); (3) `offers` all statuses, newest-sent-first,
+`limit` cap honored; (4) `nonChairfillTenant_board_isModuleGated_1132`; (5) `nonStaff_board_isForbidden_1800`;
+(6) `board_isTenantIsolated` — another tenant's rows never leak.
+
+## OpenAPI
+
+`WaitlistBoardController` is `@ConditionalOnProperty(kmosf.modules.chairfill.enabled)`-gated, so it is
+absent from the generated spec when the module is off (the `NoShowRiskController`/`SalonReviewReplyController`
+precedent — `OpenApiEndpointIT` runs without the chairfill flag). Confirmed `docs/api/openapi.json`
+contains no `chairfill/waitlist` path and is left byte-unchanged at HEAD; `OpenApiEndpointIT` passes (2/0/0).
+
+## Deviations / surprises
+
+- **None material.** Kept DTOs as flat projections (no contact/stylist name enrichment join) per the
+  `MissedCallInboxItemDTO` lean-projection precedent and the "small + additive" mandate — the offer
+  already denormalizes `contactPhone` + `serviceMenuItemName`, and the FE resolves ids against the
+  contacts/staff it loads for the board. A reactive per-row name-join would have been the wrong altitude.
+- **`@CreatedDate` seeding gotcha (handled):** `WaitlistEntry.createdAt` is `@CreatedDate`, so the IT
+  seeds via save-then-`toBuilder().createdAt(...)`-resave (the `RetentionPurgeIT` back-dating precedent)
+  to make the newest-first ordering assertions deterministic. `WaitlistOffer` ordering keys on `sentAt`
+  (a plain field), so it needs no such dance.
