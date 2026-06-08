@@ -398,6 +398,16 @@ public final class DomainEventType {
     public static final String LISTING_MARKETING_DRAFTED  = "realestate.listingMarketingDrafted";
     public static final String LISTING_MARKETING_APPROVED = "realestate.listingMarketingApproved";
 
+    // FrontDesk IQ FD-1 (Health-practices flagship) — nightly PHI-free no-show risk scoring. Emitted by the
+    // frontdesk-module-gated FrontDeskNoShowScoringService once per UPCOMING Appointment that gets a
+    // NoShowRisk stamped (terminal appointments are never re-stamped, so never emit). Advisory (RuleEngine /
+    // webhook fan-out) — does NOT drive any core mutation; the FD-2 FrontDeskConfirmationService will
+    // subscribe to branch on tier (HIGH -> an extra confirmation ask; LOW/MEDIUM -> a light reminder), all
+    // with generic copy that never names a procedure/provider (fence F3). The payload carries ONLY logistics
+    // metadata — no clinical field exists to leak (fence F1). Payload:
+    // {appointmentId, contactId, providerId, riskTier, riskScore, source}.
+    public static final String APPOINTMENT_RISK_SCORED = "appointment.riskScored";
+
     private DomainEventType() {
     }
 }
