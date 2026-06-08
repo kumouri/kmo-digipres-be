@@ -628,3 +628,180 @@ spec is unchanged; `docs/api/openapi.json` left at HEAD; `OpenApiEndpointIT` pas
   `persistWithDeposit`" — chose the latter (the deposit logic + `InvoiceRepository` already live on
   `SalonBookingService`; a separate helper would duplicate the wiring). Kept dependency-free: the CF-2
   service computes the amount (it has `ServiceMenuRepository`) and passes it in.
+
+---
+
+# CF-3 — ChairFill gap-fill waitlist auto-offer (the double-YES-correct showpiece) — Progress Ledger
+
+> Spec: `~/.claude/plans/chairfill-salon-flagship.md` CF-3 section + D2 (the double-YES race).
+> Branch: `chairfill-salon-flagship-phase-3-gapfill-waitlist`. Error band **4230-4239**.
+
+## Goal
+On a salon booking cancel → rank waitlisted clients for that freed slot (the CF-1 risk model **inverted**
+= most-likely-to-accept-and-show first) → Claude drafts a personalized, time-boxed SMS offer → the
+**first client to reply "YES" atomically claims** the slot; late repliers get an apologetic auto-reply.
+The net-new inbound-SMS webhook carries the YES (and a STOP → opt-out, closing the CF-2 TCPA follow-up).
+
+## Design as built
+- **`BOOKING_CANCELLED` emit (the only salon-core change).** `SalonBookingService.cancel()` was found to
+  emit NO event. Added an **additive** `.doOnNext(saved -> emitCancelled(saved))` on the save (mirroring
+  `complete()`'s `emitCompleted` exactly) — the two pre-existing branches (already-CANCELLED no-op,
+  COMPLETED-rejection 2902) emit nothing, byte-equivalent to before. Payload
+  `{bookingId, contactId, staffMemberId, serviceMenuItemId, scheduledStart, scheduledEnd}`. Advisory,
+  NMM-irrelevant (no waitlist subscriber runs for a non-chairfill tenant).
+- **The ranking (inverted CF-1).** `WaitlistMatchService` filters OPEN + opted-in + slot-matching entries
+  (service/stylist/time-window filters, all optional), then ranks ascending by a per-contact no-show risk
+  computed by **mirroring** CF-1's deterministic rules (`scoreWithRules` polarity, NO_SHOW=1) over the
+  three history-derived priors (`priorNoShowRate`, `priorBookingCount`, `daysSinceLastVisit`) — lowest
+  no-show risk first = most-likely-to-show. A **mirror not a call** because CF-1's `features`/`scoreWith*`
+  are private and Booking-coupled (there's no Booking to score at gap-fill time); a deterministic ranking
+  is also far easier to demo/defend + test-stable than a per-run-varying model order. CF-1 left untouched.
+- **The offer copy.** `OfferCopyService` is a verbatim-shape sibling of CF-2's `ReminderCopyService` (and
+  `GbpReplyDraftService`): per-tenant Anthropic key + house-key fallback, `AiUsageRecorder` budget gate
+  BEFORE + record AFTER, WireMock-able base-url, defensive parse, 1200/1202/1203 reused. System prompt asks
+  for a warm, **time-boxed** offer (reply YES within the window). Best-effort: a Claude/budget failure →
+  a deterministic generic offer (never blocks, never texts a blank).
+- **The inbound-SMS webhook (NET-NEW — verified no inbound-SMS route existed on `main`; only voicemail +
+  voice).** `TwilioInboundSmsController` (`POST /public/integrations/twilio/{id}/sms`, `@ConditionalOnProperty`
+  chairfill-gated → absent from the OpenAPI spec) → `InboundSmsService`, a structural mirror of
+  `TwilioVoicemailService.verifiedConnection`: connection lookup → authToken → `TwilioRequestValidator.verify`
+  → **4000** sig-invalid / **4001** not-connected / **4003** bad-tenant-id (reused verbatim), tenant from
+  the path only. Reuses `TwilioVoicemailController.reconstructFullUrl` (same package) for the proxy-aware
+  signed URL. Body routing: a STOP-family word → set the CF-2 `sms-opt-out` tag (idempotent); a
+  YES-family word → the atomic claim; anything else → no-op 200.
+- **Correlation.** The sender `From` → the most-recent still-`OFFERED`, un-expired `WaitlistOffer` for that
+  tenant + phone (`findByTenantIdAndContactPhoneAndStatusOrderBySentAtDesc`, filtered on `expiresAt`).
+- **The atomic claim (D2 — the hard part).** The contended resource is "the freed slot," which no existing
+  doc uniquely represents, so `WaitlistClaimService` mints a per-slot `chairfill_waitlist_claims` doc keyed
+  `_id = "<tenantId>:<freedBookingId>"` and claims it with a single `ReactiveMongoTemplate.findAndModify`
+  (the `WorkOrderNumberGenerator` precedent): `query = {_id: slotKey, claimedByContactId: null}`,
+  `update = $set{claimedByContactId, claimedOfferId, claimedAt}`, `opts = returnNew(true).upsert(true)`.
+  Exactly one concurrent YES finds the doc unclaimed and writes it (**winner** — gets the doc back, claimed
+  by itself); every other YES's `claimedByContactId:null` predicate no longer matches → `upsert` attempts a
+  second insert with the same unique `_id` → `DuplicateKeyException` → **loser**. First-writer-wins,
+  atomically, at the DB. Winner → a real Booking via the **unchanged** `SalonBookingService.create` (so
+  `BookingPolicyService.validate` guards against double-book; `Booking @Version` is the further backstop),
+  offer→CLAIMED, siblings→SUPERSEDED, entry→FULFILLED, confirmation SMS, `WAITLIST_SLOT_CLAIMED` emit.
+  Loser → apologetic auto-reply, offer→SUPERSEDED, no booking, no error.
+- **STOP handling.** A STOP inbound sets the CF-2 `sms-opt-out` tag on every contact matching the `From`
+  number — **closes the CF-2 deviation** (CF-2 noted "an inbound-STOP webhook [is] a clean follow-up").
+- **The waitlist-join widget.** `WaitlistWidgetController` (`POST /public/widget/salon-waitlist/{token}`,
+  chairfill-gated) is a clone of `SalonBookingWidgetController`: HMAC token verify → assert
+  `widgetType="salon-waitlist"` (mismatch → **4230**) → synthetic `PUBLIC_WIDGET` context → upsert Contact
+  by email → create an OPEN `WaitlistEntry` (`smsOptIn=true` — the join IS the consent act).
+
+## Invariants
+- **`cancel()` byte-equivalent except the additive emit (HARD GATE 1):** only `.doOnNext(emitCancelled)`
+  added on the save path; both other branches unchanged; salon-core + CF-1 + CF-2 + lead-scorer + voicemail
+  ITs stay green.
+- **Concurrency-correct claim (HARD GATE 2):** the slot-level `findAndModify` is the primary gate; the
+  `WaitlistOffer`/`Booking` `@Version` is the backstop; `BookingPolicyService.validate` prevents double-book.
+  The IT subscribes two `handleAffirmative` Monos in parallel and asserts exactly one WON / one booking /
+  one CLAIMED / one apology.
+- **Best-effort (HARD GATE 3):** every external call (Claude, SMS) and the winner's booking-create are
+  wrapped — a failure degrades (generic copy / skip-that-offer / apologize-instead) and never corrupts the
+  cancel or the waitlist.
+- **Module-gated, blast-radius zero (HARD GATE 4):** all CF-3 beans are `@ConditionalOnProperty(chairfill)`
+  + `@ConditionalOnBean(SalonBookingService.class)`; controllers `@ConditionalOnProperty`-gated; `GapFillService`
+  additionally re-checks `Tenant.enabledModules` (defense-in-depth) so a `BOOKING_CANCELLED` from a
+  non-chairfill salon tenant is a hard no-op.
+- **Inbound-SMS signature-verified (HARD GATE 5):** reuses `TwilioRequestValidator` + 4000-4003. Error band
+  4230-4239 (only 4230 minted; the rest reserved).
+- **No new error codes beyond 4230:** the inbound-SMS webhook reuses 4000-4003; AI reuses 1200-1203; Twilio
+  SMS reuses 2530-2532; booking/policy reuses 2900-2901.
+
+## Files
+**Created**
+- `module/salonspa/.../` — none (only the additive emit in `SalonBookingService`).
+- `module/chairfill/model/WaitlistEntry.java` + `WaitlistEntryRepository.java` — the join pool (OPEN/FULFILLED/CANCELLED, opt-in, optional filters).
+- `module/chairfill/model/WaitlistOffer.java` + `WaitlistOfferRepository.java` — the time-boxed offer ledger (`@Version`, OFFERED/CLAIMED/SUPERSEDED/EXPIRED), inbound-YES correlation finder.
+- `module/chairfill/widget/WaitlistWidgetController.java` + `WaitlistJoinSubmissionDTO.java` + `WaitlistJoinResponseDTO.java` — the `salon-waitlist` public join widget (4230 on type mismatch).
+- `module/chairfill/gapfill/WaitlistMatchService.java` — the inverted-CF-1 ranking.
+- `module/chairfill/ai/OfferCopyService.java` — the Claude time-boxed offer drafter (ReminderCopyService sibling).
+- `module/chairfill/gapfill/GapFillService.java` — the `@PostConstruct` subscriber on `BOOKING_CANCELLED` (rank → offer → send top-N).
+- `module/chairfill/gapfill/WaitlistClaimService.java` — the atomic `findAndModify` slot claim (winner→booking, loser→apology).
+- `integration/twilio/InboundSmsService.java` — the net-new inbound-SMS handler (signature-verify + YES/STOP routing).
+- `controller/integration/TwilioInboundSmsController.java` — `POST /public/integrations/twilio/{id}/sms` (chairfill-gated).
+- `src/test/.../module/chairfill/GapFillWaitlistIT.java` — the CF-3 IT (11 cases incl. concurrent double-YES).
+
+**Modified**
+- `module/salonspa/service/SalonBookingService.java` — additive `BOOKING_CANCELLED` emit in `cancel()` (the only salon-core change).
+- `automation/DomainEventType.java` — `BOOKING_CANCELLED`, `WAITLIST_OFFER_SENT`, `WAITLIST_SLOT_CLAIMED`.
+- `module/chairfill/ChairFillAutoConfiguration.java` — register the 5 CF-3 beans (all `@ConditionalOnBean(SalonBookingService.class)`).
+- `controller/advice/GlobalErrorHandler.java` — the 4230-4239 band doc-comment.
+
+## Sub-steps
+1. `BOOKING_CANCELLED` additive emit + 3 new event constants — done.
+2. `WaitlistEntry`/`WaitlistOffer` models + repos + the `salon-waitlist` join widget — done.
+3. `WaitlistMatchService` (inverted ranking) + `OfferCopyService` (Claude) + `GapFillService` subscriber — done.
+4. `WaitlistClaimService` (atomic `findAndModify`) + `InboundSmsService`/`TwilioInboundSmsController` (signature-verified YES/STOP) — done.
+5. Beans wired + 4230-4239 doc band — done.
+6. `GapFillWaitlistIT` (11 cases) + regression gates — done, all green.
+
+## Test result — BUILD SUCCESSFUL
+
+`./gradlew cleanTest test --tests "*GapFillWaitlistIT" --tests "*RiskTieredPreventionIT"
+--tests "*NoShowRiskScoringIT" --tests "*TwilioVoicemailIT" --tests "*LeadScoringV2IT"
+--tests "*OpenApiEndpointIT" --tests "*GbpReplyDraftServiceIT"` (Docker up). `*Salon*`/`*Booking*`/
+`*Rebook*` matched no dedicated salon-core IT (the salon-spa module shipped with none — confirmed by
+globbing `src/test`); the CF-3 `cancel_emitsBookingCancelled` case exercises the only salon-core change
+end-to-end (asserts the CANCELLED transition AND the additive emit).
+
+| Class | tests | failures | errors | skipped |
+|---|---|---|---|---|
+| `GapFillWaitlistIT` (CF-3, new) | 11 | 0 | 0 | 0 |
+| `RiskTieredPreventionIT` (CF-2 regression — UNCHANGED) | 5 | 0 | 0 | 0 |
+| `NoShowRiskScoringIT` (CF-1 regression — UNCHANGED) | 8 | 0 | 0 | 0 |
+| `TwilioVoicemailIT` (inbound Twilio webhook regression — UNCHANGED) | 6 | 0 | 0 | 0 |
+| `LeadScoringV2IT` (lead-scorer regression — UNCHANGED) | 4 | 0 | 0 | 0 |
+| `GbpReplyDraftServiceIT` (AI-services regression — UNCHANGED) | 4 | 0 | 0 | 0 |
+| `OpenApiEndpointIT` | 2 | 0 | 0 | 0 |
+| **TOTAL** | **40** | **0** | **0** | **0** |
+
+`GapFillWaitlistIT` cases: (1) `waitlistJoinWidget_createsEntry` — token-gated widget creates an OPEN
+opted-in `WaitlistEntry`; (2) `waitlistJoinWidget_wrongWidgetType_4230` — a `salon-booking`-typed token →
+4230, no entry; (3) `cancel_emitsBookingCancelled` — `cancel()` flips CANCELLED AND emits `BOOKING_CANCELLED`
+with the freed-slot payload; (4) `gapFill_ranksReliableAboveFlaky_andSendsPersonalizedOffer` — a reliable
+regular (no prior NO_SHOW) ranks rank-0 ABOVE a flaky client (a prior NO_SHOW) rank-1, both texted, the
+Claude prompt carried the stylist; (5) `gapFill_claudeFailure_fallsBackToGenericOffer_noError` — WireMock
+Anthropic 500 → a generic time-boxed offer still sent (mentions stylist + YES), no error; (6)
+`inboundYes_claimsSlot_createsBookingViaNormalPath` — an inbound YES over the signed webhook → a real
+CONFIRMED Booking via `create()`, offer CLAIMED, one confirmation SMS; (7)
+**`concurrentDoubleYes_exactlyOneBooking_oneApology`** — two parallel YESs for one slot → exactly one WON /
+one LOST / **one Booking** / one CLAIMED / one SUPERSEDED / one apologetic SMS (the crown jewel); (8)
+`expiredOffer_cannotBeClaimed_noBooking` — a past-`expiresAt` offer → NO_OPEN_OFFER, no booking, no SMS; (9)
+`inboundStop_setsOptOutTag` — an inbound STOP → the contact gets the `sms-opt-out` tag (CF-2 follow-up
+closed); (10) `nonChairfillTenant_gapFillIsHardNoOp` — a `BOOKING_CANCELLED` for a non-chairfill tenant →
+zero offers/SMS/Anthropic-call (defense-in-depth); (11) `inboundSms_badSignature_401_4000_zeroEffect` — a
+bad `X-Twilio-Signature` → 401/4000, the offer untouched, no booking, no SMS.
+
+### OpenAPI
+CF-3's two public controllers (`WaitlistWidgetController`, `TwilioInboundSmsController`) are BOTH
+`@ConditionalOnProperty(kmosf.modules.chairfill.enabled)`-gated, so they are absent from the generated spec
+when the module is off (the `NoShowRiskController` / HS precedent — and `OpenApiEndpointIT` runs without
+`chairfill.enabled=true`). `docs/api/openapi.json` left at HEAD; `OpenApiEndpointIT` passes (2/0/0).
+
+### Deviations / surprises
+- **Inbound-SMS route was net-new (the plan's flagged scope risk, confirmed).** No inbound-SMS webhook
+  existed on `main` — only the voicemail transcription callback + the voice TwiML webhook. Built it
+  signature-verified mirroring `TwilioVoicemailService`/`TwilioRequestValidator`, reusing 4000-4003. No
+  `MessageSid` idempotency ledger (unlike voicemail's `CallSid` ledger): a re-delivered YES is naturally
+  idempotent (the slot is already CLAIMED → a re-claim is a loser/apology, never a 2nd booking — the atomic
+  guard handles it), and a re-delivered STOP is an idempotent tag-set — the `MoleTriageController`
+  "intentionally re-invocable public surface" posture.
+- **Ranking is a mirror of CF-1, not a call into it.** `NoShowRiskScoringService.features`/`scoreWithRules`
+  are private + coupled to scoring a specific upcoming Booking. `WaitlistMatchService` re-implements the
+  same deterministic rules over the history-only priors (the only ones knowable with no Booking to score),
+  ranking ascending. CF-1 stays untouched; the ranking is deterministic (test-stable, demo-defensible).
+- **The contended resource ("the slot") gets its own claim doc.** Per D2, neither the `WaitlistOffer` nor
+  the `Booking` uniquely represents "the freed slot" before a winner exists, so a dedicated per-slot
+  `chairfill_waitlist_claims` doc (keyed `_id="<tenant>:<freedBookingId>"`, accessed via `ReactiveMongoTemplate`,
+  NOT a repo entity — the `WorkOrderNumberGenerator` pattern) is the `findAndModify` target. `upsert(true)` +
+  the unique `_id` makes the first-ever-claim insert race resolve to one winner + DuplicateKeyException for
+  the rest.
+- **Test-precision nit (not a product bug).** Mongo persists `Instant` at millisecond precision; the seeded
+  `slotStart` carried nanos, so the winner-booking's `scheduledStart` asserted with a 1ms tolerance
+  (`isCloseTo`) rather than exact equality — the booking window is correct to the ms.
+- **STOP closes the CF-2 TCPA follow-up.** CF-2's ledger noted "an inbound-STOP webhook [is] a clean
+  follow-up"; CF-3's inbound-SMS route now sets the `sms-opt-out` tag on STOP, so the CF-2 consent gate is
+  honored end-to-end.

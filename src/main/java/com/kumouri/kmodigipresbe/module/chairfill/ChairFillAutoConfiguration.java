@@ -6,12 +6,19 @@ import com.kumouri.kmodigipresbe.extension.ModuleAutoConfigurationSupport;
 import com.kumouri.kmodigipresbe.extension.ModuleDefinition;
 import com.kumouri.kmodigipresbe.integration.IntegrationConnectionRepository;
 import com.kumouri.kmodigipresbe.integration.twilio.TwilioSmsService;
+import com.kumouri.kmodigipresbe.module.chairfill.ai.OfferCopyService;
 import com.kumouri.kmodigipresbe.module.chairfill.ai.ReminderCopyService;
 import com.kumouri.kmodigipresbe.module.chairfill.automation.ChairFillReminderAutomation;
 import com.kumouri.kmodigipresbe.module.chairfill.automation.ReminderLogRepository;
 import com.kumouri.kmodigipresbe.module.chairfill.automation.RiskTieredPreventionService;
+import com.kumouri.kmodigipresbe.module.chairfill.gapfill.GapFillService;
+import com.kumouri.kmodigipresbe.module.chairfill.gapfill.WaitlistClaimService;
+import com.kumouri.kmodigipresbe.module.chairfill.gapfill.WaitlistMatchService;
 import com.kumouri.kmodigipresbe.module.chairfill.model.NoShowRisk;
+import com.kumouri.kmodigipresbe.module.chairfill.model.WaitlistEntryRepository;
+import com.kumouri.kmodigipresbe.module.chairfill.model.WaitlistOfferRepository;
 import com.kumouri.kmodigipresbe.module.chairfill.scoring.NoShowRiskScoringService;
+import com.kumouri.kmodigipresbe.integration.twilio.InboundSmsService;
 import com.kumouri.kmodigipresbe.module.salonspa.SalonSpaAutoConfiguration;
 import com.kumouri.kmodigipresbe.module.salonspa.repository.BookingRepository;
 import com.kumouri.kmodigipresbe.module.salonspa.repository.ServiceMenuRepository;
@@ -26,6 +33,7 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
+import org.springframework.data.mongodb.core.ReactiveMongoTemplate;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.math.BigDecimal;
@@ -58,7 +66,15 @@ import java.util.List;
  *       {@link ReminderCopyService}), plus the owner-tunable {@link ChairFillReminderAutomation}
  *       baseline WorkflowRule seeder. TCPA-safe (opt-out tag + per-contact frequency cap) and
  *       best-effort (Claude/SMS/deposit failure degrades, never drops a booking).</li>
- *   <li>CF-3: gap-fill waitlist auto-offer (the double-YES-correct showpiece).</li>
+ *   <li><strong>CF-3 (this PR):</strong> gap-fill waitlist auto-offer (the double-YES-correct showpiece)
+ *       — the {@link GapFillService} subscriber on {@code BOOKING_CANCELLED} (additively emitted by
+ *       {@code SalonBookingService.cancel()}) ranks the {@code salon-waitlist} pool by the CF-1 model
+ *       <em>inverted</em> ({@link WaitlistMatchService}), Claude drafts a time-boxed offer
+ *       ({@link OfferCopyService}), and the first inbound "YES" atomically claims the slot
+ *       ({@link WaitlistClaimService} — the slot-level {@code findAndModify} gate), winner → a real
+ *       booking via the unchanged {@code SalonBookingService.create}, loser → an apology. The net-new
+ *       signature-verified inbound-SMS webhook ({@link InboundSmsService}) carries the YES and a STOP →
+ *       {@code sms-opt-out} (closing the CF-2 TCPA follow-up).</li>
  *   <li>CF-4: AI review-reply, salon-generalized.</li>
  *   <li>CF-5: FE surfaces (separate repo).</li>
  * </ul>
@@ -158,5 +174,97 @@ public class ChairFillAutoConfiguration {
             TenantRepository tenantRepository,
             WorkflowRuleRepository workflowRuleRepository) {
         return new ChairFillReminderAutomation(tenantRepository, workflowRuleRepository);
+    }
+
+    // ── CF-3: gap-fill waitlist auto-offer (the double-YES-correct showpiece) ──
+
+    /**
+     * The Claude-personalized time-boxed offer drafter (CF-3) — a sibling of {@link ReminderCopyService}.
+     * Hand-constructed so the {@code @Value}-resolved config lands on the factory params.
+     */
+    @Bean
+    @ConditionalOnBean(SalonBookingService.class)
+    public OfferCopyService chairFillOfferCopyService(
+            WebClient.Builder webClientBuilder,
+            IntegrationConnectionRepository connections,
+            AiUsageRecorder usageRecorder,
+            @Value("${kmosf.ai.anthropic.base-url:https://api.anthropic.com/v1/messages}") String baseUrl,
+            @Value("${kmosf.ai.anthropic.house-key:}") String houseKey,
+            @Value("${kmosf.chairfill.offer-draft-model:claude-haiku-4-5}") String draftModel,
+            @Value("${kmosf.chairfill.offer-system-prompt:}") String systemPromptOverride) {
+        return new OfferCopyService(webClientBuilder, connections, usageRecorder,
+                baseUrl, houseKey, draftModel, systemPromptOverride);
+    }
+
+    /** Ranks the waitlist for a freed slot — the CF-1 no-show model inverted (most-likely-to-show first). */
+    @Bean
+    @ConditionalOnBean(SalonBookingService.class)
+    public WaitlistMatchService chairFillWaitlistMatchService(BookingRepository bookingRepository) {
+        return new WaitlistMatchService(bookingRepository);
+    }
+
+    /**
+     * The double-YES-correct atomic slot claim (CF-3 D2): the slot-level {@code findAndModify} via
+     * {@link ReactiveMongoTemplate}, winner → booking via the unchanged {@link SalonBookingService#create},
+     * loser → apologetic auto-reply. Confirmation/apology SMS bodies configurable.
+     */
+    @Bean
+    @ConditionalOnBean(SalonBookingService.class)
+    public WaitlistClaimService chairFillWaitlistClaimService(
+            ReactiveMongoTemplate mongoTemplate,
+            WaitlistOfferRepository offerRepository,
+            WaitlistEntryRepository entryRepository,
+            ContactRepository contactRepository,
+            SalonBookingService salonBookingService,
+            TwilioSmsService twilioSmsService,
+            DomainEventPublisher eventPublisher,
+            @Value("${kmosf.chairfill.gapfill.confirmation-sms:You're booked! See you soon.}")
+            String confirmationTemplate,
+            @Value("${kmosf.chairfill.gapfill.apology-sms:Sorry — that slot was just taken. "
+                    + "You're still first in line for the next opening!}") String apologyTemplate) {
+        return new WaitlistClaimService(mongoTemplate, offerRepository, entryRepository, contactRepository,
+                salonBookingService, twilioSmsService, eventPublisher, confirmationTemplate, apologyTemplate);
+    }
+
+    /**
+     * The gap-fill orchestrator (CF-3) — the {@code @PostConstruct} subscriber on {@code BOOKING_CANCELLED}:
+     * rank the waitlist → Claude time-boxed offer (best-effort) → mint {@link com.kumouri.kmodigipresbe.module.chairfill.model.WaitlistOffer}s
+     * + send to the top-N. TCPA-safe (opt-out tag + opt-in entries) and best-effort.
+     */
+    @Bean
+    @ConditionalOnBean(SalonBookingService.class)
+    public GapFillService chairFillGapFillService(
+            DomainEventPublisher eventPublisher,
+            TenantRepository tenantRepository,
+            WaitlistEntryRepository entryRepository,
+            WaitlistOfferRepository offerRepository,
+            ContactRepository contactRepository,
+            StaffMemberRepository staffMemberRepository,
+            ServiceMenuRepository serviceMenuRepository,
+            WaitlistMatchService waitlistMatchService,
+            OfferCopyService offerCopyService,
+            TwilioSmsService twilioSmsService,
+            @Value("${kmosf.chairfill.gapfill.max-offers:3}") int maxOffers,
+            @Value("${kmosf.chairfill.gapfill.offer-ttl-minutes:10}") long offerTtlMinutes,
+            @Value("${kmosf.chairfill.gapfill.brand-tone:}") String brandTone) {
+        return new GapFillService(eventPublisher, tenantRepository, entryRepository, offerRepository,
+                contactRepository, staffMemberRepository, serviceMenuRepository, waitlistMatchService,
+                offerCopyService, twilioSmsService, maxOffers, offerTtlMinutes, brandTone);
+    }
+
+    /**
+     * The net-new inbound-SMS webhook service (CF-3) — signature-verified (reused
+     * {@link com.kumouri.kmodigipresbe.integration.twilio.voice.TwilioRequestValidator} + {@code 4000-4003}),
+     * correlates an inbound YES to a pending offer (→ atomic claim) and a STOP to the {@code sms-opt-out}
+     * consent tag (closes the CF-2 TCPA follow-up). The {@code TwilioInboundSmsController} is
+     * {@code @ConditionalOnProperty}-component-scanned and delegates here.
+     */
+    @Bean
+    @ConditionalOnBean(SalonBookingService.class)
+    public InboundSmsService chairFillInboundSmsService(
+            IntegrationConnectionRepository connections,
+            ContactRepository contactRepository,
+            WaitlistClaimService waitlistClaimService) {
+        return new InboundSmsService(connections, contactRepository, waitlistClaimService);
     }
 }

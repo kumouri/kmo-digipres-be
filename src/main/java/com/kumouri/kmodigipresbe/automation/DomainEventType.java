@@ -324,6 +324,25 @@ public final class DomainEventType {
     // {bookingId, contactId, staffMemberId, riskTier, riskScore, source}.
     public static final String BOOKING_RISK_SCORED = "booking.riskScored";
 
+    // ChairFill CF-3 — gap-fill waitlist auto-offer. All three are advisory (RuleEngine / webhook
+    // fan-out) — they do NOT drive any core mutation; the gap-fill (rank → Claude offer → atomic
+    // first-YES claim → booking) happens synchronously and explicitly inside the chairfill GapFillService
+    // / WaitlistClaimService, gated by the slot-level findAndModify claim + the WaitlistOffer @Version.
+    // BOOKING_CANCELLED: emitted by SalonBookingService.cancel() after a salon Booking transitions to
+    //   CANCELLED (the additive emit — the method emitted nothing before). The reliable gap-fill trigger.
+    //   Payload: {bookingId, contactId, staffMemberId, serviceMenuItemId, scheduledStart, scheduledEnd}.
+    //   Distinct from the H.2 CALCOM_BOOKING_CANCELLED (a decoupled Meeting projection with no salon
+    //   bookingId). Non-chairfill tenants have no subscriber, so this is a harmless no-op there.
+    // WAITLIST_OFFER_SENT: emitted by GapFillService once per WaitlistOffer dispatched (a ranked
+    //   waitlisted contact texted a time-boxed offer for the freed slot). Payload:
+    //   {bookingId, offerId, contactId, rank, expiresAt}.
+    // WAITLIST_SLOT_CLAIMED: emitted by WaitlistClaimService when the first YES atomically claims the
+    //   freed slot and a real Booking is created for the winner. Payload:
+    //   {freedBookingId, newBookingId, offerId, contactId}.
+    public static final String BOOKING_CANCELLED      = "booking.cancelled";
+    public static final String WAITLIST_OFFER_SENT    = "waitlist.offerSent";
+    public static final String WAITLIST_SLOT_CLAIMED  = "waitlist.slotClaimed";
+
     private DomainEventType() {
     }
 }
