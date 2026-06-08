@@ -381,6 +381,23 @@ public final class DomainEventType {
     //   BOOKED. Payload: {conversationId, listingId, meetingId, contactId (nullable), start}.
     public static final String SHOWING_BOOKED = "realestate.showingBooked";
 
+    // Real Estate Concierge RE-4 — the Marketing Studio (text + vision photo captions, Fair-Housing
+    // guardrail, draft→approve queue). All advisory (RuleEngine / webhook fan-out) — they do NOT drive
+    // any core mutation; the generation (vision-caption each listing photo via the UNCHANGED
+    // AiVisionService.extract + Sonnet draft of MLS remarks / social captions / email blast), the
+    // deterministic Fair-Housing lint, and the draft lifecycle all happen synchronously and explicitly
+    // inside the realestate-module-gated ListingMarketingService. Emitted only when the realestate module
+    // is on. NEVER auto-published — a draft requires a staff approve (the GBP review-reply draft→approve
+    // posture). Each photo caption is best-effort: a failed/blank vision read degrades to no caption,
+    // never an error; a Claude failure yields a partial/empty draft + a flag, never an error.
+    // LISTING_MARKETING_DRAFTED: emitted by ListingMarketingService after a generate call persists a
+    //   DRAFTED ListingMarketingDraft (MLS remarks + N social captions + email blast + per-photo
+    //   callouts). Payload: {draftId, listingId, channelCount, photoCaptionCount, fairHousingFlagCount}.
+    // LISTING_MARKETING_APPROVED: emitted after a staff approve marks a draft APPROVED (copy-ready;
+    //   actual MLS/social posting is out of scope — paste-out). Payload: {draftId, listingId}.
+    public static final String LISTING_MARKETING_DRAFTED  = "realestate.listingMarketingDrafted";
+    public static final String LISTING_MARKETING_APPROVED = "realestate.listingMarketingApproved";
+
     private DomainEventType() {
     }
 }

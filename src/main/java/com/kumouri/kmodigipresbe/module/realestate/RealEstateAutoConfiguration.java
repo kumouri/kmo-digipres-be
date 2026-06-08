@@ -14,12 +14,17 @@ import com.kumouri.kmodigipresbe.module.realestate.concierge.ListingConciergeSer
 import com.kumouri.kmodigipresbe.module.realestate.concierge.QualificationExtractionService;
 import com.kumouri.kmodigipresbe.module.realestate.concierge.QualificationService;
 import com.kumouri.kmodigipresbe.module.realestate.concierge.ShowingBookingService;
+import com.kumouri.kmodigipresbe.module.realestate.marketing.ListingMarketingService;
+import com.kumouri.kmodigipresbe.module.realestate.marketing.MarketingGenerationService;
 import com.kumouri.kmodigipresbe.module.realestate.model.ConciergeConversationRepository;
 import com.kumouri.kmodigipresbe.module.realestate.model.HotHandoffLogRepository;
 import com.kumouri.kmodigipresbe.module.realestate.model.ListingDisclosureRepository;
+import com.kumouri.kmodigipresbe.module.realestate.model.ListingMarketingDraftRepository;
+import com.kumouri.kmodigipresbe.module.realestate.model.ListingPhotoRepository;
 import com.kumouri.kmodigipresbe.module.realestate.model.ListingRepository;
 import com.kumouri.kmodigipresbe.module.realestate.service.ListingDisclosureService;
 import com.kumouri.kmodigipresbe.module.realestate.service.ListingService;
+import com.kumouri.kmodigipresbe.repository.AttachmentRepository;
 import com.kumouri.kmodigipresbe.repository.ContactRepository;
 import com.kumouri.kmodigipresbe.repository.DealRepository;
 import com.kumouri.kmodigipresbe.repository.TenantRepository;
@@ -28,6 +33,8 @@ import com.kumouri.kmodigipresbe.service.ai.AiUsageRecorder;
 import com.kumouri.kmodigipresbe.service.ai.embedding.EmbeddingService;
 import com.kumouri.kmodigipresbe.service.ai.rag.RagRetrievalService;
 import com.kumouri.kmodigipresbe.service.ai.vector.VectorIndex;
+import com.kumouri.kmodigipresbe.service.ai.vision.AiVisionService;
+import com.kumouri.kmodigipresbe.service.storage.FileStorageService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -230,6 +237,51 @@ public class RealEstateAutoConfiguration {
             @Value("${kmosf.realestate.showing-slot-hours:14,16}") List<Integer> slotHours) {
         return new ShowingBookingService(conversations, meetings, contacts, activityCrudService,
                 twilioSmsService, events, slotCount, slotDurationMinutes, slotHours);
+    }
+
+    // ── RE-4 Marketing Studio (vision captions + Sonnet copy + Fair-Housing lint) ─
+
+    /**
+     * RE-4 — the Anthropic marketing generator (a sibling of {@link ConciergeAnswerService} /
+     * {@code AnthropicAiAssistService}, the {@code draft}-style Sonnet caller). Hand-built so the
+     * {@code @Value}-resolved key/base-url/model land on the factory params. Defaults to Sonnet
+     * ({@code kmosf.realestate.marketing-model}) — outbound prose quality matters.
+     */
+    @Bean
+    public MarketingGenerationService marketingGenerationService(
+            WebClient.Builder webClientBuilder,
+            IntegrationConnectionRepository connections,
+            AiUsageRecorder usageRecorder,
+            ObjectMapper objectMapper,
+            @Value("${kmosf.ai.anthropic.base-url:https://api.anthropic.com/v1/messages}") String baseUrl,
+            @Value("${kmosf.ai.anthropic.house-key:}") String houseKey,
+            @Value("${kmosf.realestate.marketing-model:claude-sonnet-4-6}") String marketingModel,
+            @Value("${kmosf.realestate.marketing-system-prompt:}") String systemPromptOverride) {
+        return new MarketingGenerationService(webClientBuilder, connections, usageRecorder, objectMapper,
+                baseUrl, houseKey, marketingModel, systemPromptOverride);
+    }
+
+    /**
+     * RE-4 — the Marketing Studio orchestrator: listing-photo intake (store bytes via the shared
+     * {@link FileStorageService} + a generic LISTING {@code Attachment} + a {@code ListingPhoto}),
+     * generate (caption each photo via the UNCHANGED {@link AiVisionService#extract} + Sonnet draft +
+     * the deterministic Fair-Housing lint → a DRAFTED draft), and the draft → approve / skip queue (the
+     * GBP review-reply posture — NEVER auto-published). Vision uses Sonnet by default
+     * ({@code kmosf.realestate.marketing-vision-model}).
+     */
+    @Bean
+    public ListingMarketingService listingMarketingService(
+            ListingRepository listings,
+            ListingPhotoRepository photos,
+            ListingMarketingDraftRepository drafts,
+            AttachmentRepository attachments,
+            FileStorageService storage,
+            AiVisionService visionService,
+            MarketingGenerationService generationService,
+            DomainEventPublisher events,
+            @Value("${kmosf.realestate.marketing-vision-model:claude-sonnet-4-5}") String visionModel) {
+        return new ListingMarketingService(listings, photos, drafts, attachments, storage, visionService,
+                generationService, events, visionModel);
     }
 
     // ── RE-2 hot-handoff (LEAD_SCORE_UPDATED subscriber) ─────────────────────────
