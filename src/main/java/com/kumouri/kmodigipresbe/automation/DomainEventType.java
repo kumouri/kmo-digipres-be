@@ -343,6 +343,19 @@ public final class DomainEventType {
     public static final String WAITLIST_OFFER_SENT    = "waitlist.offerSent";
     public static final String WAITLIST_SLOT_CLAIMED  = "waitlist.slotClaimed";
 
+    // Real Estate Concierge RE-1 — the grounded listing concierge over inbound SMS. Both are advisory
+    // (RuleEngine / webhook fan-out) — they do NOT drive any core mutation; the disclosure-text indexing
+    // and the inbound answer/handoff happen synchronously and explicitly inside the realestate-module-gated
+    // ListingDisclosureService / ConciergeInboundRouter. Emitted only when the realestate module is on.
+    // LISTING_DISCLOSURE_INDEXED: emitted by ListingDisclosureService after a disclosure's text is embedded
+    //   and upserted into the vector index as source type "ListingDisclosure" with listingId metadata
+    //   (RE-1 §3 / §6.3). Payload: {listingId, disclosureId, disclosureType}.
+    // CONCIERGE_INBOUND_RECEIVED: emitted by ConciergeInboundRouter after a buyer inbound SMS is correlated
+    //   to a listing + conversation and the buyer turn is appended (RE-1 §6.6). Payload:
+    //   {listingId, conversationId, buyerPhone}.
+    public static final String LISTING_DISCLOSURE_INDEXED = "realestate.listingDisclosureIndexed";
+    public static final String CONCIERGE_INBOUND_RECEIVED = "realestate.conciergeInboundReceived";
+
     private DomainEventType() {
     }
 }

@@ -7,6 +7,7 @@ import com.kumouri.kmodigipresbe.integration.twilio.voice.TwilioRequestValidator
 import com.kumouri.kmodigipresbe.model.contact.Contact;
 import com.kumouri.kmodigipresbe.module.chairfill.automation.RiskTieredPreventionService;
 import com.kumouri.kmodigipresbe.module.chairfill.gapfill.WaitlistClaimService;
+import com.kumouri.kmodigipresbe.module.realestate.concierge.ConciergeInboundRouter;
 import com.kumouri.kmodigipresbe.repository.ContactRepository;
 import com.kumouri.kmodigipresbe.tenancy.TenantContext;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
@@ -14,6 +15,7 @@ import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 import org.springframework.util.MultiValueMap;
 
+import jakarta.annotation.Nullable;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -57,13 +59,28 @@ import java.util.UUID;
  *
  * <h2>Module gate</h2>
  * Wired as a {@code @Bean} only when {@code kmosf.modules.chairfill.enabled} + the salon-spa beans are
- * present; the controller is {@code @ConditionalOnProperty}-gated too (absent from the OpenAPI spec when
- * chairfill is off — the {@code NoShowRiskController} precedent). No live Twilio anywhere (§7).
+ * present (and, when chairfill is off, by {@code RealEstateAutoConfiguration} so the inbound webhook still
+ * exists for a pure-realestate tenant); the controller is gated on the presence of this bean (absent from
+ * the OpenAPI spec when no module provides it). No live Twilio anywhere (§7).
+ *
+ * <h2>Real Estate Concierge seam (RE-1)</h2>
+ * A per-tenant {@code smsMode} (read from the verified {@code IntegrationConnection(twilio).config.smsMode},
+ * default/absent = {@code "chairfill"}) routes the inbound. <strong>STOP-words still win first</strong>
+ * (TCPA) regardless of mode. When {@code smsMode="realestate"} and a {@link ConciergeInboundRouter} is
+ * wired (only when the realestate module is on), the body is delegated to that router (the grounded
+ * concierge). When {@code smsMode} is absent/{@code "chairfill"} <strong>the existing ChairFill YES/STOP
+ * path is byte-identical</strong> — the seam is a no-op (the router is null / never consulted), so the
+ * shipped {@code GapFillWaitlistIT} inbound cases pass unchanged.
  */
 @Slf4j
 public class InboundSmsService {
 
     public static final String PROVIDER = TwilioSmsService.PROVIDER; // "twilio"
+
+    /** The per-tenant routing mode key on {@code IntegrationConnection(twilio).config} (RE-1 §6.6). */
+    public static final String SMS_MODE_KEY = "smsMode";
+    /** The realestate routing mode value that flips the inbound to the grounded concierge. */
+    public static final String SMS_MODE_REALESTATE = "realestate";
 
     private static final Set<String> STOP_WORDS = Set.of(
             "STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT", "REVOKE", "OPTOUT", "OPT-OUT");
@@ -72,8 +89,25 @@ public class InboundSmsService {
 
     private final IntegrationConnectionRepository connections;
     private final ContactRepository contacts;
+
+    /**
+     * The CF-3 gap-fill claim service — present only when ChairFill (the YES path) is on. Null in a
+     * pure-realestate deployment, where the YES path is never reached (the concierge seam owns all
+     * non-STOP bodies). The STOP/opt-out path never touches it.
+     */
+    @Nullable
     private final WaitlistClaimService claimService;
 
+    /**
+     * The realestate inbound router — wired (via {@link #setConciergeRouter}) only when the realestate
+     * module is loaded. Null otherwise → the {@code smsMode} seam is inert and the ChairFill YES/STOP
+     * path is byte-identical. The bean is hand-constructed (not component-scanned), so this is a setter
+     * the realestate auto-config invokes, not field-{@code @Autowired}.
+     */
+    @Nullable
+    private ConciergeInboundRouter conciergeRouter;
+
+    /** ChairFill (CF-3) constructor — the YES path is wired via {@code claimService}. */
     public InboundSmsService(IntegrationConnectionRepository connections,
                              ContactRepository contacts,
                              WaitlistClaimService claimService) {
@@ -82,8 +116,34 @@ public class InboundSmsService {
         this.claimService = claimService;
     }
 
+    /**
+     * Real Estate Concierge (RE-1) constructor for a <strong>pure-realestate</strong> deployment (chairfill
+     * off, so no {@code WaitlistClaimService}). The inbound webhook + STOP/opt-out still work; the YES path
+     * is unreachable (realestate mode delegates every non-STOP body to the concierge router). Used by
+     * {@code RealEstateAutoConfiguration}'s {@code @ConditionalOnMissingBean} fallback.
+     */
+    public InboundSmsService(IntegrationConnectionRepository connections,
+                             ContactRepository contacts) {
+        this.connections = connections;
+        this.contacts = contacts;
+        this.claimService = null;
+    }
+
+    /**
+     * Wires the RE-1 grounded-concierge router (RE-1 §6.6). Invoked by {@code RealEstateAutoConfiguration}
+     * when the realestate module is enabled; never called otherwise (the seam stays inert and ChairFill
+     * is byte-identical). Idempotent / last-wins.
+     */
+    public void setConciergeRouter(@Nullable ConciergeInboundRouter conciergeRouter) {
+        this.conciergeRouter = conciergeRouter;
+    }
+
     /** What an inbound SMS resolved to — for the controller to log. */
-    public enum InboundOutcome { CLAIMED_WON, CLAIMED_LOST, NO_OPEN_OFFER, OPTED_OUT, IGNORED }
+    public enum InboundOutcome {
+        CLAIMED_WON, CLAIMED_LOST, NO_OPEN_OFFER, OPTED_OUT, IGNORED,
+        // RE-1 realestate-mode outcomes.
+        CONCIERGE_ANSWERED, CONCIERGE_HANDED_OFF, CONCIERGE_NO_LISTING
+    }
 
     /**
      * Entry point called by the controller. Verify-before-effect, then classify + route the body. Tenant
@@ -93,7 +153,14 @@ public class InboundSmsService {
     public Mono<InboundOutcome> handleInboundSms(UUID tenantId, String signatureHeader, String fullUrl,
                                                  MultiValueMap<String, String> form) {
         return verifiedConnection(tenantId, signatureHeader, fullUrl, form)
-                .flatMap(conn -> route(tenantId, form));
+                .flatMap(conn -> route(tenantId, form, smsModeOf(conn)));
+    }
+
+    /** The per-tenant routing mode from the verified connection's config (absent → ChairFill default). */
+    @Nullable
+    private static String smsModeOf(IntegrationConnection conn) {
+        Map<String, String> config = conn.getConfig();
+        return config == null ? null : config.get(SMS_MODE_KEY);
     }
 
     /**
@@ -124,8 +191,10 @@ public class InboundSmsService {
                 });
     }
 
-    private Mono<InboundOutcome> route(UUID tenantId, MultiValueMap<String, String> form) {
+    private Mono<InboundOutcome> route(UUID tenantId, MultiValueMap<String, String> form,
+                                       @Nullable String smsMode) {
         String from = form == null ? null : form.getFirst("From");
+        String to = form == null ? null : form.getFirst("To");
         String body = form == null ? null : form.getFirst("Body");
         String normalized = body == null ? "" : body.trim().toUpperCase();
         String firstWord = normalized.isEmpty() ? "" : normalized.split("\\s+")[0];
@@ -133,10 +202,23 @@ public class InboundSmsService {
         if (from == null || from.isBlank()) {
             return Mono.just(InboundOutcome.IGNORED);
         }
+        // STOP wins first, in EVERY mode (TCPA) — the unchanged shared opt-out (RE-1 §6.6).
         if (STOP_WORDS.contains(firstWord)) {
             return optOut(tenantId, from).thenReturn(InboundOutcome.OPTED_OUT);
         }
-        if (YES_WORDS.contains(firstWord)) {
+        // RE-1 seam: realestate mode + a wired router → the grounded concierge (single-turn Q&A).
+        // The seam is consulted ONLY for non-STOP bodies and ONLY when smsMode=="realestate"; absent/
+        // "chairfill" mode (or no router) falls straight through to the byte-identical ChairFill path.
+        if (SMS_MODE_REALESTATE.equals(smsMode) && conciergeRouter != null) {
+            return conciergeRouter.handle(tenantId, from, to, body)
+                    .map(outcome -> switch (outcome) {
+                        case ANSWERED -> InboundOutcome.CONCIERGE_ANSWERED;
+                        case HANDED_OFF -> InboundOutcome.CONCIERGE_HANDED_OFF;
+                        case NO_LISTING -> InboundOutcome.CONCIERGE_NO_LISTING;
+                        case IGNORED -> InboundOutcome.IGNORED;
+                    });
+        }
+        if (YES_WORDS.contains(firstWord) && claimService != null) {
             return claimService.handleAffirmative(tenantId, from)
                     .map(outcome -> switch (outcome) {
                         case WON -> InboundOutcome.CLAIMED_WON;
