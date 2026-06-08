@@ -68,9 +68,58 @@ public class RagRetrievalService {
                 });
     }
 
+    /**
+     * Listing-scoped retrieval for the Real Estate Concierge (RE-1). Additive overload — the
+     * contact/deal {@link #retrieve} signature is byte-unchanged so NMM / all existing callers are
+     * unaffected.
+     *
+     * <p>Two guards make the grounding "scoped" claim hold (RE-1 §6.4):
+     * <ol>
+     *   <li>{@code sourceType == "ListingDisclosure"} — only disclosure vectors, never generic CRM
+     *       activity/quote/email vectors, can ground a listing answer;</li>
+     *   <li>{@code matchesListing} on {@code metadata.listingId} — only <em>this</em> listing's
+     *       disclosures, so listing A's question can never retrieve listing B's chunk.</li>
+     * </ol>
+     * {@code topK} is intentionally larger than {@link #DEFAULT_TOP_K} (the in-memory filter narrows the
+     * Atlas top-K down to one listing's hits). Falls back to an empty flux if the vector index is
+     * unavailable — the concierge then short-circuits to {@code HANDOFF} (never grounds on nothing).
+     *
+     * @param tenantId  the tenant scope — mandatory
+     * @param question  the buyer's question to embed as a query vector
+     * @param listingId the listing whose disclosures are the only eligible grounding corpus
+     * @param topK      candidates to pull from Atlas before the listing/source-type filter
+     */
+    public Flux<RetrievedChunk> retrieveForListing(UUID tenantId, String question,
+                                                   UUID listingId, int topK) {
+        return embeddingService.embed(tenantId, question)
+                .flatMapMany(vector -> vectorIndex.search(tenantId, vector, topK, null))
+                .filter(hit -> hit.sourceId() != null)
+                .filter(hit -> LISTING_DISCLOSURE_SOURCE_TYPE.equals(hit.sourceType()))
+                .filter(hit -> matchesListing(hit, listingId))
+                .map(hit -> new RetrievedChunk(
+                        hit.sourceType(),
+                        hit.sourceId(),
+                        previewFrom(hit),
+                        hit.score()))
+                .onErrorResume(err -> {
+                    log.warn("Listing-scoped RAG retrieval failed for tenant {} listing {}: {}",
+                            tenantId, listingId, err.toString());
+                    return Flux.empty();
+                });
+    }
+
+    /** The embedding source type for {@code ListingDisclosure} text (RE-1 §3). */
+    public static final String LISTING_DISCLOSURE_SOURCE_TYPE = "ListingDisclosure";
+
     private static boolean matchesContact(VectorIndex.VectorSearchHit hit, UUID contactId) {
         Object val = hit.metadata() != null ? hit.metadata().get("contactId") : null;
         return contactId.toString().equals(val instanceof String ? val : (val != null ? val.toString() : null));
+    }
+
+    /** Mirror of {@link #matchesContact}/{@link #matchesDeal} on the {@code listingId} metadata (RE-1). */
+    private static boolean matchesListing(VectorIndex.VectorSearchHit hit, UUID listingId) {
+        Object val = hit.metadata() != null ? hit.metadata().get("listingId") : null;
+        return listingId.toString().equals(val instanceof String ? val : (val != null ? val.toString() : null));
     }
 
     private static boolean matchesDeal(VectorIndex.VectorSearchHit hit, UUID dealId) {

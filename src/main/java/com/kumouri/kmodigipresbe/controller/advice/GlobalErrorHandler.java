@@ -492,6 +492,34 @@ import java.util.UUID;
  *       future board-read growth. The {@code WaitlistBoardController} is
  *       {@code @ConditionalOnProperty}-gated, so it is absent from the generated OpenAPI spec when the
  *       module is off (the {@code NoShowRiskController}/{@code SalonReviewReplyController} precedent).</li>
+ *   <li>{@code 4250-4259} — <em>Real Estate Concierge RE-1 (flagship #3)</em>: the {@code realestate}
+ *       module + {@code Listing}/{@code ListingDisclosure} + disclosure-text indexing + the strict-grounded,
+ *       cited listing concierge over inbound SMS. The whole module is gated on
+ *       {@code kmosf.modules.realestate.enabled} (default off) + {@code Tenant.enabledModules} membership.
+ *       {@code 4250} realestate not enabled for the tenant (surfaced via the shared
+ *       {@code TenantModuleRegistry.requireEnabled} {@code 1130}/{@code 1132} module-gate codes on every
+ *       {@code ListingController}/{@code ListingDisclosureController} handler — the
+ *       {@code 4220}/{@code 4202}/{@code 2700}/{@code 3930} not-enabled posture); {@code 4251} inbound SMS
+ *       could not resolve a listing (no tracked-number match + no in-window recency fallback) — logged, the
+ *       buyer is asked to clarify, 200 returned to Twilio (advisory, never thrown as HTTP); {@code 4252}
+ *       disclosure-text indexing degraded — embedding unavailable / failed (advisory, {@code indexedAt}
+ *       left null, the disclosure is never lost; a re-index retries — never thrown); {@code 4253}
+ *       listing/disclosure not found (or not owned) on agent CRUD, and missing disclosure text on create
+ *       (404/400). {@code 4254-4259} reserved for RE growth. <strong>The inbound-SMS webhook is REUSED</strong>
+ *       ({@code TwilioInboundSmsController}/{@code InboundSmsService}, {@code POST
+ *       /public/integrations/twilio/{id}/sms}) — the {@code smsMode="realestate"} seam delegates non-STOP
+ *       bodies to the {@code ConciergeInboundRouter}; STOP still wins first (TCPA). It REUSES the voicemail
+ *       webhook's {@code 4000} (signature invalid, 401), {@code 4001} (not connected, 404), {@code 4003}
+ *       (invalid tenant id in path, 400) verbatim (NOT re-allocated). Reused (NOT re-allocated):
+ *       {@code 1200-1203} (AI budget gate / Anthropic non-200 / missing-key, via the
+ *       {@code ConciergeAnswerService} sibling of {@code OfferCopyService} — all best-effort, a failure
+ *       becomes a graceful {@code HANDOFF}, never a fabricated or empty answer); {@code 2530-2532} (Twilio
+ *       SMS recipient/send/secret — the reused {@code TwilioSmsService} on the answer/handoff/clarify
+ *       sends, best-effort); {@code 1800} ({@code RoleGuard} STAFF on the agent CRUD controllers). The two
+ *       controllers are {@code @ConditionalOnProperty}-gated, so they are absent from the generated OpenAPI
+ *       spec when the module is off. <strong>No live Twilio / Anthropic / OpenAI / Atlas in tests</strong>
+ *       (WireMock + a test {@code VectorIndex}). <strong>ChairFill byte-equivalent when {@code smsMode}
+ *       unset:</strong> the seam is inert (no router consulted), so the CF-3 YES/STOP path is unchanged.</li>
  * </ul>
  */
 @Slf4j

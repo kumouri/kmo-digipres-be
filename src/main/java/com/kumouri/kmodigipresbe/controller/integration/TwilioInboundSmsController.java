@@ -1,9 +1,10 @@
 package com.kumouri.kmodigipresbe.controller.integration;
 
 import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
+import com.kumouri.kmodigipresbe.integration.twilio.InboundSmsModuleEnabledCondition;
 import com.kumouri.kmodigipresbe.integration.twilio.InboundSmsService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -26,15 +27,18 @@ import java.util.UUID;
  * claim; a STOP sets the {@code sms-opt-out} consent tag. Tenant id is resolved from the URL path
  * <strong>only</strong> — never the payload (§9 external-ingress invariant).
  *
- * <p>{@code @ConditionalOnProperty}-gated on {@code kmosf.modules.chairfill.enabled} so the controller is
- * absent from the generated OpenAPI spec when the module is off (the {@code NoShowRiskController} /
- * waitlist-widget posture — unlike the always-on {@code matchIfMissing=true} voicemail webhook).
- * {@code /public/integrations/twilio/{tenantId}/sms} is reached via the {@code /public/**} permitAll rule.
- * Returns 200 on success (Twilio treats any 2xx as acknowledged).
+ * <p>Gated by {@link InboundSmsModuleEnabledCondition} (chairfill OR realestate enabled) so the controller
+ * is absent from the generated OpenAPI spec when neither module provides the inbound-SMS service (the
+ * {@code NoShowRiskController} / waitlist-widget posture — unlike the always-on {@code matchIfMissing=true}
+ * voicemail webhook). The {@code InboundSmsService} bean is contributed by ChairFill (CF-3) and/or by the
+ * Real Estate Concierge module (RE-1, for a pure-realestate deployment where chairfill is off) — so the
+ * single inbound webhook + signature boundary is reused across both, exactly as the RE-1 "REUSE/EXTEND
+ * CF-3" directive requires. {@code /public/integrations/twilio/{tenantId}/sms} is reached via the
+ * {@code /public/**} permitAll rule. Returns 200 on success (Twilio treats any 2xx as acknowledged).
  */
 @RestController
 @RequestMapping("/public/integrations/twilio")
-@ConditionalOnProperty(prefix = "kmosf.modules.chairfill", name = "enabled")
+@Conditional(InboundSmsModuleEnabledCondition.class)
 @RequiredArgsConstructor
 public class TwilioInboundSmsController {
 
