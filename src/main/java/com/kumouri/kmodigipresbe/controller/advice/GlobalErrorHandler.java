@@ -614,6 +614,28 @@ import java.util.UUID;
  *       <strong>RE-1..RE-4 + ChairFill + the scorer byte-equivalent:</strong> RE-5a is a purely
  *       additive read controller + DTOs + two additive repo finders; it touches no inbound-SMS /
  *       concierge / qualification / marketing / scoring path.</li>
+ *   <li>{@code 4275-4279} — <em>FrontDesk IQ FD-1 (Health-practices flagship #4)</em>: the
+ *       {@code frontdesk} module skeleton + the thin <strong>PHI-free</strong> {@code Appointment} model +
+ *       the nightly no-show-risk model ({@code FrontDeskNoShowScoringService} — a parallel fork of the
+ *       chairfill {@code NoShowRiskScoringService}, itself a fork of {@code LeadScoringV2Service}). The
+ *       first free band above Real Estate (which ends at {@code 4274}). Whole module is
+ *       {@code @ConditionalOnProperty}-gated on {@code kmosf.modules.frontdesk.enabled} (default off) +
+ *       {@code Tenant.enabledModules} membership, so most paths reuse existing codes and FD-1 mints little.
+ *       <strong>The headline is the PHI boundary, enforced by construction</strong> (fence F1): the
+ *       {@code Appointment} document and the scorer's feature vector carry NO clinical field, so the model
+ *       cannot see a diagnosis; a release-blocking IT asserts via reflection that no clinically-named field
+ *       exists. New codes: {@code 4275} a no-show retrain already running for the tenant (409 — the CF-1
+ *       {@code 4221} analogue in the FD band; the {@code NoShowRiskController.retrain} guard); {@code 4276}
+ *       appointment not found / not owned (the tenant-scoped by-id fetch, the RE-1 {@code ListingService}
+ *       {@code 4253} not-found posture, 404); {@code 4277} invalid appointment payload — a create/update
+ *       missing the required {@code contactId}/{@code scheduledStart} (400, nothing to score without them);
+ *       {@code 4278-4279} reserved for FD-1 growth. Reused (NOT re-allocated): {@code 1130}/{@code 1132}
+ *       module gate (a non-frontdesk tenant → the shared not-enabled response, the {@code NoShowRiskController}
+ *       / {@code WaitlistBoardController} 1132 posture); {@code 1800} STAFF {@code RoleGuard} on the CRUD.
+ *       <strong>No outbound comms in FD-1</strong> (that is FD-2 {@code 4280-4284}). <strong>CF-1 + the
+ *       lead-scorer + the core calendar + NMM/ChairFill/RE byte-equivalent:</strong> FD-1 is a purely
+ *       additive module that reads only {@code AppointmentRepository}, never {@code BookingRepository} —
+ *       the two no-show scorers share the {@code NoShowRisk} value type but never share data.</li>
  * </ul>
  */
 @Slf4j
