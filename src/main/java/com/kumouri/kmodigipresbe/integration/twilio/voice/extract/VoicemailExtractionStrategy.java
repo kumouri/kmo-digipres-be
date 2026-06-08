@@ -43,4 +43,24 @@ public interface VoicemailExtractionStrategy {
      * that drops the lead.
      */
     Mono<VoicemailLeadDetails> extract(String transcript, VoicemailCallbackParams params);
+
+    /**
+     * Whether the raw voicemail transcript may be persisted on the resulting {@code Activity.body}
+     * (FD-3 fence F2). The default is {@code true} — {@code TwilioVoicemailService.logCallActivity}
+     * stores the raw transcript as the {@code Activity.body} exactly as it always has, so the mole
+     * and multi-trade strategies (which do NOT override this) stay <strong>byte-identical</strong>
+     * (the {@code TwilioVoicemailIT} / {@code HomeServicesVoicemailIT} regression gates).
+     *
+     * <p>A strategy that handles <strong>PHI-sensitive</strong> verticals (the health front-desk
+     * strategy) overrides this to {@code false}: the raw transcript is then used only transiently for
+     * extraction and is <strong>never written</strong> to the {@code Activity} — the body becomes a
+     * fixed redaction marker and only the logistics fields (name / callback number / intent bucket)
+     * survive on the record. A patient saying "I need my insulin refilled" thus never lands in a
+     * stored, queryable {@code Activity.body}. This is the primary FD-3 PHI fence; that a {@code CALL}
+     * {@code Activity} is also never embedded (the {@code EmbeddingPipeline} indexes only NOTE/EMAIL)
+     * is defense-in-depth.
+     */
+    default boolean persistTranscript() {
+        return true;
+    }
 }

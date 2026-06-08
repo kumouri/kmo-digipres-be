@@ -302,3 +302,146 @@ visit-type. The F3 fence is the PHI headline and is made *provable* by a release
 - **`ConfirmationCopyService.ConfirmationContext` deliberately drops the salon record's `stylistName` +
   `lastService` fields.** This is the structural half of fence F3 — the strongest possible guard is to make
   the clinical token un-passable, not merely forbidden in the prompt.
+
+---
+
+# FD-3 — FrontDesk IQ: PHI-free voicemail-to-callback (HS-1 seam + fence F2) — Progress Ledger
+
+> Crash-recovery source of truth for `frontdesk-iq-phase-3-voicemail-callback`
+> (off `main` @ `c271d48`, FD-2 merged via PR #95). Appends to the FD-1/FD-2 ledger above (same
+> `frontdesk-iq-flagship` lineage).
+>
+> Spec: `~/.claude/plans/frontdesk-iq-flagship.md` §2 (FD-3 sub-phase + the F2 seam option (A)) + §0 fence
+> F2 (raw transcript never persisted/indexed). Error band: **4285-4289** (reserved — FD-3 mints none;
+> reuses AI 1200-1203, Twilio signature 4000-4003, Activity 1300).
+
+## Goal (FD-3)
+
+An after-hours health-practice voicemail → a **logistics-only** extraction (name / callback number /
+intent bucket — `SCHEDULING`/`BILLING`/`PRESCRIPTION_REFILL_REQUEST`/`GENERAL_CALLBACK`/`OTHER`, **never
+clinical detail**) → a front-desk callback `Activity(CALL, INBOUND)` + best-effort notify the desk.
+Reuses the **HS-1 per-tenant voicemail strategy seam** end-to-end. The headline is **fence F2**: the raw
+transcript is **NEVER persisted or indexed** — made provable by a release-blocking IT.
+
+## Design as built
+
+### The F2 seam — `persistTranscript()` (the ONE divergence; keeps mole/multi-trade byte-equivalent)
+- `integration/twilio/voice/extract/VoicemailExtractionStrategy.java` — added a
+  **`default boolean persistTranscript() { return true; }`** to the interface. **Mole + multi-trade do NOT
+  override it** → they keep the default `true` → byte-identical behavior (the `TwilioVoicemailIT` /
+  `HomeServicesVoicemailIT` / `HomeServicesVoicemailFieldServiceDisabledIT` regression gates). The health
+  strategy returns `false`. This is the additive, default-preserving option (A) the plan recommends.
+- `integration/twilio/voice/TwilioVoicemailService.logCallActivity(...)` — now receives the resolved
+  `strategy` (threaded `handleTranscript → createLeadAndNotify → logCallActivity`) and gates the body +
+  recording pointer on `strategy.persistTranscript()`:
+  - **`true` (mole + multi-trade):** `Activity.body` = the raw transcript exactly as before; the
+    `recordingSid`/`recordingUrl` pointer is retained in the payload — **byte-identical** to the shipped
+    construction (same payload keys, same order, same body expression).
+  - **`false` (health):** `Activity.body` = the fixed marker `TwilioVoicemailService.TRANSCRIPT_REDACTED_MARKER`
+    = `"(voicemail transcript not retained — front-desk callback)"`; the `recordingSid`/`recordingUrl`
+    (a path back to the spoken words) are **omitted** from the payload. Only the strategy's logistics-only
+    `extractedJson` + call/from metadata survive. (`transcriptionSource` is the source enum name, not PHI.)
+- **Defense-in-depth (cited, not relied upon):** `EmbeddingPipeline.indexActivity` indexes only NOTE/EMAIL
+  (line 116), so a `CALL` Activity is never embedded regardless — F2's transcript-suppression is the
+  primary fence, CALL-not-indexed is the second layer.
+
+### The health strategy (mirror of `MultiTradeExtractionStrategy`, minus the WO + minus transcript)
+- `integration/twilio/voice/extract/HealthFrontDeskExtractionStrategy.java` — `verticalKey()="health-frontdesk"`,
+  a thin caller over the unchanged `VoicemailExtractionService` transport (AI codes 1200-1203 reused). Owns
+  only its **logistics-only strict-JSON system prompt** (explicitly instructs the model to capture name /
+  callbackNumber / intentBucket / callbackRequested and to **drop ALL clinical/symptom/medication detail** —
+  the prompt is the last fence, never the only one), its model choice, and the map into `VoicemailLeadDetails`.
+  `persistTranscript()=false`. `toDraftWorkOrder` is **always null** (health creates no WorkOrder). Best-effort:
+  an AI failure degrades to `HealthIntakeExtraction.empty()` (OTHER bucket) → a still-usable callback from
+  caller-ID, never the transcript. Selected per-tenant via `IntegrationConnection(twilio).config.voicemailVertical
+  = "health-frontdesk"`; NMM (no key) still defaults to mole → zero blast radius.
+- `integration/twilio/voice/extract/HealthIntakeExtraction.java` — the logistics-only record
+  `{name, callbackNumber, intentBucket, callbackRequested}` + the `IntentBucket` enum
+  `{SCHEDULING, BILLING, PRESCRIPTION_REFILL_REQUEST, GENERAL_CALLBACK, OTHER}` + lenient `fromWire`
+  (unknown → OTHER) + `wire()`/`label()`. **Structural fence F2:** the record has NO symptom/diagnosis/
+  procedure/drug/dosage slot, so the spoken clinical detail cannot be captured even if the model emitted it.
+  A refill *request* routes as the `PRESCRIPTION_REFILL_REQUEST` logistics bucket; the drug name is not kept.
+
+### The callback Activity + notify (reused pipeline, PHI-free payload)
+- The existing `TwilioVoicemailService` pipeline (signature-verify 4000-4003, ledger-insert-FIRST idempotency,
+  find-or-create Contact, `Activity(CALL, INBOUND)`, best-effort notify + auto-ack) is **reused unchanged**
+  except for the `persistTranscript()` gate. The health voicemail yields: a Contact, a callback `Activity`
+  whose body is the redaction marker and whose payload carries only `{callSid, fromNumber, extractedJson:
+  {name, callbackNumber, intentBucket, callbackRequested}, transcriptionSource}`, and a PHI-free notify
+  (the summary one-liner names only the logistics bucket, e.g. "Callback from Dana — Prescription refill —
+  callback requested").
+
+## Files
+
+### New (FD-3)
+- `integration/twilio/voice/extract/HealthFrontDeskExtractionStrategy.java` (the strategy; `persistTranscript()=false`)
+- `integration/twilio/voice/extract/HealthIntakeExtraction.java` (logistics-only record + `IntentBucket` enum)
+
+### Touched (additive, default-preserving)
+- `integration/twilio/voice/extract/VoicemailExtractionStrategy.java` (+`default boolean persistTranscript()`)
+- `integration/twilio/voice/TwilioVoicemailService.java` (thread `strategy` into `logCallActivity`; gate
+  body + recording pointer on `persistTranscript()`; add `TRANSCRIPT_REDACTED_MARKER`)
+- `controller/advice/GlobalErrorHandler.java` (+4285-4289 doc band)
+
+### Reused, NOT copied / NOT changed
+- `VoicemailExtractionStrategyResolver` (selection by `voicemailVertical`), `VoicemailExtractionService`
+  (transport/budget/parse — codes 1200-1203), the whole `TwilioVoicemailService` signature-verify +
+  idempotency + Contact + notify + auto-ack pipeline, `VoicemailLeadDetails` (`draftWorkOrder=null` for health).
+
+### Tests
+- `src/test/java/.../integration/twilio/voice/HealthFrontDeskVoicemailIT.java` — (1) **THE MARQUEE /
+  release-blocking F2 test**: a `voicemailVertical="health-frontdesk"` signed transcription callback whose
+  transcript mentions clinical detail ("blood pressure", "Lisinopril", "dizzy") → one Contact, one callback
+  `Activity(CALL, INBOUND)` with `extractedJson.intentBucket=PRESCRIPTION_REFILL_REQUEST` + callbackNumber,
+  **`body` == the redaction marker (NOT the transcript)**, payload has **no `recordingSid`/`recordingUrl`**
+  and no transcript, and the **entire serialized Activity contains NONE of the clinical tokens** (the F2
+  assertion); the Anthropic transport called once; notify fired but PHI-free (no clinical token in any SMS
+  body). (2) best-effort — a Claude 500 still creates a callback Activity and the transcript is **still
+  redacted** on the degraded path. WireMock for Anthropic; `@MockitoBean TwilioSmsService`/`EmailService`.
+
+## Validation status
+
+- `./gradlew compileJava compileTestJava` — GREEN.
+- `./gradlew cleanTest test --tests "*HealthFrontDeskVoicemailIT" --tests "*TwilioVoicemailIT"
+  --tests "*HomeServicesVoicemailIT" --tests "*HomeServicesVoicemailFieldServiceDisabledIT"
+  --tests "*FrontDeskConfirmationIT" --tests "*OpenApiEndpointIT"` — **GREEN** (force-clean). Per-class
+  (tests/failures/errors): **HealthFrontDeskVoicemailIT 2/0/0**; **TwilioVoicemailIT (mole gate) 6/0/0**;
+  **HomeServicesVoicemailIT (multi-trade gate) 4/0/0**; **HomeServicesVoicemailFieldServiceDisabledIT
+  (multi-trade degrade gate) 2/0/0**; FrontDeskConfirmationIT 8/0/0; OpenApiEndpointIT 2/0/0. (24 total,
+  0 failures.)
+
+## Hard gates
+
+1. **Mole + multi-trade voicemail BYTE-EQUIVALENT** — `persistTranscript()` defaults `true`; the mole + the
+   two multi-trade ITs pass **unchanged** (6/0/0, 4/0/0, 2/0/0). The only change to a shipped file
+   (`TwilioVoicemailService`) is gated behind the default-true bit, so the default path is byte-identical.
+2. **F2 fence (the PHI headline)** — the health voicemail Activity stores NO raw transcript (body = the
+   redaction marker), NO recording pointer, and NO clinical token; the release-blocking
+   `clinicalVoicemail_createsCallbackActivity_withNoTranscriptAndNoClinicalToken` IT asserts a clinical
+   forbidden-token set is absent from the entire serialized Activity (and from every outbound SMS body). The
+   structural fence (no clinical slot on `HealthIntakeExtraction`) means PHI can't be captured even upstream.
+3. **Module-gated / per-tenant, blast radius zero, best-effort, error band 4285-4289** — selection is by the
+   per-tenant `voicemailVertical="health-frontdesk"` (NMM/HS/ChairFill/RealEstate unaffected); the new
+   strategy is an additive `@Component` (the resolver auto-discovers it). Every AI/notify call is
+   `onErrorResume` best-effort (a callback is never dropped). FD-3 mints no new error codes (reuses AI
+   1200-1203, Twilio signature 4000-4003, Activity 1300); the 4285-4289 band is reserved + documented.
+
+## Deviations / surprises
+
+- **Intent-bucket vocabulary follows the PLAN (`SCHEDULING / BILLING / PRESCRIPTION_REFILL_REQUEST /
+  GENERAL_CALLBACK / OTHER`), not the alternate set in the task prose** (`SCHEDULE/RESCHEDULE/CANCEL/BILLING/
+  NEW_PATIENT/OTHER`). The plan §0/§2 + the demo script + the marquee F2 test all key on
+  `PRESCRIPTION_REFILL_REQUEST` as the load-bearing demo bucket (a refill *request* is the canonical
+  "rides up to the clinical line, fenced" example), so the plan's set is the source of truth.
+- **No `FRONTDESK_CALLBACK_CREATED` event emitted (plan marked it optional).** The reused pipeline already
+  emits `VOICEMAIL_LEAD_CREATED` (carrying contactId + activityId) for the callback inbox to consume; adding
+  a second, health-only emit would have added a second seam bit and blast-radius surface for no FD-3
+  behavior. Kept the seam to the single `persistTranscript()` bit (the briefing's "keep it tight"). Trivial
+  to add additively in FD-5 if the FE callback inbox wants a distinct signal.
+- **No `VoicemailRetention` opt-in blob built (plan marked it optional).** The default + only behavior is to
+  drop the transcript after extraction (the strongest F2 posture). A tenant insisting on verifiable
+  transcripts is a separately-priced compliance-tier conversation (plan §0/D4) — deliberately not built.
+- **The recording SID/URL are suppressed alongside the transcript for the health vertical.** The plan's F2
+  text focuses on the transcript; the recording pointer is a re-fetchable path back to the spoken words, so
+  omitting it from the payload closes that gap too. (For mole/multi-trade the pointer is retained
+  byte-identically — the default-true branch is unchanged.)
