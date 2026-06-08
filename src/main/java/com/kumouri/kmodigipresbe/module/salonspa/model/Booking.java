@@ -68,6 +68,16 @@ public class Booking implements Auditable {
      */
     private UUID loyaltyAccountId;
 
+    /**
+     * Nightly no-show-risk score stamped by the ChairFill (CF-1)
+     * {@link com.kumouri.kmodigipresbe.module.chairfill.scoring.NoShowRiskScoringService}
+     * on <em>upcoming</em> bookings only. Additive + nullable (the {@code Contact.leadScore}
+     * embed precedent): null for terminal bookings, for tenants without the {@code chairfill}
+     * module, and before the first scoring run. Salon-spa core never reads or writes this —
+     * it is purely an advisory CF-1 stamp consumed by CF-2 prevention.
+     */
+    private com.kumouri.kmodigipresbe.module.chairfill.model.NoShowRisk noShowRisk;
+
     @Version
     private Long version;
 

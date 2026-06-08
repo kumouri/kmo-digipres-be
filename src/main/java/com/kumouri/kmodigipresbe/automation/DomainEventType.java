@@ -315,6 +315,15 @@ public final class DomainEventType {
     public static final String GBP_REVIEW_REPLY_DRAFTED = "gbp.reviewReplyDrafted";
     public static final String GBP_REVIEW_REPLY_POSTED  = "gbp.reviewReplyPosted";
 
+    // ChairFill CF-1 — nightly no-show risk scoring. Emitted by the chairfill-module-gated
+    // NoShowRiskScoringService once per UPCOMING salon Booking that gets a NoShowRisk stamped
+    // (terminal bookings are never re-stamped, so never emit). Advisory (RuleEngine / webhook
+    // fan-out) — does NOT drive any core mutation; the CF-2 RiskTieredPreventionService
+    // subscribes to branch on tier (HIGH -> deposit-require + extra-confirm; LOW/MEDIUM ->
+    // personalized reminder). Payload:
+    // {bookingId, contactId, staffMemberId, riskTier, riskScore, source}.
+    public static final String BOOKING_RISK_SCORED = "booking.riskScored";
+
     private DomainEventType() {
     }
 }

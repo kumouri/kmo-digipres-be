@@ -398,6 +398,22 @@ import java.util.UUID;
  *       + owner-digest sends). <strong>Go-live needs a real Twilio number, a verified on-call number,
  *       and an A2P 10DLC campaign for the caller-facing booking SMS</strong> — separate human/external
  *       steps, out of the implementation loop (plan §6).</li>
+ *   <li>{@code 4220-4224} — <em>ChairFill CF-1 (Personal-care / salon flagship)</em>: nightly
+ *       no-show risk model. The free band above HS (which ends at {@code 4219}). The whole module is
+ *       gated on {@code kmosf.modules.chairfill.enabled} (default off) + {@code Tenant.enabledModules}
+ *       membership, so most paths reuse existing codes and CF-1 mints little. {@code 4220} ChairFill
+ *       not enabled for the tenant (surfaced via the shared {@code TenantModuleRegistry.requireEnabled}
+ *       {@code 1130}/{@code 1132} module-gate codes on every {@code NoShowRiskController} handler —
+ *       mirrors the {@code 4202}/{@code 2700}/{@code 3930} not-enabled posture); {@code 4221} a
+ *       no-show retrain job is already running for this tenant ({@code POST /chairfill/risk/retrain}
+ *       → 409, the lead-scoring {@code 3001} analogue, kept ChairFill-local for clarity);
+ *       {@code 4222-4224} reserved for CF-1 growth. Reused (NOT re-allocated): {@code 1130}/{@code 1132}
+ *       (module-gate, as above); {@code 2900} salon Booking-not-found (the reused {@code BookingRepository}
+ *       reads). The scoring itself is pure Smile ML — <strong>zero per-booking token cost, no AI-budget
+ *       (1200-1203) path</strong>. The downstream {@code BOOKING_RISK_SCORED} event is advisory (it does
+ *       not drive any core mutation; CF-2 will subscribe). The {@code NoShowRiskController} is
+ *       {@code @ConditionalOnProperty}-gated, so it is absent from the generated OpenAPI spec when the
+ *       module is off (the HS precedent).</li>
  * </ul>
  */
 @Slf4j
