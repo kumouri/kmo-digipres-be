@@ -73,4 +73,37 @@ public class TwilioVoiceController {
                         .contentType(MediaType.APPLICATION_XML)
                         .body(twiml));
     }
+
+    /**
+     * HS-3 — handles the single digit from the EMERGENCY live-forward IVR {@code <Gather>}. Twilio
+     * POSTs the pressed {@code Digits} here (the {@code action} of the {@code <Gather>} emitted by
+     * {@code /voice}). {@link TwilioVoicemailService} verifies the {@code X-Twilio-Signature} (the
+     * same {@code 4000-4003} posture as {@code /voice} and {@code /voicemail}) BEFORE producing any
+     * TwiML, then returns either {@code <Dial>onCallPhone</Dial>} ({@code Digits=="1"} — the
+     * live-forward) or the greeting + {@code <Record>} voicemail TwiML (any other / no input /
+     * timeout — the caller still leaves a message). Tenant id from the URL path ONLY.
+     *
+     * @param tenantId  the CRM tenant id (from the URL path — NEVER the payload)
+     * @param signature the {@code X-Twilio-Signature} header from Twilio
+     * @param exchange  the request (used to reconstruct the full signed URL + read the form)
+     */
+    @PostMapping(value = "/{tenantId}/voice/gather", produces = MediaType.APPLICATION_XML_VALUE)
+    public Mono<ResponseEntity<String>> gather(
+            @PathVariable String tenantId,
+            @RequestHeader(name = "X-Twilio-Signature", required = false) String signature,
+            ServerWebExchange exchange) {
+        UUID parsed;
+        try {
+            parsed = UUID.fromString(tenantId);
+        } catch (IllegalArgumentException ex) {
+            return Mono.error(new DigiPresBeException(
+                    "Invalid tenant id in Twilio voice gather webhook path", 4003, 400));
+        }
+        String fullUrl = TwilioVoicemailController.reconstructFullUrl(exchange);
+        return exchange.getFormData()
+                .flatMap(form -> voicemail.handleGather(parsed, signature, fullUrl, form))
+                .map(twiml -> ResponseEntity.ok()
+                        .contentType(MediaType.APPLICATION_XML)
+                        .body(twiml));
+    }
 }

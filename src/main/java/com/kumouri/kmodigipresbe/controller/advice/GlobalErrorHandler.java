@@ -380,6 +380,24 @@ import java.util.UUID;
  *       {@code 1300} Activity-not-found (reused {@code ActivityCrudService}); {@code 1800}
  *       not-ADMIN (reused {@code RoleGuard} on the token issuer); {@code 2530-2532} (Twilio SMS —
  *       reused {@code TwilioSmsService} on the owner-digest notify).</li>
+ *   <li>{@code 4215-4219} — <em>HS-3 (Home Services — "Front Desk That Never Sleeps")</em>:
+ *       EMERGENCY live-forward + two-sided outbound SMS. The live-forward is a <strong>deterministic
+ *       IVR gate on the voice webhook</strong> (a {@code <Gather>} "press 1 for the on-call tech")
+ *       whose digit is handled by a new signature-verified callback
+ *       {@code POST /public/integrations/twilio/{id}/voice/gather} — AI urgency is only known
+ *       <em>after</em> transcription, so the forward cannot be AI-gated mid-call (plan §6 timing).
+ *       The gate is the per-tenant {@code IntegrationConnection(twilio).config.onCallPhone}: absent
+ *       → the voice webhook returns the EXISTING greeting+record TwiML byte-unchanged (the NMM gate).
+ *       The caller booking-link SMS is gated on {@code config.bookingLinkUrl} and the owner digest is
+ *       EMERGENCY-flagged only when the AI triage urgency is {@code EMERGENCY} — both gated so the
+ *       mole/default auto-ack + owner-notify bodies stay byte-identical. No new error condition is
+ *       <em>thrown</em> today — the band is RESERVED ({@code 4215-4219}) for future HS-3 forward /
+ *       booking-link conditions; the gather callback reuses the voice webhook's existing
+ *       {@code 4000-4003} (signature / not-connected / CallSid / tenant-id) and the
+ *       {@code 2530-2532} Twilio-SMS codes (the reused {@code TwilioSmsService} on the booking-link
+ *       + owner-digest sends). <strong>Go-live needs a real Twilio number, a verified on-call number,
+ *       and an A2P 10DLC campaign for the caller-facing booking SMS</strong> — separate human/external
+ *       steps, out of the implementation loop (plan §6).</li>
  * </ul>
  */
 @Slf4j

@@ -105,6 +105,21 @@ public class TwilioVoicemailService {
     public static final String PROVIDER = TwilioSmsService.PROVIDER; // "twilio"
 
     /**
+     * HS-3 — the per-tenant {@code IntegrationConnection(twilio).config} key whose presence is the
+     * EMERGENCY live-forward gate: when set to the on-call technician's E.164 number, the voice
+     * webhook returns the emergency IVR {@code <Gather>}; when absent (NMM / default) the voice
+     * webhook is byte-unchanged.
+     */
+    public static final String CONFIG_ON_CALL_PHONE = "onCallPhone";
+
+    /**
+     * HS-3 — the per-tenant {@code IntegrationConnection(twilio).config} key whose presence gates the
+     * caller-facing booking-link SMS: when set to a booking URL, the caller auto-ack appends "Book
+     * your visit: &lt;url&gt;"; when absent (NMM / default) the auto-ack is byte-unchanged.
+     */
+    public static final String CONFIG_BOOKING_LINK_URL = "bookingLinkUrl";
+
+    /**
      * HS-2 — TTL of the equipment-photo upload token embedded in the home-services auto-ack SMS link.
      * 7 days (matches {@code EquipmentPhotoTokenController.TOKEN_TTL}): long enough for a caller to
      * get to their unit and photograph it after the after-hours call, short enough that a forgotten
@@ -151,6 +166,19 @@ public class TwilioVoicemailService {
      */
     private final String equipmentUploadBaseUrl;
 
+    /**
+     * HS-3 — the spoken prompt for the EMERGENCY live-forward {@code <Gather>}. Configurable so a
+     * deployment can tune the wording; the default tells the caller to press 1 for the on-call tech
+     * or stay on the line to leave a message.
+     */
+    private final String emergencyGatherPrompt;
+    /**
+     * HS-3 — the {@code <Gather timeout>} (seconds) the caller has to press 1 before the IVR falls
+     * through to the voicemail greeting + {@code <Record>}. Short by default so a non-emergency caller
+     * is not made to wait.
+     */
+    private final int emergencyGatherTimeoutSeconds;
+
     public TwilioVoicemailService(
             IntegrationConnectionRepository connections,
             TwilioVoicemailEventRepository voicemailEvents,
@@ -170,7 +198,12 @@ public class TwilioVoicemailService {
             @Value("${kmosf.voicemail.auto-ack-message:Thanks for calling — we got your "
                     + "message and will call you back.}") String autoAckMessage,
             @Value("${kmosf.mail.smtp.username:}") String notifyFromAddress,
-            @Value("${kmosf.home-services.equipment-upload-base-url:}") String equipmentUploadBaseUrl) {
+            @Value("${kmosf.home-services.equipment-upload-base-url:}") String equipmentUploadBaseUrl,
+            @Value("${kmosf.home-services.emergency-gather-prompt:If this is an emergency, press 1 "
+                    + "now to reach our on-call technician; otherwise, stay on the line to leave a "
+                    + "message.}") String emergencyGatherPrompt,
+            @Value("${kmosf.home-services.emergency-gather-timeout-seconds:5}")
+                    int emergencyGatherTimeoutSeconds) {
         this.connections = connections;
         this.voicemailEvents = voicemailEvents;
         this.transcriptionSource = transcriptionSource;
@@ -187,6 +220,25 @@ public class TwilioVoicemailService {
         this.autoAckMessage = autoAckMessage;
         this.notifyFromAddress = notifyFromAddress;
         this.equipmentUploadBaseUrl = equipmentUploadBaseUrl == null ? "" : equipmentUploadBaseUrl.trim();
+        this.emergencyGatherPrompt = emergencyGatherPrompt;
+        this.emergencyGatherTimeoutSeconds = emergencyGatherTimeoutSeconds;
+    }
+
+    /**
+     * Reads a per-tenant {@code IntegrationConnection.config} value, trimmed, returning {@code null}
+     * for absent/blank — the gate posture shared by the HS-3 {@code onCallPhone} /
+     * {@code bookingLinkUrl} keys (an absent key keeps the mole/default behavior byte-unchanged).
+     */
+    private static String configValue(IntegrationConnection conn, String key) {
+        if (conn == null || conn.getConfig() == null) {
+            return null;
+        }
+        String v = conn.getConfig().get(key);
+        if (v == null) {
+            return null;
+        }
+        String t = v.trim();
+        return t.isEmpty() ? null : t;
     }
 
     // -------------------------------------------------------------------------
@@ -194,14 +246,100 @@ public class TwilioVoicemailService {
     // -------------------------------------------------------------------------
 
     /**
-     * Verifies the Twilio signature, then returns the TwiML that greets the caller and
-     * records + transcribes a voicemail with the transcription delivered to the
-     * {@code .../voicemail} callback. Tenant from path only.
+     * Verifies the Twilio signature, then returns the TwiML for the inbound call.
+     *
+     * <h2>HS-3 — EMERGENCY live-forward IVR gate</h2>
+     * AI urgency is only known <em>after</em> transcription + triage — which is <em>after</em> the
+     * caller has already left a voicemail — so the live-forward CANNOT be AI-gated mid-call (plan §6
+     * timing). Instead a <strong>deterministic IVR gate</strong> on the voice webhook: when the
+     * tenant's Twilio {@code IntegrationConnection.config} carries an {@code onCallPhone}, the TwiML
+     * is a brief {@code <Gather numDigits="1">} ("press 1 now to reach our on-call technician;
+     * otherwise stay on the line to leave a message") whose digit is handled by
+     * {@link #handleGather} — {@code 1} → {@code <Dial>onCallPhone</Dial>}, anything else / no input /
+     * timeout → falls through to the existing greeting + {@code <Record>} voicemail TwiML.
+     *
+     * <p><strong>The gate:</strong> when {@code onCallPhone} is absent (NMM / the default), this
+     * returns {@link #buildVoiceTwiml()} <strong>byte-unchanged</strong> — the NMM voice flow must not
+     * change (the {@code TwilioVoicemailIT} {@code voiceEndpoint_signed_returnsRecordTwiml} gate).
+     * Tenant from path only.
      */
     public Mono<String> handleVoice(UUID tenantId, String signatureHeader, String fullUrl,
                                     MultiValueMap<String, String> form) {
         return verifiedConnection(tenantId, signatureHeader, fullUrl, form)
-                .thenReturn(buildVoiceTwiml());
+                .map(this::buildVoiceTwimlFor);
+    }
+
+    /**
+     * HS-3 gather callback — handles the single digit from the emergency IVR {@code <Gather>}. Signed
+     * exactly like the voice/voicemail callbacks (reused {@code 4000-4003} via
+     * {@link #verifiedConnection}). {@code Digits == "1"} → {@code <Dial>onCallPhone</Dial>} (the
+     * live-forward to the on-call tech); anything else / no input / timeout → the existing greeting +
+     * {@code <Record>} voicemail TwiML (so the caller still leaves a message). If {@code onCallPhone}
+     * is somehow absent at this point (defensive — the gather is only ever reached when it was set),
+     * also falls through to the record TwiML. Tenant from path only.
+     */
+    public Mono<String> handleGather(UUID tenantId, String signatureHeader, String fullUrl,
+                                     MultiValueMap<String, String> form) {
+        return verifiedConnection(tenantId, signatureHeader, fullUrl, form)
+                .map(conn -> {
+                    String digits = form == null ? null : form.getFirst("Digits");
+                    String onCallPhone = configValue(conn, CONFIG_ON_CALL_PHONE);
+                    if ("1".equals(digits) && onCallPhone != null) {
+                        return buildDialTwiml(onCallPhone);
+                    }
+                    // Any other / no input / timeout → fall through to the record-voicemail TwiML.
+                    return buildVoiceTwiml();
+                });
+    }
+
+    /**
+     * HS-3 — chooses the voice-webhook TwiML for this connection. With an {@code onCallPhone}
+     * configured, the emergency IVR {@code <Gather>}; otherwise the existing record-voicemail TwiML
+     * <strong>byte-unchanged</strong> (the NMM gate).
+     */
+    private String buildVoiceTwimlFor(IntegrationConnection conn) {
+        String onCallPhone = configValue(conn, CONFIG_ON_CALL_PHONE);
+        if (onCallPhone == null) {
+            return buildVoiceTwiml();
+        }
+        return buildEmergencyGatherTwiml();
+    }
+
+    /**
+     * The emergency-IVR TwiML: a brief {@code <Gather numDigits="1">} prompting the caller to press 1
+     * for the on-call tech, posting the digit to the path-relative {@code voice/gather} callback (same
+     * RFC-3986 path-relative-resolution reasoning as {@code voicemail} in {@link #buildVoiceTwiml()} —
+     * it inherits the host + {@code /api/v1} base-path). On no input / timeout the {@code <Gather>}
+     * falls through to the greeting + {@code <Record>} so the caller still leaves a message.
+     */
+    private String buildEmergencyGatherTwiml() {
+        // "voice/gather" is path-relative (no leading slash) so Twilio resolves it against the full
+        // voice-webhook URL (.../{id}/voice) → .../{id}/voice/gather, inheriting host + base-path.
+        String gatherAction = "voice/gather";
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                + "<Response>"
+                + "<Gather numDigits=\"1\" timeout=\"" + emergencyGatherTimeoutSeconds + "\""
+                + " action=\"" + gatherAction + "\">"
+                + "<Say>" + HtmlUtils.htmlEscape(emergencyGatherPrompt) + "</Say>"
+                + "</Gather>"
+                + "<Say>" + HtmlUtils.htmlEscape(greeting) + "</Say>"
+                + "<Record transcribe=\"true\""
+                + " transcribeCallback=\"voicemail\""
+                + " maxLength=\"" + recordMaxLengthSeconds + "\""
+                + " playBeep=\"true\"/>"
+                + "</Response>";
+    }
+
+    /**
+     * The live-forward TwiML — {@code <Dial>onCallPhone</Dial>}. Telephony is stubbed in tests (no
+     * real call is placed); go-live requires a real Twilio number + a verified on-call number
+     * (plan §6).
+     */
+    private String buildDialTwiml(String onCallPhone) {
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                + "<Response>"
+                + "<Dial>" + HtmlUtils.htmlEscape(onCallPhone) + "</Dial>"
+                + "</Response>";
     }
 
     private String buildVoiceTwiml() {
@@ -420,7 +558,7 @@ public class TwilioVoicemailService {
                                             .thenReturn(woId);
                                 })
                                 .flatMap(woId -> notifyRob(conn, params, details)
-                                        .then(autoAckCaller(tenantId, params, woId))
+                                        .then(autoAckCaller(tenantId, conn, params, woId))
                                         .then(Mono.fromRunnable(() -> {
                                             emitVoicemailLeadCreated(tenantId, params, contact, activity);
                                             woId.ifPresent(id -> emitVoicemailWorkOrderDrafted(
@@ -544,6 +682,13 @@ public class TwilioVoicemailService {
      * {@code IntegrationConnection.config} ({@code notifyEmail} / {@code notifyPhone}); NOT
      * hardcoded. A missing target or a send failure is swallowed ({@code onErrorResume}) so the
      * already-durable lead is never lost.
+     *
+     * <p>HS-3: when the AI triage urgency is {@code EMERGENCY} (the HS-1
+     * {@code extractedJson.urgency} the multi-trade strategy stamps), the owner digest is prominently
+     * <strong>EMERGENCY-flagged</strong> (an {@code EMERGENCY:} prefix on the email subject + an
+     * {@code EMERGENCY} banner on the email body + SMS). For the mole/default vertical (no
+     * {@code urgency} / a non-EMERGENCY urgency) the email subject + email body + SMS body are
+     * <strong>byte-identical</strong> to before (the NMM {@code TwilioVoicemailIT} gate).
      */
     private Mono<Void> notifyRob(IntegrationConnection conn, VoicemailCallbackParams params,
                                  VoicemailLeadDetails details) {
@@ -552,16 +697,22 @@ public class TwilioVoicemailService {
         String notifyPhone = config.get("notifyPhone");
         String callbackNumber = params.from() != null ? params.from() : "(unknown)";
         String summary = details.summaryLine();
+        boolean emergency = isEmergency(details);
 
         Mono<Void> emailMono = Mono.empty();
         if (notifyEmail != null && !notifyEmail.isBlank()
                 && notifyFromAddress != null && !notifyFromAddress.isBlank()) {
-            String bodyHtml = "<p>" + HtmlUtils.htmlEscape(summary) + "</p>"
+            // The EMERGENCY banner is prepended only for an EMERGENCY-urgency lead; otherwise the
+            // body is the byte-identical Phase-1/HS-1 construction.
+            String bodyHtml = (emergency ? "<p><strong>EMERGENCY</strong></p>" : "")
+                    + "<p>" + HtmlUtils.htmlEscape(summary) + "</p>"
                     + "<p>Callback number: " + HtmlUtils.htmlEscape(callbackNumber) + "</p>";
+            String subject = (emergency ? "EMERGENCY: " : "")
+                    + "New voicemail lead — " + callbackNumber;
             SingleEmailCommunicationRequest emailReq = SingleEmailCommunicationRequest.builder()
                     .from(new EmailContact(notifyFromAddress))
                     .to(new EmailContact(notifyEmail))
-                    .subject("New voicemail lead — " + callbackNumber)
+                    .subject(subject)
                     .body(bodyHtml)
                     .build();
             emailMono = emailService.sendSingleEmail(emailReq)
@@ -575,9 +726,12 @@ public class TwilioVoicemailService {
 
         Mono<Void> smsMono = Mono.empty();
         if (notifyPhone != null && !notifyPhone.isBlank()) {
+            // EMERGENCY prefix only for an EMERGENCY lead; otherwise byte-identical to before.
+            String smsBody = (emergency ? "EMERGENCY: " : "")
+                    + summary + " Callback: " + callbackNumber;
             SmsCommunicationRequest smsReq = SmsCommunicationRequest.builder()
                     .to(new PhoneContact(notifyPhone))
-                    .body(summary + " Callback: " + callbackNumber)
+                    .body(smsBody)
                     .build();
             smsMono = twilioSmsService.sendSms(smsReq)
                     .onErrorResume(e -> {
@@ -591,25 +745,43 @@ public class TwilioVoicemailService {
     }
 
     /**
+     * HS-3 — whether the AI triage urgency for this lead is {@code EMERGENCY}. Reads the
+     * {@code extractedJson.urgency} the multi-trade strategy stamps (the same value echoed onto the
+     * WorkOrder {@code customFields.urgency}). Defensive: a missing/non-EMERGENCY value → {@code false}
+     * (so the mole/default digest stays byte-unchanged).
+     */
+    private static boolean isEmergency(VoicemailLeadDetails details) {
+        Object urgency = details.extractedJson().get("urgency");
+        return urgency != null && "EMERGENCY".equals(urgency.toString());
+    }
+
+    /**
      * Best-effort auto-acknowledgement SMS back to the caller ({@code From}) via the existing
      * {@code TwilioSmsService}. Swallowed on failure — never fails the ingest.
      *
      * <p>HS-2: when a DRAFT {@link WorkOrder} was created (home-services vertical only) AND a
      * {@code kmosf.home-services.equipment-upload-base-url} is configured, the equipment-photo upload
      * link is appended so the caller can text a photo of their unit (which
-     * {@code EquipmentVisionService} reads to enrich the WorkOrder). For the mole/default vertical
-     * {@code woId} is empty → no link → the SMS body is <strong>byte-identical</strong> to before
-     * (the NMM {@code TwilioVoicemailIT} gate); likewise when the base URL is unset (the default).
+     * {@code EquipmentVisionService} reads to enrich the WorkOrder).
+     *
+     * <p>HS-3: when the tenant's Twilio {@code config.bookingLinkUrl} is set, a booking link is
+     * appended so the caller can self-book ("Book your visit: &lt;url&gt;"). Go-live for the
+     * caller-facing booking SMS needs an A2P 10DLC campaign (plan §6) — out of the implementation
+     * loop.
+     *
+     * <p>For the mole/default vertical {@code woId} is empty AND (in NMM's config) neither the
+     * equipment-upload base URL nor {@code bookingLinkUrl} is set → no link of either kind → the SMS
+     * body is <strong>byte-identical</strong> to before (the NMM {@code TwilioVoicemailIT} gate).
      */
-    private Mono<Void> autoAckCaller(UUID tenantId, VoicemailCallbackParams params,
-                                     java.util.Optional<UUID> woId) {
+    private Mono<Void> autoAckCaller(UUID tenantId, IntegrationConnection conn,
+                                     VoicemailCallbackParams params, java.util.Optional<UUID> woId) {
         String from = params.from();
         if (from == null || from.isBlank()) {
             return Mono.empty();
         }
         SmsCommunicationRequest ack = SmsCommunicationRequest.builder()
                 .to(new PhoneContact(from))
-                .body(buildAutoAckBody(tenantId, woId))
+                .body(buildAutoAckBody(tenantId, conn, woId))
                 .build();
         return twilioSmsService.sendSms(ack)
                 .onErrorResume(e -> {
@@ -621,28 +793,42 @@ public class TwilioVoicemailService {
     }
 
     /**
-     * Builds the auto-ack SMS body. The base message is unchanged; the HS-2 equipment-photo upload
-     * link is appended only when {@code woId} is present (home-services created a DRAFT WorkOrder) AND
-     * the upload base URL is configured. Token minting is wrapped defensively — a token failure must
-     * never fail the (best-effort) auto-ack, so it falls back to the bare message.
+     * Builds the auto-ack SMS body. The base message is unchanged; two <em>independent, gated</em>
+     * suffixes may be appended (in order): the HS-2 equipment-photo upload link (when {@code woId} is
+     * present AND the upload base URL is configured) and the HS-3 booking link (when the tenant's
+     * Twilio {@code config.bookingLinkUrl} is set). Token minting is wrapped defensively — a token
+     * failure must never fail the (best-effort) auto-ack, so it degrades to omitting that one suffix.
+     *
+     * <p>When neither suffix applies (the mole/default path) the returned body is
+     * <strong>byte-identical</strong> to {@link #autoAckMessage} — the NMM gate.
      */
-    private String buildAutoAckBody(UUID tenantId, java.util.Optional<UUID> woId) {
-        if (woId.isEmpty() || equipmentUploadBaseUrl.isEmpty()) {
-            return autoAckMessage;
+    private String buildAutoAckBody(UUID tenantId, IntegrationConnection conn,
+                                    java.util.Optional<UUID> woId) {
+        StringBuilder body = new StringBuilder(autoAckMessage);
+
+        // HS-2 — equipment-photo upload link (gated on a DRAFT WO + configured base URL).
+        if (woId.isPresent() && !equipmentUploadBaseUrl.isEmpty()) {
+            try {
+                String token = equipmentPhotoTokens.issue(
+                        tenantId, woId.get(), EQUIPMENT_UPLOAD_TOKEN_TTL);
+                String base = equipmentUploadBaseUrl.endsWith("/")
+                        ? equipmentUploadBaseUrl.substring(0, equipmentUploadBaseUrl.length() - 1)
+                        : equipmentUploadBaseUrl;
+                String link = base + "/" + token + "/upload";
+                body.append(" If it helps, send a photo of your equipment here: ").append(link);
+            } catch (RuntimeException e) {
+                log.warn("Equipment-photo upload-link minting failed for WorkOrder {} (best-effort, "
+                        + "omitting the upload link): {}", woId.get(), e.getMessage());
+            }
         }
-        try {
-            String token = equipmentPhotoTokens.issue(
-                    tenantId, woId.get(), EQUIPMENT_UPLOAD_TOKEN_TTL);
-            String base = equipmentUploadBaseUrl.endsWith("/")
-                    ? equipmentUploadBaseUrl.substring(0, equipmentUploadBaseUrl.length() - 1)
-                    : equipmentUploadBaseUrl;
-            String link = base + "/" + token + "/upload";
-            return autoAckMessage + " If it helps, send a photo of your equipment here: " + link;
-        } catch (RuntimeException e) {
-            log.warn("Equipment-photo upload-link minting failed for WorkOrder {} (best-effort, "
-                    + "bare auto-ack): {}", woId.get(), e.getMessage());
-            return autoAckMessage;
+
+        // HS-3 — caller booking link (gated on the per-tenant config.bookingLinkUrl).
+        String bookingLinkUrl = configValue(conn, CONFIG_BOOKING_LINK_URL);
+        if (bookingLinkUrl != null) {
+            body.append(" Book your visit: ").append(bookingLinkUrl);
         }
+
+        return body.toString();
     }
 
     private void emitVoicemailLeadCreated(UUID tenantId, VoicemailCallbackParams params,
