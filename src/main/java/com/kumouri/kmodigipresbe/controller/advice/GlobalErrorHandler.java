@@ -520,6 +520,26 @@ import java.util.UUID;
  *       spec when the module is off. <strong>No live Twilio / Anthropic / OpenAI / Atlas in tests</strong>
  *       (WireMock + a test {@code VectorIndex}). <strong>ChairFill byte-equivalent when {@code smsMode}
  *       unset:</strong> the seam is inert (no router consulted), so the CF-3 YES/STOP path is unchanged.</li>
+ *   <li>{@code 4260-4262} — <em>Real Estate Concierge RE-2 (flagship #3)</em>: multi-turn qualification +
+ *       the buyer {@code Deal} + the unchanged nightly {@code LeadScoringV2Service} tiering + the
+ *       hot-handoff. All gated on {@code kmosf.modules.realestate.enabled}; RE-2 adds NO new ML and does
+ *       NOT modify the scorer — the materialized concierge {@code Deal} flows through the shipped scorer,
+ *       which emits the existing {@code LEAD_SCORE_UPDATED} that the {@code LeadHandoffService} subscriber
+ *       acts on. <strong>RE-2 mints only advisory codes</strong> (every path is best-effort — a Claude/SMS
+ *       failure never drops the conversation or corrupts the Deal): {@code 4260} qualification extraction
+ *       degraded/blank (the {@code QualificationExtractionService} Claude/parse failure — logged, the
+ *       conversation continues with the accumulated partial qualification, never thrown); {@code 4261} deal
+ *       materialization conflict (the {@code QualificationService} Contact/Deal upsert failure — logged,
+ *       the conversation keeps the qualification, never thrown); {@code 4262} reserved for RE-2 growth.
+ *       Reused (NOT re-allocated): {@code 1200-1203} (AI budget gate / Anthropic non-200 / missing-key, via
+ *       the {@code QualificationExtractionService} — best-effort, a failure degrades to an empty
+ *       qualification); {@code 2530-2532} (Twilio SMS recipient/send/secret — the reused
+ *       {@code TwilioSmsService} on the best-effort hot-handoff notify); the {@code Deal} CRUD codes
+ *       ({@code 1400/1401}). The hot-handoff is idempotent per {@code (tenant, deal)} via a
+ *       {@code HotHandoffLog} ledger-insert-FIRST (the {@code ReminderLog}/{@code TwilioVoicemailEvent}
+ *       precedent) and re-checks {@code Tenant.enabledModules} membership, so it is a hard no-op for
+ *       non-realestate / non-HOT / non-concierge {@code LEAD_SCORE_UPDATED} events. <strong>No live Twilio /
+ *       Anthropic in tests</strong> (WireMock + a mock {@code TwilioSmsService}).</li>
  * </ul>
  */
 @Slf4j

@@ -72,6 +72,13 @@ public class ConciergeConversation implements TenantScoped {
     @Builder.Default
     private List<ConciergeTurn> turns = new ArrayList<>();
 
+    /**
+     * The buyer's accumulated qualification (RE-2) — budget / timeline / financing / intent extracted
+     * across the conversation. Null until RE-2 runs the first qualification extraction; fields accumulate
+     * turn-to-turn. Feeds the materialized {@link #dealId} Deal the nightly scorer tiers.
+     */
+    private BuyerQualification qualification;
+
     /** When the most recent inbound buyer text was received — drives the recency fallback + TTL window. */
     private Instant lastInboundAt;
 

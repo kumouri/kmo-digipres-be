@@ -9,17 +9,25 @@ import com.kumouri.kmodigipresbe.integration.twilio.TwilioSmsService;
 import com.kumouri.kmodigipresbe.module.chairfill.ChairFillAutoConfiguration;
 import com.kumouri.kmodigipresbe.module.realestate.concierge.ConciergeAnswerService;
 import com.kumouri.kmodigipresbe.module.realestate.concierge.ConciergeInboundRouter;
+import com.kumouri.kmodigipresbe.module.realestate.concierge.LeadHandoffService;
 import com.kumouri.kmodigipresbe.module.realestate.concierge.ListingConciergeService;
+import com.kumouri.kmodigipresbe.module.realestate.concierge.QualificationExtractionService;
+import com.kumouri.kmodigipresbe.module.realestate.concierge.QualificationService;
 import com.kumouri.kmodigipresbe.module.realestate.model.ConciergeConversationRepository;
+import com.kumouri.kmodigipresbe.module.realestate.model.HotHandoffLogRepository;
 import com.kumouri.kmodigipresbe.module.realestate.model.ListingDisclosureRepository;
 import com.kumouri.kmodigipresbe.module.realestate.model.ListingRepository;
 import com.kumouri.kmodigipresbe.module.realestate.service.ListingDisclosureService;
 import com.kumouri.kmodigipresbe.module.realestate.service.ListingService;
 import com.kumouri.kmodigipresbe.repository.ContactRepository;
+import com.kumouri.kmodigipresbe.repository.DealRepository;
+import com.kumouri.kmodigipresbe.repository.TenantRepository;
+import com.kumouri.kmodigipresbe.service.EmailService;
 import com.kumouri.kmodigipresbe.service.ai.AiUsageRecorder;
 import com.kumouri.kmodigipresbe.service.ai.embedding.EmbeddingService;
 import com.kumouri.kmodigipresbe.service.ai.rag.RagRetrievalService;
 import com.kumouri.kmodigipresbe.service.ai.vector.VectorIndex;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -49,8 +57,15 @@ import java.util.List;
  * metadata; the core {@code EmbeddingPipeline} is untouched); the listing-scoped RAG retrieval overload +
  * the strict-grounded {@code ListingConciergeService} (no-hallucination → {@code HANDOFF}); the
  * {@code ConciergeConversation} state; and the {@code smsMode="realestate"} inbound-SMS seam delegating to
- * {@link ConciergeInboundRouter} (the CF-3 inbound webhook reused). RE-2..RE-5 (qualification, booking,
- * Marketing Studio, FE) layer on this.
+ * {@link ConciergeInboundRouter} (the CF-3 inbound webhook reused).
+ *
+ * <p>RE-2 build-out (additive): the {@link QualificationExtractionService} (strict-JSON Claude extractor,
+ * the {@code VoicemailExtractionService} transport shape) + {@link QualificationService} (accumulates the
+ * qualification onto the conversation and materializes the buyer {@code Contact} + concierge {@code Deal}
+ * the UNCHANGED nightly {@code LeadScoringV2Service} tiers), both wired into the router; and the
+ * {@link LeadHandoffService} {@code LEAD_SCORE_UPDATED} subscriber (the CF-2 {@code RiskTieredPreventionService}
+ * / {@code RebookingNudgeService} {@code @PostConstruct} pattern) that alerts the agent on a HOT,
+ * concierge-sourced lead. RE-3..RE-5 (booking, Marketing Studio, FE) layer on this.
  */
 @AutoConfiguration(after = ChairFillAutoConfiguration.class)
 @ConditionalOnProperty(prefix = "kmosf.modules.realestate", name = "enabled")
@@ -119,10 +134,46 @@ public class RealEstateAutoConfiguration {
         return new ListingConciergeService(retrieval, answerService, retrievalTopK);
     }
 
+    // ── RE-2 qualification (strict-JSON extract → accumulate → materialize Deal) ──
+
+    /**
+     * RE-2 — the strict-JSON buyer-qualification extractor (a sibling of {@link ConciergeAnswerService},
+     * the {@code VoicemailExtractionService.extractRaw} transport shape). Hand-built so the
+     * {@code @Value}-resolved key/base-url/model land on the factory params.
+     */
+    @Bean
+    public QualificationExtractionService qualificationExtractionService(
+            WebClient.Builder webClientBuilder,
+            ObjectMapper objectMapper,
+            IntegrationConnectionRepository connections,
+            AiUsageRecorder usageRecorder,
+            @Value("${kmosf.ai.anthropic.base-url:https://api.anthropic.com/v1/messages}") String baseUrl,
+            @Value("${kmosf.ai.anthropic.house-key:}") String houseKey,
+            @Value("${kmosf.realestate.qualification-model:claude-haiku-4-5}") String qualificationModel,
+            @Value("${kmosf.realestate.qualification-system-prompt:}") String systemPromptOverride) {
+        return new QualificationExtractionService(webClientBuilder, objectMapper, connections, usageRecorder,
+                baseUrl, houseKey, qualificationModel, systemPromptOverride);
+    }
+
+    /**
+     * RE-2 — accumulates the qualification onto the conversation and materializes the buyer {@code Contact}
+     * + a concierge-sourced {@code Deal} (stage NEW, value=budget, {@code customFields.source="concierge"}
+     * + {@code listingId}). The UNCHANGED nightly {@code LeadScoringV2Service} then tiers that Deal — RE-2
+     * adds no ML and does not touch the scorer.
+     */
+    @Bean
+    public QualificationService realEstateQualificationService(
+            ContactRepository contacts,
+            DealRepository deals,
+            DomainEventPublisher events) {
+        return new QualificationService(contacts, deals, events);
+    }
+
     /**
      * The RE-side inbound-SMS router the {@code smsMode="realestate"} seam delegates to. Correlates the
-     * inbound to a listing/conversation, answers grounded (or hands off), replies via Twilio, and persists
-     * the turns + citations. Wired into the {@code InboundSmsService} via {@link #conciergeInboundWiring}.
+     * inbound to a listing/conversation, answers grounded (or hands off), replies via Twilio, persists the
+     * turns + citations (RE-1), and runs the RE-2 qualification step (best-effort) afterwards. Wired into
+     * the {@code InboundSmsService} via {@link #conciergeInboundSmsWiring}.
      */
     @Bean
     public ConciergeInboundRouter conciergeInboundRouter(
@@ -130,6 +181,8 @@ public class RealEstateAutoConfiguration {
             ListingDisclosureRepository disclosures,
             ConciergeConversationRepository conversations,
             ListingConciergeService conciergeService,
+            QualificationExtractionService qualificationExtraction,
+            QualificationService qualificationService,
             TwilioSmsService twilioSmsService,
             DomainEventPublisher events,
             @Value("${kmosf.realestate.correlation-ttl-minutes:1440}") long correlationTtlMinutes,
@@ -139,8 +192,34 @@ public class RealEstateAutoConfiguration {
             @Value("${kmosf.realestate.disambiguation-sms:Thanks for reaching out! Which property are you "
                     + "asking about? Reply with the address or MLS#.}") String disambiguationSmsBody) {
         return new ConciergeInboundRouter(listings, disclosures, conversations, conciergeService,
-                twilioSmsService, events, correlationTtlMinutes, handoffNotify,
-                handoffSmsBody, disambiguationSmsBody);
+                qualificationExtraction, qualificationService, twilioSmsService, events,
+                correlationTtlMinutes, handoffNotify, handoffSmsBody, disambiguationSmsBody);
+    }
+
+    // ── RE-2 hot-handoff (LEAD_SCORE_UPDATED subscriber) ─────────────────────────
+
+    /**
+     * RE-2 — the hot-handoff subscriber. A {@code @PostConstruct} listener on the UNCHANGED scorer's
+     * {@code LEAD_SCORE_UPDATED} (the CF-2 {@code RiskTieredPreventionService} / {@code RebookingNudgeService}
+     * pattern): for a HOT, concierge-sourced realestate {@code Deal} it alerts the agent (best-effort SMS +
+     * email to the per-tenant {@code IntegrationConnection(twilio).config.notifyPhone/notifyEmail}) and
+     * emits {@code CONCIERGE_HOT_HANDOFF}, idempotent per {@code (tenant, deal)} via {@code HotHandoffLog}.
+     * Module-gated + tenant-rechecked → a hard no-op for non-realestate / non-HOT / non-concierge updates.
+     */
+    @Bean
+    public LeadHandoffService leadHandoffService(
+            DomainEventPublisher events,
+            TenantRepository tenants,
+            ContactRepository contacts,
+            DealRepository deals,
+            HotHandoffLogRepository handoffLog,
+            IntegrationConnectionRepository connections,
+            TwilioSmsService twilioSmsService,
+            EmailService emailService,
+            @Value("${kmosf.realestate.handoff-notify:false}") boolean handoffNotify,
+            @Value("${kmosf.mail.smtp.username:}") String notifyFromAddress) {
+        return new LeadHandoffService(events, tenants, contacts, deals, handoffLog, connections,
+                twilioSmsService, emailService, handoffNotify, notifyFromAddress);
     }
 
     // ── Inbound-SMS seam wiring (RE-1 §6.6) ───────────────────────────────────────

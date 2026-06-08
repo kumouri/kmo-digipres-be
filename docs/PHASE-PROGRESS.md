@@ -94,3 +94,99 @@ inbound YES/STOP path stays **byte-identical** when `smsMode` is unset.
    (no-chunk short-circuit asserts the model was NEVER called; HANDOFF-token case asserts no answer sent).
 3. Module-gated, blast-radius zero; existing behavior + NMM byte-equivalent.
 4. Error band 4250-4259; reuse 1200-1203 (AI), embedding/RAG codes, 4000-4003 (Twilio sig), 1800 (RoleGuard).
+
+---
+
+# RE-2 — multi-turn qualification + `Deal` + `LeadScoringV2Service` tiering + hot-handoff — Progress Ledger
+
+> Crash-recovery source of truth for `realestate-concierge-phase-2-qualification` (off `main` @ `cceff2c`,
+> RE-1 merged). Spec: `~/.claude/plans/real-estate-concierge-flagship.md` RE-2 (§5) + decision 3. Error
+> band: **4260-4262** (advisory only). RE-2 adds **zero net-new ML** and does **NOT** modify the scorer.
+
+## Goal (RE-2)
+
+Across the buyer's SMS conversation, Claude extracts **budget / timeline / financing (+ buy/sell intent)**
+into a **`Deal`**; the **UNCHANGED nightly `LeadScoringV2Service`** tiers that Deal/Contact HOT/WARM/COLD;
+a **`LEAD_SCORE_UPDATED` subscriber** does the **hot-handoff** (alert the agent on a HOT buyer). The
+grounded Q&A (RE-1) and qualification **coexist** — a buyer question still gets a cited answer.
+
+## Design as built
+
+- **Multi-turn qualification.** `QualificationExtractionService` (hand-built `@Bean`, the
+  `VoicemailExtractionService.extractRaw` transport shape — per-tenant Anthropic key + house-key, budget
+  gate, WireMock base-url; reuses 1200/1202/1203) runs a **strict-JSON** extraction over the
+  conversation-so-far → `{budget, timeline, financing, preApproved, intent}`. Defensive/best-effort: blank
+  conv → empty result no spend; any AI/parse failure → empty result (never throws). The router runs it
+  **after** the grounded answer/handoff turn is persisted, **gated by a cheap `hasQualificationSignal`
+  pre-filter** (money/financing/timeline/buy-sell vocabulary or a money-shaped number) so a pure factual
+  question ("how old is the roof?") never triggers a paid extraction call → **RE-1 model-call behavior is
+  byte-identical** (the `RealEstateConciergeIT` call-count gate) and cost is saved.
+- **Accumulate + materialize.** `QualificationService.merge` accumulates fields onto the
+  `ConciergeConversation.qualification` (a later turn never clears an earlier non-null). On **enough signal
+  (a budget)** it find-or-creates the buyer **`Contact`** (by phone — the `TwilioVoicemailService`
+  precedent, existing contact reused untouched) and find-or-creates the per-`(buyer × listing)` **`Deal`**
+  (keyed via the conversation `dealId` → idempotent re-entry updates the same Deal): stage `NEW`,
+  `value`=budget, `primaryContactId`=buyer, `customFields` = `{source:"concierge", listingId, timeline,
+  financing, preApproved, intent}`. Links `contactId`/`dealId` onto the conversation, advances state
+  `ASKING`→`QUALIFYING`, emits `CONCIERGE_LEAD_QUALIFIED`. Best-effort (4261 → keep the qualification,
+  never drop the conversation).
+- **Scoring (reuse, untouched).** The materialized Deal flows through the **byte-equivalent** nightly
+  `LeadScoringV2Service`, which tiers the Contact off its Deals and emits the existing `LEAD_SCORE_UPDATED`
+  — no duplication, no scorer change.
+- **Hot-handoff.** `LeadHandoffService` — a `@PostConstruct` subscriber on `LEAD_SCORE_UPDATED` (the CF-2
+  `RiskTieredPreventionService` / `RebookingNudgeService` pattern + synthetic `TenantContext`). For a
+  **HOT** tier whose Contact has a **concierge-sourced realestate Deal** (`isConciergeSourced`), it
+  **ledger-inserts-FIRST** a `HotHandoffLog` (unique `(tenant, deal)` → a re-fired event does zero
+  duplicate work), best-effort alerts the agent (SMS + email to the per-tenant
+  `IntegrationConnection(twilio).config.notifyPhone/notifyEmail` — the `notifyRob` precedent, gated by
+  `kmosf.realestate.handoff-notify`), and emits `CONCIERGE_HOT_HANDOFF`. Module-gated + re-checks
+  `Tenant.enabledModules` → a hard **no-op for non-realestate / non-HOT / non-concierge** events.
+
+## Files
+
+### New — module
+- `concierge/QualificationExtractionService.java` (strict-JSON Claude extractor, extractRaw shape)
+- `concierge/QualificationService.java` (merge + Contact/Deal materialization; the concierge/listing
+  customField markers + `isConciergeSourced`/`conciergeListingId` recognition helpers)
+- `concierge/LeadHandoffService.java` (`LEAD_SCORE_UPDATED` `@PostConstruct` subscriber; ledger-first +
+  best-effort agent alert)
+- `model/BuyerQualification.java` (embedded on the conversation)
+- `model/HotHandoffLog.java` + `model/HotHandoffLogRepository.java` (idempotency ledger, unique (tenant,deal))
+
+### Edited (additive; RE-1 + ChairFill + scorer byte-equivalent)
+- `concierge/ConciergeInboundRouter.java` (+the post-answer qualification step + the `hasQualificationSignal`
+  pre-filter; the RE-1 answer/handoff path + citations unchanged)
+- `model/ConciergeConversation.java` (+the `qualification` field — RE-1 declared the state enum; this adds
+  the embedded value)
+- `RealEstateAutoConfiguration.java` (+`QualificationExtractionService`, `QualificationService`,
+  `LeadHandoffService` beans; router bean takes the two qualification services)
+- `automation/DomainEventType.java` (+`CONCIERGE_LEAD_QUALIFIED`, `CONCIERGE_HOT_HANDOFF`)
+- `controller/advice/GlobalErrorHandler.java` (+4260-4262 doc band)
+
+### Tests
+- `src/test/java/.../module/realestate/RealEstateQualificationIT.java` — (1) a buyer text revealing
+  budget/timeline materializes a concierge Deal (value/customFields asserted) + advances to QUALIFYING +
+  the grounded Q&A still cites the disclosure (coexistence; two Anthropic calls differentiated by request
+  body in WireMock); (2) hot-handoff fires the agent SMS + writes the ledger on a HOT concierge
+  `LEAD_SCORE_UPDATED`, idempotent on re-fire; (3) no-op for a non-concierge Deal and for a WARM tier;
+  (4) best-effort — a Claude extraction 500 never drops the conversation or creates a Deal, the grounded
+  answer still goes through.
+
+## Validation status
+
+- `./gradlew compileJava compileTestJava` — GREEN.
+- `./gradlew cleanTest test --tests "*RealEstateQualificationIT" --tests "*RealEstateConciergeIT"
+  --tests "*LeadScoringV2IT" --tests "*GapFillWaitlistIT" --tests "*NoShowRiskScoringIT"
+  --tests "*OpenApiEndpointIT"` — **GREEN**. Per-class: RealEstateQualificationIT 5/0/0;
+  RealEstateConciergeIT 5/0/0; LeadScoringV2IT 4/0/0; GapFillWaitlistIT 11/0/0; NoShowRiskScoringIT 8/0/0;
+  OpenApiEndpointIT 2/0/0 (tests/failures/errors).
+
+## Hard gates
+
+1. `LeadScoringV2Service` + `LeadScore` **byte-equivalent** (zero diff vs `main`) — `LeadScoringV2IT` green.
+2. RE-1 grounding + ChairFill inbound **byte-equivalent** — `RealEstateConciergeIT` + `GapFillWaitlistIT`
+   green (the `hasQualificationSignal` pre-filter keeps RE-1's factual questions from adding a model call).
+3. Best-effort extraction/handoff — a Claude/SMS failure never drops the conversation or corrupts the Deal
+   (proven by the best-effort IT + the ledger-first idempotency).
+4. Module-gated, blast-radius zero. Error band 4260-4262 (advisory); reuse 1200-1203 (AI), 2530-2532 (SMS),
+   the Deal codes (1400/1401).
