@@ -61,10 +61,39 @@ byte-equivalent; `TwilioVoicemailIT` passes UNCHANGED.**
 
 | Sub-step | Status | SHA | Build | Notes |
 |---|---|---|---|---|
-| SP1 — transport refactor + mole strategy + carrier + resolver; wire service to resolver (mole default, no WO) | pending | — | — | proves byte-equivalence in isolation: `TwilioVoicemailIT` green BEFORE going further |
-| SP2 — MultiTrade strategy + schema + WO-create branch + ledger field + event + MissedCallInboxController + error band | pending | — | — | |
-| SP3 — `HomeServicesVoicemailIT` (5 cases §4.8) + openapi.json regen | pending | — | — | |
+| SP1 — transport refactor + mole strategy + carrier + resolver; wire service to resolver (mole default, no WO) | done | `f919342` | TwilioVoicemailIT 6/0/0 (UNCHANGED) | byte-equivalence proven in isolation BEFORE going further |
+| SP2 — MultiTrade strategy + schema + WO-create branch + ledger field + event + MissedCallInboxController + error band | done | `9e9f8e7` | compileJava OK | |
+| SP3 — `HomeServicesVoicemailIT` + `…FieldServiceDisabledIT` (all 5 cases §4.8) + case-5 strategy degrade fix + openapi check | done | (this commit) | full suite GREEN | case 4 needs field-service OFF → separate class (class-level @TestPropertySource) |
 
-## Test result
+## Test result — BUILD SUCCESSFUL
 
-(pending)
+`./gradlew cleanTest test --tests "*TwilioVoicemailIT" --tests "*HomeServicesVoicemailIT"
+--tests "*HomeServicesVoicemailFieldServiceDisabledIT" --tests "*TwilioRequestValidatorTest"
+--tests "*MoleVisionServiceIT" --tests "*MoleTriageIT" --tests "*OpenApiEndpointIT"` (Docker up):
+
+| Class | tests | failures | errors | skipped |
+|---|---|---|---|---|
+| `TwilioVoicemailIT` (NMM gate — UNCHANGED) | 6 | 0 | 0 | 0 |
+| `HomeServicesVoicemailIT` (cases 1,2,3,5) | 4 | 0 | 0 | 0 |
+| `HomeServicesVoicemailFieldServiceDisabledIT` (case 4) | 2 | 0 | 0 | 0 |
+| `TwilioRequestValidatorTest` | 8 | 0 | 0 | 0 |
+| `MoleVisionServiceIT` (vision regression) | 5 | 0 | 0 | 0 |
+| `MoleTriageIT` (vision regression) | 7 | 0 | 0 | 0 |
+| `OpenApiEndpointIT` | 2 | 0 | 0 | 0 |
+
+**`TwilioVoicemailIT` passed UNCHANGED** (never edited; byte-equivalence held end-to-end).
+
+### OpenAPI
+`MissedCallInboxController` is `@ConditionalOnProperty(home-services)`, so — like every other
+gated-module controller (`DispatchBoardController`, `WorkOrderController`, …) — it is absent from
+the spec `OpenApiEndpointIT` generates (that context runs with opt-in modules OFF). Semantic
+order-insensitive compare of generated vs committed `docs/api/openapi.json`: **222 == 222 paths,
+152 == 152 schemas, zero added/removed** — HS-1 adds nothing to the documented surface. The only
+non-deterministic byte churn `verifyOpenApi` produced was an operationId-suffix reordering on the
+unrelated `/integrations/mole-triage/tokens` path (the documented springdoc non-determinism;
+`verifyOpenApi` is advisory), so `docs/api/openapi.json` was left at HEAD. `OpenApiEndpointIT`
+passes (2/0/0).
+
+§9: the only `switchIfEmpty` in changed code is the pre-existing genuine not-connected
+`verifiedConnection` + the existing `findOrCreateContact` explicit-boolean (unchanged); the
+WO-create branch uses an explicit null/Optional check, never `switchIfEmpty(create)`.

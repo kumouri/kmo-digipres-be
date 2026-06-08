@@ -77,12 +77,23 @@ public class MultiTradeExtractionStrategy implements VoicemailExtractionStrategy
     @Override
     public Mono<VoicemailLeadDetails> extract(String transcript, VoicemailCallbackParams params) {
         return transport.extractRaw(transcript, extractionModel, SYSTEM_PROMPT)
-                .map(node -> toDetails(node, transcript, params));
+                .map(node -> toDetails(parse(node), transcript, params))
+                .onErrorResume(e -> {
+                    // A lead is NEVER dropped (plan §4.8 case 5): an AI budget/upstream failure
+                    // (1200-1203) still produces a GENERAL DRAFT WorkOrder from the raw transcript.
+                    // This is stronger than the mole vertical (whose service-level onErrorResume
+                    // degrades to an empty extraction with no WorkOrder) — for home services the
+                    // floor is a triageable DRAFT job a dispatcher can act on in the morning.
+                    log.warn("Multi-trade voicemail extraction failed (best-effort, GENERAL WO from "
+                            + "raw transcript): {}", e.getMessage());
+                    return Mono.just(toDetails(
+                            MultiTradeExtraction.empty(), transcript, params));
+                });
     }
 
-    private VoicemailLeadDetails toDetails(JsonNode node, String transcript,
-                                           VoicemailCallbackParams params) {
-        MultiTradeExtraction ex = new MultiTradeExtraction(
+    /** Defensive field parse of the raw JSON into a {@link MultiTradeExtraction} (never throws). */
+    private MultiTradeExtraction parse(JsonNode node) {
+        return new MultiTradeExtraction(
                 textOrNull(node, "name"),
                 textOrNull(node, "phone"),
                 textOrNull(node, "address"),
@@ -91,7 +102,10 @@ public class MultiTradeExtractionStrategy implements VoicemailExtractionStrategy
                 textOrNull(node, "symptom"),
                 JobValueBand.fromWire(textOrNull(node, "jobValueBand")),
                 node.path("callbackRequested").asBoolean(false));
+    }
 
+    private VoicemailLeadDetails toDetails(MultiTradeExtraction ex, String transcript,
+                                           VoicemailCallbackParams params) {
         Map<String, Object> extractedJson = new HashMap<>();
         if (ex.name() != null) extractedJson.put("name", ex.name());
         if (ex.phone() != null) extractedJson.put("phone", ex.phone());
