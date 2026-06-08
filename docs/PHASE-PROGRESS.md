@@ -483,3 +483,148 @@ HEAD; `OpenApiEndpointIT` passes (2/0/0).
   override) and so `required()`s a request context the test doesn't have → the IT reads via
   `mongo.findById(id, Booking.class)`. The nightly job itself reads via the explicit-param
   `findAllByTenantId` (added), which bypasses the auto-filter — the lead-scorer precedent.
+
+---
+
+# CF-2 — ChairFill risk-tiered prevention + Claude-personalized reminder — Progress Ledger
+
+> Branch `chairfill-salon-flagship-phase-2-risk-prevention` (off `main` after CF-1 merged @ `4c28013`).
+> Spec: `~/.claude/plans/chairfill-salon-flagship.md` CF-2 section + D5 (dedicated subscriber, NOT a
+> seeded `SEND_SMS` rule), error band `4225-4229`.
+
+## Goal
+
+On `BOOKING_RISK_SCORED` (the CF-1 stamp): a **HIGH**-risk upcoming booking → **require a deposit**
+(reuse the shipped salon deposit/Stripe path) + an **extra confirmation** SMS; a **LOW/MEDIUM** booking
+→ a single **light reminder**. The reminder copy is **Claude-personalized** (stylist name, last service,
+the owner's brand tone) via an `AnthropicAiAssistService`-mirror, **best-effort** (a Claude/budget
+failure falls back to a generic template, never blocks). TCPA-safe; salon-spa core / CF-1 / NMM
+untouched; blast radius zero.
+
+## Design as built (mirror of `RebookingNudgeService`, D5)
+
+- **`RiskTieredPreventionService`** (new `module/chairfill/automation/`) — a `@PostConstruct`
+  `events.stream().filter(BOOKING_RISK_SCORED).flatMap(handle)` subscriber (the `RebookingNudgeService`
+  pattern) on `Schedulers.boundedElastic()`, per-event `onErrorResume` → empty (a poison event never
+  breaks the stream). Synthetic `TenantContext(tenantId, null, {SYSTEM})`. A visible-for-test
+  `handle(event)` returns `Mono<Void>` the IT blocks (the `CoverageNudgeJob.nudgeDueOnce()` posture).
+  - **Why a dedicated subscriber, not a `SEND_SMS` WorkflowRule (D5):** the generic `SEND_SMS` action
+    resolves a *static* template (no per-contact Claude personalization) and there is no
+    `REQUIRE_DEPOSIT` action type. So the personalized + deposit logic lives here; an owner-tunable
+    static baseline rule is *also* seeded (below) so the owner sees a toggle.
+  - **HIGH** → `SalonBookingService.requireDepositNow(bookingId, amount)` (deposit amount = service
+    price × `deposit-rate` (default 0.25), floored at `deposit-min` (default $20); an already-set
+    `depositAmount` wins) + an **extra-confirmation** Claude SMS (`confirm=true` → "reply to confirm").
+  - **LOW/MEDIUM** → one light Claude-personalized reminder SMS.
+- **`ReminderCopyService`** (new `module/chairfill/ai/`) — a **sibling of `GbpReplyDraftService`**
+  (NOT an edit to the reused `AnthropicAiAssistService`): per-tenant Anthropic key + house-key fallback,
+  `AiUsageRecorder.checkBudget()` BEFORE + `record()` AFTER, WireMock-able base-url, defensive parse,
+  Haiku default. A salon-reminder system prompt that names the stylist + last service in the owner's
+  brand tone and outputs ONLY the SMS body; a blank answer → 1202 (so the caller falls back). Codes
+  `1200-1203` reused unchanged.
+- **`ChairFillReminderAutomation`** (new) — the `OnTheWaySmsAutomation` clone: idempotent
+  `ApplicationReadyEvent` seeder of an owner-tunable baseline `SEND_SMS` `WorkflowRule` on
+  `BOOKING_RISK_SCORED` per chairfill tenant (D5's "WorkflowRule-driven" intent; the personalized path
+  stays in the subscriber). Honest v1 caveat documented: the CF-1 payload carries no resolved phone, so
+  the generic dispatcher safely skips the static rule — it is a visible/editable placeholder.
+- **`SalonBookingService.requireDepositNow(bookingId, amount)`** — the ONLY salon-core change: a new
+  additive method that requires a deposit on an *already-created* booking by reusing the exact create-time
+  path (`createDepositInvoice` → DRAFT `Invoice` via `InvoiceRepository`). Idempotent + safe: no-op on a
+  terminal booking, when a deposit invoice already exists, or on a null/non-positive amount. Existing
+  `create`/`confirm`/`complete`/`cancel` callers are byte-unchanged.
+
+## TCPA / consent + frequency cap (plan §4 risk, HARD GATE 4)
+
+- **Opt-out / STOP:** a Contact carrying the `sms-opt-out` tag (`RiskTieredPreventionService.SMS_OPT_OUT_TAG`)
+  gets NO SMS — the codebase has no `smsOptIn` boolean (consent is tag/subscription-based today), so the
+  honored signal is a tag an inbound-STOP handler / staff toggle sets. A contact with no phone is skipped.
+- **Per-contact frequency cap:** the `ReminderLog` ledger backs a rolling-window count
+  (`max-per-contact-per-window` default 2 over `window-hours` default 24) so a HIGH-risk client with
+  several upcoming bookings is not spammed.
+- **Idempotency:** the `ReminderLog` row is inserted **FIRST** (unique `(tenantId, bookingId)`), so a
+  re-fired `BOOKING_RISK_SCORED` (nightly re-score / restart / concurrent emit) loses on a
+  `DuplicateKeyException` → ZERO duplicate SMS/deposit (the `CoverageNudgeLog` ledger-insert-FIRST pattern).
+
+## Invariants
+
+- **Best-effort + safe (HARD GATE 2):** every external call is `onErrorResume`-wrapped — a Claude /
+  budget / missing-key (1200/1202/1203) failure degrades to a generic template; an SMS failure (no
+  Twilio connection 2501, send 2531/2532) or a deposit-mint failure logs and degrades. A booking is
+  never dropped or corrupted.
+- **Blast radius zero (HARD GATE 3):** the beans are `@ConditionalOnProperty(chairfill)` +
+  `@ConditionalOnBean(SalonBookingService.class)`; `BOOKING_RISK_SCORED` is only emitted by the CF-1
+  scorer for chairfill tenants; AND `process` re-checks `Tenant.enabledModules` membership
+  (defense-in-depth) → a hard no-op for every non-chairfill tenant regardless of who emits.
+- **No new error codes (band 4225-4229 RESERVED, HARD GATE 5):** CF-2 is fully additive + best-effort.
+  Reused unchanged: AI `1200-1203`, Twilio `2530-2532` (+ `2501`), salon deposit/booking `2900`.
+- **Salon-spa core / CF-1 / NMM untouched:** the only salon-core edit is the additive
+  `requireDepositNow`; `NoShowRiskScoringIT` (8) + `LeadScoringV2IT` (4) + `OpenApiEndpointIT` (2) pass
+  unchanged.
+
+## Files
+
+**Created:**
+- `module/chairfill/ai/ReminderCopyService.java` (the Claude-personalized reminder drafter; `GbpReplyDraftService` sibling).
+- `module/chairfill/automation/RiskTieredPreventionService.java` (the `BOOKING_RISK_SCORED` subscriber).
+- `module/chairfill/automation/ChairFillReminderAutomation.java` (owner-tunable baseline `WorkflowRule` seeder).
+- `module/chairfill/automation/ReminderLog.java` + `ReminderLogRepository.java` (idempotency + frequency-cap ledger).
+- `src/test/.../module/chairfill/RiskTieredPreventionIT.java` (5 cases).
+
+**Modified (surgical, additive):**
+- `module/salonspa/service/SalonBookingService.java` — add `requireDepositNow(bookingId, amount)` (reuses `createDepositInvoice`).
+- `module/chairfill/ChairFillAutoConfiguration.java` — register the 3 CF-2 beans (all `@ConditionalOnBean(SalonBookingService.class)`).
+- `controller/advice/GlobalErrorHandler.java` — document the `4225-4229` band (mints nothing; reuse map).
+
+## Sub-steps
+
+| Sub-step | Status | Build | Notes |
+|---|---|---|---|
+| SP1 — `requireDepositNow` (salon-core additive) + `ReminderCopyService` + `ReminderLog`/repo + `RiskTieredPreventionService` + `ChairFillReminderAutomation` + bean wiring + 4225-4229 doc | done | compileJava OK | mirror of `RebookingNudgeService` + `GbpReplyDraftService`; deposit path reused |
+| SP2 — defense-in-depth tenant-module guard in `process` + `RiskTieredPreventionIT` (5 cases) + full gate-suite re-run | done | full suite GREEN | `@MockitoBean TwilioSmsService` capture; WireMock-Anthropic; `handle(event)` driven |
+
+## Test result — BUILD SUCCESSFUL
+
+`./gradlew cleanTest test --tests "*RiskTieredPreventionIT" --tests "*NoShowRiskScoringIT"
+--tests "*LeadScoringV2IT" --tests "*OpenApiEndpointIT"` (Docker up). `*RebookingNudge*` / salon-spa
+deposit ITs matched no class — **the salon-spa module shipped with no dedicated ITs** (confirmed by
+globbing `src/test`), so `RiskTieredPreventionIT` (which exercises the reused deposit path end-to-end)
+is the de-facto deposit-path regression proof.
+
+| Class | tests | failures | errors | skipped |
+|---|---|---|---|---|
+| `RiskTieredPreventionIT` (CF-2, new) | 5 | 0 | 0 | 0 |
+| `NoShowRiskScoringIT` (CF-1 regression — UNCHANGED) | 8 | 0 | 0 | 0 |
+| `LeadScoringV2IT` (lead-scorer regression — UNCHANGED) | 4 | 0 | 0 | 0 |
+| `OpenApiEndpointIT` | 2 | 0 | 0 | 0 |
+| **TOTAL** | **19** | **0** | **0** | **0** |
+
+`RiskTieredPreventionIT` cases: (1) `highRisk_requiresDeposit_andSendsPersonalizedConfirmation` — HIGH
+→ `depositRequired` flips, a DRAFT `Invoice` ($50 = 25% of $200) exists via the reused path, status
+PENDING_DEPOSIT, one confirmation SMS carrying the personalized copy, the Claude prompt carried the
+stylist (Mia) + service (Balayage), ledger `personalized=true`/`depositRequired=true`; (2)
+`lowRisk_sendsSinglePersonalizedReminder_noDeposit` — LOW → no deposit, exactly one personalized
+reminder, prompt carried stylist + service; (3) `claudeFailure_fallsBackToGenericReminder_noError` —
+WireMock Anthropic 500 → a generic reminder still sent (mentions stylist + name), no error, ledger
+`personalized=false`; (4) `nonChairfillTenant_isHardNoOp_evenWhenEventFired` — a fired event for a
+non-chairfill tenant → zero deposit/SMS/ledger/Anthropic-call (defense-in-depth module re-check); (5)
+`optedOutContact_getsNoSms_andReFiredEventIsIdempotent` — an `sms-opt-out` contact gets no SMS/ledger,
+and a second `handle` of the same booking is a zero-duplicate no-op (ledger-insert-FIRST).
+
+### OpenAPI
+CF-2 adds **no controllers/endpoints** (it is an event subscriber + a service method), so the generated
+spec is unchanged; `docs/api/openapi.json` left at HEAD; `OpenApiEndpointIT` passes (2/0/0).
+
+### Deviations / surprises
+- **No `smsOptIn` boolean exists on Contact.** Consent in the codebase is tag/subscription-based and the
+  existing `SEND_SMS` dispatcher applies no opt-in gate at all. CF-2 honors a `sms-opt-out` **tag**
+  (STOP) + adds a per-contact frequency cap — the strongest consent signal available without inventing a
+  new Contact field (which would be a salon-core change). Flagged as the honest TCPA posture for the PoC;
+  a first-class `smsConsent` field + an inbound-STOP webhook are a clean follow-up.
+- **No salon-spa / rebooking deposit ITs exist on `main`** (same finding as CF-1). The CF-2 IT exercises
+  the reused `requireDepositNow` deposit path (flag flip + DRAFT invoice) end-to-end, covering the
+  deposit-regression concern the gate intended.
+- **`requireDepositNow` placed on `SalonBookingService` (not a new helper).** The plan offered either a
+  small `BookingDepositService` or "a minimal additive method `requireDepositNow(bookingId)` mirroring
+  `persistWithDeposit`" — chose the latter (the deposit logic + `InvoiceRepository` already live on
+  `SalonBookingService`; a separate helper would duplicate the wiring). Kept dependency-free: the CF-2
+  service computes the amount (it has `ServiceMenuRepository`) and passes it in.

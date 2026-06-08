@@ -84,6 +84,54 @@ public class SalonBookingService {
         });
     }
 
+    /**
+     * Requires a deposit on an <em>already-created</em> upcoming booking — the additive entry point
+     * the ChairFill (CF-2) {@code RiskTieredPreventionService} calls when a HIGH no-show-risk booking
+     * needs a deposit it did not originally carry. Reuses the exact create-time deposit path
+     * ({@link #createDepositInvoice}, a DRAFT {@link Invoice} via {@link InvoiceRepository}) rather
+     * than reinventing it — the only difference is it runs after creation instead of inside
+     * {@link #create}.
+     *
+     * <p>Idempotent + safe: a no-op (returns the booking unchanged) when the booking is already
+     * terminal (COMPLETED / CANCELLED / NO_SHOW), when a deposit invoice already exists
+     * ({@code depositInvoiceId != null}), or when {@code depositAmount} is null / non-positive — so a
+     * re-fired {@code BOOKING_RISK_SCORED} or a booking that was already deposit-gated never mints a
+     * second invoice or corrupts state. On a valid require it sets {@code depositRequired=true},
+     * stamps {@code depositAmount}, flips the status back to {@code PENDING_DEPOSIT} (unless already
+     * paid/terminal), mints the DRAFT deposit invoice, and stores its id. No domain event is emitted
+     * (the Stripe {@code INVOICE_PAID} path drives confirmation, exactly as create-time).
+     *
+     * <p>Salon-spa core behaviour is otherwise untouched: existing callers of {@link #create} /
+     * {@link #confirm} / {@link #complete} / {@link #cancel} see no change (this is a new method).
+     */
+    public Mono<Booking> requireDepositNow(UUID bookingId, BigDecimal depositAmount) {
+        return findById(bookingId).flatMap(booking -> {
+            BookingStatus status = booking.getStatus();
+            if (status == BookingStatus.COMPLETED
+                    || status == BookingStatus.CANCELLED
+                    || status == BookingStatus.NO_SHOW) {
+                return Mono.just(booking); // terminal — never re-gate
+            }
+            if (booking.getDepositInvoiceId() != null) {
+                return Mono.just(booking); // already deposit-gated — idempotent no-op
+            }
+            if (depositAmount == null || depositAmount.compareTo(BigDecimal.ZERO) <= 0) {
+                return Mono.just(booking); // nothing sensible to charge — leave untouched
+            }
+            booking.setDepositRequired(true);
+            booking.setDepositAmount(depositAmount);
+            if (!booking.isDepositPaid()) {
+                booking.setStatus(BookingStatus.PENDING_DEPOSIT);
+            }
+            return bookings.save(booking)
+                    .flatMap(saved -> createDepositInvoice(saved)
+                            .flatMap(inv -> {
+                                saved.setDepositInvoiceId(inv.getId());
+                                return bookings.save(saved);
+                            }));
+        });
+    }
+
     private Mono<Booking> persistWithDeposit(Booking booking) {
         if (!booking.isDepositRequired() || booking.getDepositAmount() == null
                 || booking.getDepositAmount().compareTo(BigDecimal.ZERO) <= 0) {
