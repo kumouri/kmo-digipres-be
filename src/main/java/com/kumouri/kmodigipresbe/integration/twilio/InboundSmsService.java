@@ -142,7 +142,9 @@ public class InboundSmsService {
     public enum InboundOutcome {
         CLAIMED_WON, CLAIMED_LOST, NO_OPEN_OFFER, OPTED_OUT, IGNORED,
         // RE-1 realestate-mode outcomes.
-        CONCIERGE_ANSWERED, CONCIERGE_HANDED_OFF, CONCIERGE_NO_LISTING
+        CONCIERGE_ANSWERED, CONCIERGE_HANDED_OFF, CONCIERGE_NO_LISTING,
+        // RE-3 showing-booking outcomes (slots offered / a showing booked).
+        CONCIERGE_BOOKING_OFFERED, CONCIERGE_BOOKED
     }
 
     /**
@@ -214,6 +216,8 @@ public class InboundSmsService {
                     .map(outcome -> switch (outcome) {
                         case ANSWERED -> InboundOutcome.CONCIERGE_ANSWERED;
                         case HANDED_OFF -> InboundOutcome.CONCIERGE_HANDED_OFF;
+                        case BOOKING_OFFERED -> InboundOutcome.CONCIERGE_BOOKING_OFFERED;
+                        case BOOKED -> InboundOutcome.CONCIERGE_BOOKED;
                         case NO_LISTING -> InboundOutcome.CONCIERGE_NO_LISTING;
                         case IGNORED -> InboundOutcome.IGNORED;
                     });

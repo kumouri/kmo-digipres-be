@@ -190,3 +190,110 @@ grounded Q&A (RE-1) and qualification **coexist** — a buyer question still get
    (proven by the best-effort IT + the ledger-first idempotency).
 4. Module-gated, blast-radius zero. Error band 4260-4262 (advisory); reuse 1200-1203 (AI), 2530-2532 (SMS),
    the Deal codes (1400/1401).
+
+---
+
+# RE-3 — Cal.com showing booking over SMS — Progress Ledger
+
+> Crash-recovery source of truth for `realestate-concierge-phase-3-showing-booking` (off `main` @ `f8a1ed1`,
+> RE-1 + RE-2 merged). Spec: `~/.claude/plans/real-estate-concierge-flagship.md` RE-3 (§5) + decision 4 +
+> §7 (the demo hard boundary). Error band: **4263-4265** (advisory only). RE-3 makes **no live Cal.com call**
+> (the demo writes the `Meeting` projection directly) and **no Anthropic call** (the offer/confirm copy is
+> deterministic templating — so the RE-1 model-call gates stay byte-identical).
+
+## Goal (RE-3)
+
+When the buyer wants to see the listing (showing intent in the SMS conversation, e.g. "can I see it
+Saturday?"), the concierge **offers available showing slots over SMS** → the buyer picks one → a **`Meeting`
+is written** (the demo writes the Meeting projection directly; production flips to live Cal.com availability +
+the shipped webhook). The grounded Q&A (RE-1) and qualification (RE-2) **still coexist** — a factual question
+still gets a cited answer.
+
+## Design as built
+
+- **Showing-intent detection (cheap pre-filter, no model call).** `ShowingBookingService.hasShowingIntent`
+  — a deterministic keyword heuristic (mirrors `ConciergeInboundRouter.hasQualificationSignal`): "see it",
+  "tour", "showing", "walk through", "come by", "visit", "open house", "schedule a"/"book a", etc. A pure
+  factual disclosure question (no showing language) never enters the booking flow → the RE-1 grounded path's
+  **model-call count is byte-identical** (the `RealEstateConciergeIT` call-count gate).
+- **State-machine routing (the seam in the router).** `ConciergeInboundRouter.route` branches the
+  (already-persisted) buyer turn: **`OFFERING_SLOTS`** → the body is a slot pick → `ShowingBookingService.book`
+  (NOT the grounded-answer path — a "2" is not a disclosure question); **else + showing intent** →
+  `ShowingBookingService.offerSlots` (offer slots, advance to `OFFERING_SLOTS`, no model call this turn);
+  **else** → the unchanged RE-1 answer + RE-2 qualify path (`answerAndReply`). A pure factual question routes
+  to the unchanged path — RE-1/RE-2 byte-equivalent.
+- **Offer slots over SMS (demo-grade).** `ShowingBookingService.offerSlots` generates N candidate slots
+  (`kmosf.realestate.showing-slot-count` default 2; `showing-slot-hours` default 14,16;
+  `showing-slot-duration-minutes` default 30) from a deterministic local generator starting tomorrow (never a
+  past slot), persists them on the conversation (`offeredSlots`, a new embedded `OfferedShowingSlot` list),
+  advances state to `OFFERING_SLOTS`, and texts a **deterministic** offer ("I've got Sat 2:00 PM or Sat 4:00 PM
+  — reply 1 or 2"). **Production path = live Cal.com availability** (a clean swap of `generateSlots`).
+- **Book → write a `Meeting` (the `CalComWebhookService.reconcileUpsert` shape).** On a slot pick
+  (`resolvePick` accepts a bare ordinal "2", an embedded ordinal "option 2"/"the 2nd", or a label substring),
+  `book` writes a `Meeting` **directly** — tenant-scoped, `name="Showing — <address>"`, `location=<address>`,
+  the chosen `start`/`end`, the buyer as the sole attendee, the listing agent (when known) as organizer,
+  `calComBookingUid` **left null** (so a later production Cal.com booking reconciles to its own projection, no
+  collision). Then: link `meetingId`/`contactId` onto the conversation, advance to `BOOKED`, clear the offered
+  slots, log a best-effort `Activity(MEETING, subjectType=CONTACT)` on the buyer, emit `SHOWING_BOOKED`, and
+  text the confirmation ("Booked! Sat 2:00 PM. Your agent will meet you there."). The buyer Contact is reused
+  from RE-2 when linked, else found-or-created by phone (the `QualificationService` precedent).
+- **Best-effort & idempotent.** Every path is `onErrorResume`-wrapped (4263 offer / 4264 booking — logged,
+  never thrown). A no-match pick **re-offers** (state stays `OFFERING_SLOTS`, no Meeting). A double-pick race
+  is guarded by an explicit-boolean check on the conversation's `meetingId` (already booked → re-confirm the
+  existing Meeting, never a second) backed by the conversation `@Version`. **No live Cal.com call** — §7.
+
+## Files
+
+### New — module
+- `concierge/ShowingBookingService.java` (intent detection + slot offer + pick resolution + direct Meeting
+  projection write + Activity + `SHOWING_BOOKED` + confirmation SMS; deterministic slot/copy generation)
+- `model/OfferedShowingSlot.java` (embedded on the conversation while `OFFERING_SLOTS` — the persisted
+  candidate slots the pick resolves against)
+
+### Edited (additive; RE-1 + RE-2 + ChairFill + scorer byte-equivalent)
+- `concierge/ConciergeInboundRouter.java` (+the `route` state-machine branch + the `ShowingBookingService`
+  field/ctor param; the RE-1 answer/handoff + RE-2 qualify path is reached unchanged for factual questions)
+- `model/ConciergeConversation.java` (+`meetingId` link + the `offeredSlots` embedded list)
+- `model/ConversationState.java` (doc — `OFFERING_SLOTS`/`BOOKED` are now reached by RE-3; no new value)
+- `RealEstateAutoConfiguration.java` (+the `ShowingBookingService` bean; router bean takes it)
+- `integration/twilio/InboundSmsService.java` (+`CONCIERGE_BOOKING_OFFERED`/`CONCIERGE_BOOKED` outcomes +
+  the two new `Outcome` switch cases; the ChairFill YES/STOP + RE-1 mappings unchanged)
+- `automation/DomainEventType.java` (+`SHOWING_BOOKED`)
+- `controller/advice/GlobalErrorHandler.java` (+4263-4265 doc band)
+
+### Tests
+- `src/test/java/.../module/realestate/RealEstateShowingBookingIT.java` — (1) showing intent → slots offered
+  over SMS, state `OFFERING_SLOTS`, slots persisted, NO model call; (2) a slot pick → a `Meeting` written
+  (tenant + listing address as location + buyer attendee + chosen start/end matching the offered slot, no
+  `calComBookingUid`), state `BOOKED`, confirmation SMS, `SHOWING_BOOKED` emitted (observed via
+  `eventPublisher.stream()`), `Activity(MEETING)` logged; (3) a grounded factual question still answers with a
+  citation (RE-1 intact, model called once); (4) best-effort — a no-match pick re-offers without a Meeting or
+  dropping the conversation.
+
+## Validation status
+
+- `./gradlew compileJava compileTestJava` — GREEN.
+- `./gradlew cleanTest test --tests "*RealEstateShowingBookingIT" --tests "*RealEstateConciergeIT"
+  --tests "*RealEstateQualificationIT" --tests "*GapFillWaitlistIT" --tests "*LeadScoringV2IT"
+  --tests "*OpenApiEndpointIT" --tests "*CalComWebhookIT"` — **GREEN**. Per-class (tests/failures/errors):
+  RealEstateShowingBookingIT 4/0/0; RealEstateConciergeIT 5/0/0; RealEstateQualificationIT 5/0/0;
+  GapFillWaitlistIT 11/0/0; LeadScoringV2IT 4/0/0; OpenApiEndpointIT 2/0/0; CalComWebhookIT 5/0/0.
+
+## Hard gates
+
+1. RE-1 grounding + RE-2 qualification/scoring + ChairFill inbound + the lead-scorer all **byte-equivalent**
+   (`RealEstateConciergeIT`, `RealEstateQualificationIT`, `GapFillWaitlistIT`, `LeadScoringV2IT` green). The
+   showing-intent + slot-pick branches add **no model call** (deterministic copy), so RE-1's call-count gate
+   holds; the booking branch only fires on showing intent / `OFFERING_SLOTS`, never on a factual question.
+2. Best-effort — a Claude/SMS/Meeting-write failure never drops the conversation (no-match re-offers; an
+   already-booked conversation re-confirms, never a second Meeting).
+3. Module-gated, blast-radius zero; **no live Cal.com call** (demo writes the projection directly). Error band
+   **4263-4265** (advisory); reuse 1200-1203, 2530-2532, the Meeting/Cal.com projection + `Activity(MEETING)`.
+
+## Go-live note
+
+The demo writes the `Meeting` projection directly. **For a live client, flip the production path on**:
+per-tenant `IntegrationConnection(calcom)` + webhook signing secret + the agent's configured Cal.com
+availability, so `generateSlots` reads live availability and `book` drives a real Cal.com booking that the
+shipped `CalComWebhookService` reconciles (idempotent on `calComBookingUid`). Already on the RE go-live ledger
+(plan §9). No concierge code change needed for the flip.

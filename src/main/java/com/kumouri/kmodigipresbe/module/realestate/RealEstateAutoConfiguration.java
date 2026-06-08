@@ -13,6 +13,7 @@ import com.kumouri.kmodigipresbe.module.realestate.concierge.LeadHandoffService;
 import com.kumouri.kmodigipresbe.module.realestate.concierge.ListingConciergeService;
 import com.kumouri.kmodigipresbe.module.realestate.concierge.QualificationExtractionService;
 import com.kumouri.kmodigipresbe.module.realestate.concierge.QualificationService;
+import com.kumouri.kmodigipresbe.module.realestate.concierge.ShowingBookingService;
 import com.kumouri.kmodigipresbe.module.realestate.model.ConciergeConversationRepository;
 import com.kumouri.kmodigipresbe.module.realestate.model.HotHandoffLogRepository;
 import com.kumouri.kmodigipresbe.module.realestate.model.ListingDisclosureRepository;
@@ -65,7 +66,14 @@ import java.util.List;
  * the UNCHANGED nightly {@code LeadScoringV2Service} tiers), both wired into the router; and the
  * {@link LeadHandoffService} {@code LEAD_SCORE_UPDATED} subscriber (the CF-2 {@code RiskTieredPreventionService}
  * / {@code RebookingNudgeService} {@code @PostConstruct} pattern) that alerts the agent on a HOT,
- * concierge-sourced lead. RE-3..RE-5 (booking, Marketing Studio, FE) layer on this.
+ * concierge-sourced lead.
+ *
+ * <p>RE-3 build-out (additive): the {@link ShowingBookingService} — when the buyer expresses showing intent
+ * the router offers demo-grade candidate slots over SMS ({@code OFFERING_SLOTS}); on the buyer's pick it
+ * writes a showing {@code Meeting} directly (the {@code CalComWebhookService.reconcileUpsert} projection
+ * shape — no live Cal.com call, §7), advances to {@code BOOKED}, logs an {@code Activity(MEETING)}, emits
+ * {@code SHOWING_BOOKED}, and texts the confirmation. Wired into the {@link ConciergeInboundRouter}'s
+ * state-machine routing. RE-4..RE-5 (Marketing Studio, FE) layer on this.
  */
 @AutoConfiguration(after = ChairFillAutoConfiguration.class)
 @ConditionalOnProperty(prefix = "kmosf.modules.realestate", name = "enabled")
@@ -183,6 +191,7 @@ public class RealEstateAutoConfiguration {
             ListingConciergeService conciergeService,
             QualificationExtractionService qualificationExtraction,
             QualificationService qualificationService,
+            ShowingBookingService showingBookingService,
             TwilioSmsService twilioSmsService,
             DomainEventPublisher events,
             @Value("${kmosf.realestate.correlation-ttl-minutes:1440}") long correlationTtlMinutes,
@@ -192,8 +201,35 @@ public class RealEstateAutoConfiguration {
             @Value("${kmosf.realestate.disambiguation-sms:Thanks for reaching out! Which property are you "
                     + "asking about? Reply with the address or MLS#.}") String disambiguationSmsBody) {
         return new ConciergeInboundRouter(listings, disclosures, conversations, conciergeService,
-                qualificationExtraction, qualificationService, twilioSmsService, events,
+                qualificationExtraction, qualificationService, showingBookingService, twilioSmsService, events,
                 correlationTtlMinutes, handoffNotify, handoffSmsBody, disambiguationSmsBody);
+    }
+
+    // ── RE-3 showing booking (offer slots over SMS → write a Meeting projection) ──
+
+    /**
+     * RE-3 — the showing-booking service the router delegates to when the buyer expresses showing intent
+     * (offer slots → {@code OFFERING_SLOTS}) and when a slot pick arrives (write a {@code Meeting} → {@code
+     * BOOKED} → confirm). The demo writes the {@code Meeting} projection DIRECTLY (the
+     * {@code CalComWebhookService.reconcileUpsert} shape — no live Cal.com call, §7); production flips to a
+     * live Cal.com booking + the shipped webhook reconcile (idempotent on {@code calComBookingUid}) with no
+     * concierge change. Slot offering is demo-grade deterministic generation (the production path reads live
+     * Cal.com availability — decision 4); the offer/confirmation copy is deterministic templating (no model
+     * call), so the RE-1 grounded path's model-call behavior stays byte-identical.
+     */
+    @Bean
+    public ShowingBookingService showingBookingService(
+            ConciergeConversationRepository conversations,
+            com.kumouri.kmodigipresbe.repository.MeetingRepository meetings,
+            ContactRepository contacts,
+            com.kumouri.kmodigipresbe.service.ActivityCrudService activityCrudService,
+            TwilioSmsService twilioSmsService,
+            DomainEventPublisher events,
+            @Value("${kmosf.realestate.showing-slot-count:2}") int slotCount,
+            @Value("${kmosf.realestate.showing-slot-duration-minutes:30}") int slotDurationMinutes,
+            @Value("${kmosf.realestate.showing-slot-hours:14,16}") List<Integer> slotHours) {
+        return new ShowingBookingService(conversations, meetings, contacts, activityCrudService,
+                twilioSmsService, events, slotCount, slotDurationMinutes, slotHours);
     }
 
     // ── RE-2 hot-handoff (LEAD_SCORE_UPDATED subscriber) ─────────────────────────

@@ -540,6 +540,28 @@ import java.util.UUID;
  *       precedent) and re-checks {@code Tenant.enabledModules} membership, so it is a hard no-op for
  *       non-realestate / non-HOT / non-concierge {@code LEAD_SCORE_UPDATED} events. <strong>No live Twilio /
  *       Anthropic in tests</strong> (WireMock + a mock {@code TwilioSmsService}).</li>
+ *   <li>{@code 4263-4265} — <em>Real Estate Concierge RE-3 (flagship #3)</em>: showing booking over SMS —
+ *       the {@code OFFERING_SLOTS} → {@code BOOKED} states. All gated on
+ *       {@code kmosf.modules.realestate.enabled}. When the buyer expresses showing intent (a cheap
+ *       deterministic keyword pre-filter — no model call, so the RE-1 grounded path's call count is
+ *       byte-identical) the {@code ShowingBookingService} offers demo-grade candidate slots over SMS; on the
+ *       buyer's pick it <strong>writes a showing {@code Meeting} projection DIRECTLY</strong> (the
+ *       {@code CalComWebhookService.reconcileUpsert} shape — tenant-scoped, the listing address as
+ *       {@code location}, the buyer attendee, the chosen {@code start}/{@code end}, {@code calComBookingUid}
+ *       left null), advances the conversation to {@code BOOKED}, logs a best-effort {@code Activity(MEETING)},
+ *       emits {@code SHOWING_BOOKED}, and texts the confirmation. <strong>No live Cal.com call</strong> (§7);
+ *       production flips to a live Cal.com booking + the shipped {@code CalComWebhookService} reconcile
+ *       (idempotent on {@code calComBookingUid}) with no concierge change. <strong>RE-3 mints only advisory
+ *       codes</strong> (every path is best-effort — a Meeting-write/SMS failure never drops the conversation):
+ *       {@code 4263} no availability to offer (logged, the buyer gets a graceful "your agent will reach out"
+ *       note, never thrown); {@code 4264} slot already taken / booking conflict (the double-pick guard —
+ *       an already-booked conversation re-confirms its existing {@code Meeting}, never a second write; logged,
+ *       never thrown); {@code 4265} reserved for RE-3 growth. Reused (NOT re-allocated): {@code 2530-2532}
+ *       (Twilio SMS recipient/send/secret — the reused {@code TwilioSmsService} on the offer/confirmation/
+ *       re-offer sends, best-effort); the {@code Meeting}/Cal.com projection shape + the {@code Activity}
+ *       {@code MEETING} type. The slot-offer + confirmation copy is deterministic templating (no Anthropic
+ *       call). <strong>No live Twilio / Cal.com in tests</strong> (a mock {@code TwilioSmsService} + a direct
+ *       Meeting projection write — no Cal.com).</li>
  * </ul>
  */
 @Slf4j

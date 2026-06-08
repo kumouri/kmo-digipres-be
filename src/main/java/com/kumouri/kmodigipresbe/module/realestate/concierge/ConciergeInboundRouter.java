@@ -66,7 +66,7 @@ import java.util.UUID;
 public class ConciergeInboundRouter {
 
     /** What an inbound concierge SMS resolved to — for the seam/controller to log. */
-    public enum Outcome { ANSWERED, HANDED_OFF, NO_LISTING, IGNORED }
+    public enum Outcome { ANSWERED, HANDED_OFF, BOOKING_OFFERED, BOOKED, NO_LISTING, IGNORED }
 
     private final ListingRepository listings;
     private final ListingDisclosureRepository disclosures;
@@ -74,6 +74,7 @@ public class ConciergeInboundRouter {
     private final ListingConciergeService conciergeService;
     private final QualificationExtractionService qualificationExtraction;
     private final QualificationService qualificationService;
+    private final ShowingBookingService showingBookingService;
     private final TwilioSmsService twilioSmsService;
     private final DomainEventPublisher events;
     private final long correlationTtlMinutes;
@@ -87,6 +88,7 @@ public class ConciergeInboundRouter {
                                   ListingConciergeService conciergeService,
                                   QualificationExtractionService qualificationExtraction,
                                   QualificationService qualificationService,
+                                  ShowingBookingService showingBookingService,
                                   TwilioSmsService twilioSmsService,
                                   DomainEventPublisher events,
                                   long correlationTtlMinutes,
@@ -99,6 +101,7 @@ public class ConciergeInboundRouter {
         this.conciergeService = conciergeService;
         this.qualificationExtraction = qualificationExtraction;
         this.qualificationService = qualificationService;
+        this.showingBookingService = showingBookingService;
         this.twilioSmsService = twilioSmsService;
         this.events = events;
         this.correlationTtlMinutes = correlationTtlMinutes;
@@ -167,7 +170,38 @@ public class ConciergeInboundRouter {
                                             "conversationId", saved.getId(),
                                             "buyerPhone", from))));
                 })
-                .flatMap(conv -> answerAndReply(tenantId, from, listing, conv, body));
+                .flatMap(conv -> route(tenantId, from, listing, conv, body));
+    }
+
+    /**
+     * Multi-turn routing of the (already-persisted) buyer turn (RE-3 §5 / decision 4). The state machine:
+     * <ul>
+     *   <li><strong>{@code OFFERING_SLOTS}</strong> → the body is a slot pick → {@link
+     *       ShowingBookingService#book} (writes the {@code Meeting}, advances to {@code BOOKED}, confirms);
+     *       <em>not</em> the grounded-answer path (a "2" is not a disclosure question).</li>
+     *   <li><strong>else + {@link ShowingBookingService#hasShowingIntent showing intent}</strong> (a cheap
+     *       keyword pre-filter — no model call, so the RE-1 call-count gate holds) → {@link
+     *       ShowingBookingService#offerSlots} (offer slots, advance to {@code OFFERING_SLOTS}).</li>
+     *   <li><strong>else</strong> → the unchanged RE-1 grounded-answer + RE-2 qualification path ({@link
+     *       #answerAndReply}). A pure factual question routes here exactly as before — byte-equivalent.</li>
+     * </ul>
+     * All branches are best-effort (the {@code handle} chain swallows errors to {@link Outcome#IGNORED}).
+     */
+    private Mono<Outcome> route(UUID tenantId, String from, Listing listing,
+                                ConciergeConversation conv, String body) {
+        if (conv.getState() == ConversationState.OFFERING_SLOTS) {
+            // A pick for the slots we already offered — book it (or re-offer on a no-match).
+            return showingBookingService.book(tenantId, listing, conv, from, body)
+                    .map(saved -> saved.getState() == ConversationState.BOOKED
+                            ? Outcome.BOOKED : Outcome.BOOKING_OFFERED);
+        }
+        if (ShowingBookingService.hasShowingIntent(body)) {
+            // The buyer wants to see it — offer showing slots (no grounded-answer model call this turn).
+            return showingBookingService.offerSlots(tenantId, listing, conv, from)
+                    .thenReturn(Outcome.BOOKING_OFFERED);
+        }
+        // RE-1 grounded answer + RE-2 qualification — unchanged.
+        return answerAndReply(tenantId, from, listing, conv, body);
     }
 
     private Mono<Outcome> answerAndReply(UUID tenantId, String from, Listing listing,
