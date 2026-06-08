@@ -62,6 +62,9 @@ public class ConciergeConversation implements TenantScoped {
     /** The buyer's qualification Deal — null until RE-2 materializes it. */
     private UUID dealId;
 
+    /** The booked showing {@code Meeting} — null until RE-3 writes it on a slot pick. */
+    private UUID meetingId;
+
     /** The buyer's phone in E.164 (the {@code From} number) — the per-listing correlation key. */
     private String buyerPhone;
 
@@ -78,6 +81,15 @@ public class ConciergeConversation implements TenantScoped {
      * turn-to-turn. Feeds the materialized {@link #dealId} Deal the nightly scorer tiers.
      */
     private BuyerQualification qualification;
+
+    /**
+     * RE-3 — the candidate showing slots the concierge has offered the buyer over SMS, set while the
+     * conversation is in {@link ConversationState#OFFERING_SLOTS}. Persisted so the buyer's pick (a
+     * number/slot reply) resolves to the exact offered {@code start}/{@code end} without re-deriving
+     * availability between turns. Empty/null outside the booking flow; cleared once a slot is booked.
+     */
+    @Builder.Default
+    private List<OfferedShowingSlot> offeredSlots = new ArrayList<>();
 
     /** When the most recent inbound buyer text was received — drives the recency fallback + TTL window. */
     private Instant lastInboundAt;

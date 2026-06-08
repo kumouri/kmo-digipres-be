@@ -370,6 +370,17 @@ public final class DomainEventType {
     public static final String CONCIERGE_LEAD_QUALIFIED = "realestate.conciergeLeadQualified";
     public static final String CONCIERGE_HOT_HANDOFF     = "realestate.conciergeHotHandoff";
 
+    // Real Estate Concierge RE-3 — showing booking over SMS. Advisory (RuleEngine / webhook fan-out) — it does
+    // NOT drive any core mutation; the slot offer + the Meeting projection write happen synchronously and
+    // explicitly inside the realestate-module-gated ShowingBookingService. The DEMO writes the Meeting
+    // projection DIRECTLY (no live Cal.com call — §7); production flips to a live Cal.com booking + the shipped
+    // CalComWebhookService reconcile (idempotent on calComBookingUid), with no concierge change. Emitted only
+    // when the realestate module is on.
+    // SHOWING_BOOKED: emitted by ShowingBookingService after a buyer's slot pick writes a showing Meeting
+    //   projection (+ a best-effort Activity(MEETING) on the buyer contact) and advances the conversation to
+    //   BOOKED. Payload: {conversationId, listingId, meetingId, contactId (nullable), start}.
+    public static final String SHOWING_BOOKED = "realestate.showingBooked";
+
     private DomainEventType() {
     }
 }
