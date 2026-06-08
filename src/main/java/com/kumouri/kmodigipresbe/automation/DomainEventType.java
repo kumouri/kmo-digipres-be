@@ -257,6 +257,16 @@ public final class DomainEventType {
     // mole (whose strategy creates none). Payload: {callSid, workOrderId, contactId, trade, urgency}.
     public static final String VOICEMAIL_WORK_ORDER_DRAFTED = "voicemail.workOrderDrafted";
 
+    // HS-2 (Home Services — "Front Desk That Never Sleeps") — equipment-nameplate photo enrichment.
+    // Advisory (RuleEngine / webhook fan-out) — does NOT drive any mutation; the WorkOrder enrichment
+    // + Activity(NOTE) + owner-digest notify happen synchronously and explicitly inside
+    // EquipmentVisionService after a caller uploads an equipment photo via the tokenized link the
+    // HS-1 auto-ack carried. Emitted on EVERY read (even a blank/no-legible-nameplate one — enriched
+    // is false then). There is no idempotency ledger (a per-caller photo upload is intentionally
+    // re-invocable — the MoleTriageController/MoleTripwireController precedent). Payload:
+    // {workOrderId, attachmentId, enriched, make?, model?, serial?, equipmentType?, observedSymptom?}.
+    public static final String EQUIPMENT_PHOTO_READ = "equipment.photoRead";
+
     // Phase 2 (NMM AI intake) — "is this a mole?" photo-triage pipeline (Feature B). All are
     // advisory (RuleEngine / webhook fan-out) — they do NOT drive any core mutation; the photo
     // triage performs the Attachment store + MoleVisionService classify + Contact find-or-create

@@ -7,6 +7,7 @@ import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
 import com.kumouri.kmodigipresbe.integration.IntegrationConnection;
 import com.kumouri.kmodigipresbe.integration.IntegrationConnectionRepository;
 import com.kumouri.kmodigipresbe.integration.twilio.TwilioSmsService;
+import com.kumouri.kmodigipresbe.integration.equipmentvision.EquipmentPhotoTokenService;
 import com.kumouri.kmodigipresbe.integration.twilio.voice.extract.VoicemailExtractionStrategy;
 import com.kumouri.kmodigipresbe.integration.twilio.voice.extract.VoicemailExtractionStrategyResolver;
 import com.kumouri.kmodigipresbe.integration.twilio.voice.extract.VoicemailLeadDetails;
@@ -103,6 +104,14 @@ public class TwilioVoicemailService {
 
     public static final String PROVIDER = TwilioSmsService.PROVIDER; // "twilio"
 
+    /**
+     * HS-2 — TTL of the equipment-photo upload token embedded in the home-services auto-ack SMS link.
+     * 7 days (matches {@code EquipmentPhotoTokenController.TOKEN_TTL}): long enough for a caller to
+     * get to their unit and photograph it after the after-hours call, short enough that a forgotten
+     * link expires.
+     */
+    private static final java.time.Duration EQUIPMENT_UPLOAD_TOKEN_TTL = java.time.Duration.ofDays(7);
+
     private final IntegrationConnectionRepository connections;
     private final TwilioVoicemailEventRepository voicemailEvents;
     private final VoicemailTranscriptionSource transcriptionSource;
@@ -120,11 +129,27 @@ public class TwilioVoicemailService {
      * never errors — plan §4.4).
      */
     private final ObjectProvider<WorkOrderService> workOrderServiceProvider;
+    /**
+     * HS-2 — mints the {@code equipment-photo} upload token whose link the home-services auto-ack SMS
+     * carries (so the caller can text a photo of their unit). Unconditional bean (mirrors
+     * {@code MoleTripwireTokenService}); the link is only ever appended for the home-services vertical
+     * (when a DRAFT WorkOrder was created AND a base URL is configured), so the mole/default auto-ack
+     * SMS body stays byte-identical (the NMM {@code TwilioVoicemailIT} gate).
+     */
+    private final EquipmentPhotoTokenService equipmentPhotoTokens;
 
     private final String greeting;
     private final int recordMaxLengthSeconds;
     private final String autoAckMessage;
     private final String notifyFromAddress;
+    /**
+     * HS-2 — base URL for the public equipment-photo upload link appended to the home-services
+     * auto-ack SMS, e.g. {@code https://api-demo.kmosolutionsfoundry.com/api/v1/public/integrations/
+     * home-services/equipment-photo}. The {@code {token}/upload} suffix is appended per-call. When
+     * blank (the default), <strong>no link is appended</strong> — so the auto-ack is byte-unchanged
+     * everywhere until a home-services deployment opts in by setting this.
+     */
+    private final String equipmentUploadBaseUrl;
 
     public TwilioVoicemailService(
             IntegrationConnectionRepository connections,
@@ -137,13 +162,15 @@ public class TwilioVoicemailService {
             TwilioSmsService twilioSmsService,
             DomainEventPublisher events,
             ObjectProvider<WorkOrderService> workOrderServiceProvider,
+            EquipmentPhotoTokenService equipmentPhotoTokens,
             @Value("${kmosf.voicemail.greeting:Thank you for calling. Please leave a message "
                     + "with your name, address, and a description of your problem after the "
                     + "beep, and we will call you back.}") String greeting,
             @Value("${kmosf.voicemail.record-max-length-seconds:120}") int recordMaxLengthSeconds,
             @Value("${kmosf.voicemail.auto-ack-message:Thanks for calling — we got your "
                     + "message and will call you back.}") String autoAckMessage,
-            @Value("${kmosf.mail.smtp.username:}") String notifyFromAddress) {
+            @Value("${kmosf.mail.smtp.username:}") String notifyFromAddress,
+            @Value("${kmosf.home-services.equipment-upload-base-url:}") String equipmentUploadBaseUrl) {
         this.connections = connections;
         this.voicemailEvents = voicemailEvents;
         this.transcriptionSource = transcriptionSource;
@@ -154,10 +181,12 @@ public class TwilioVoicemailService {
         this.twilioSmsService = twilioSmsService;
         this.events = events;
         this.workOrderServiceProvider = workOrderServiceProvider;
+        this.equipmentPhotoTokens = equipmentPhotoTokens;
         this.greeting = greeting;
         this.recordMaxLengthSeconds = recordMaxLengthSeconds;
         this.autoAckMessage = autoAckMessage;
         this.notifyFromAddress = notifyFromAddress;
+        this.equipmentUploadBaseUrl = equipmentUploadBaseUrl == null ? "" : equipmentUploadBaseUrl.trim();
     }
 
     // -------------------------------------------------------------------------
@@ -391,7 +420,7 @@ public class TwilioVoicemailService {
                                             .thenReturn(woId);
                                 })
                                 .flatMap(woId -> notifyRob(conn, params, details)
-                                        .then(autoAckCaller(params))
+                                        .then(autoAckCaller(tenantId, params, woId))
                                         .then(Mono.fromRunnable(() -> {
                                             emitVoicemailLeadCreated(tenantId, params, contact, activity);
                                             woId.ifPresent(id -> emitVoicemailWorkOrderDrafted(
@@ -564,15 +593,23 @@ public class TwilioVoicemailService {
     /**
      * Best-effort auto-acknowledgement SMS back to the caller ({@code From}) via the existing
      * {@code TwilioSmsService}. Swallowed on failure — never fails the ingest.
+     *
+     * <p>HS-2: when a DRAFT {@link WorkOrder} was created (home-services vertical only) AND a
+     * {@code kmosf.home-services.equipment-upload-base-url} is configured, the equipment-photo upload
+     * link is appended so the caller can text a photo of their unit (which
+     * {@code EquipmentVisionService} reads to enrich the WorkOrder). For the mole/default vertical
+     * {@code woId} is empty → no link → the SMS body is <strong>byte-identical</strong> to before
+     * (the NMM {@code TwilioVoicemailIT} gate); likewise when the base URL is unset (the default).
      */
-    private Mono<Void> autoAckCaller(VoicemailCallbackParams params) {
+    private Mono<Void> autoAckCaller(UUID tenantId, VoicemailCallbackParams params,
+                                     java.util.Optional<UUID> woId) {
         String from = params.from();
         if (from == null || from.isBlank()) {
             return Mono.empty();
         }
         SmsCommunicationRequest ack = SmsCommunicationRequest.builder()
                 .to(new PhoneContact(from))
-                .body(autoAckMessage)
+                .body(buildAutoAckBody(tenantId, woId))
                 .build();
         return twilioSmsService.sendSms(ack)
                 .onErrorResume(e -> {
@@ -581,6 +618,31 @@ public class TwilioVoicemailService {
                     return Mono.just(false);
                 })
                 .then();
+    }
+
+    /**
+     * Builds the auto-ack SMS body. The base message is unchanged; the HS-2 equipment-photo upload
+     * link is appended only when {@code woId} is present (home-services created a DRAFT WorkOrder) AND
+     * the upload base URL is configured. Token minting is wrapped defensively — a token failure must
+     * never fail the (best-effort) auto-ack, so it falls back to the bare message.
+     */
+    private String buildAutoAckBody(UUID tenantId, java.util.Optional<UUID> woId) {
+        if (woId.isEmpty() || equipmentUploadBaseUrl.isEmpty()) {
+            return autoAckMessage;
+        }
+        try {
+            String token = equipmentPhotoTokens.issue(
+                    tenantId, woId.get(), EQUIPMENT_UPLOAD_TOKEN_TTL);
+            String base = equipmentUploadBaseUrl.endsWith("/")
+                    ? equipmentUploadBaseUrl.substring(0, equipmentUploadBaseUrl.length() - 1)
+                    : equipmentUploadBaseUrl;
+            String link = base + "/" + token + "/upload";
+            return autoAckMessage + " If it helps, send a photo of your equipment here: " + link;
+        } catch (RuntimeException e) {
+            log.warn("Equipment-photo upload-link minting failed for WorkOrder {} (best-effort, "
+                    + "bare auto-ack): {}", woId.get(), e.getMessage());
+            return autoAckMessage;
+        }
     }
 
     private void emitVoicemailLeadCreated(UUID tenantId, VoicemailCallbackParams params,
