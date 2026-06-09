@@ -1,0 +1,126 @@
+package com.kumouri.kmodigipresbe.module.ar;
+
+import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
+import com.kumouri.kmodigipresbe.extension.ModuleAutoConfigurationSupport;
+import com.kumouri.kmodigipresbe.extension.ModuleDefinition;
+import com.kumouri.kmodigipresbe.extension.TenantModuleRegistry;
+import com.kumouri.kmodigipresbe.integration.IntegrationConnectionRepository;
+import com.kumouri.kmodigipresbe.integration.twilio.TwilioSmsService;
+import com.kumouri.kmodigipresbe.repository.ContactRepository;
+import com.kumouri.kmodigipresbe.repository.InvoiceRepository;
+import com.kumouri.kmodigipresbe.service.ai.AiUsageRecorder;
+import com.kumouri.kmodigipresbe.service.billing.StripeCheckoutService;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Bean;
+import org.springframework.web.reactive.function.client.WebClient;
+
+import java.time.Clock;
+import java.util.List;
+
+/**
+ * The "Get Paid" AR / collections module (band 4600-4619) — tiered overdue-invoice dunning over the
+ * existing billing core.
+ *
+ * <h2>Gating — DEFAULT-OFF (a money / customer-facing-comms module)</h2>
+ * {@code @ConditionalOnProperty(prefix="kmosf.modules.ar", name="enabled",
+ * <strong>matchIfMissing=false</strong>)} — the module's {@link ModuleDefinition} is present
+ * <em>only</em> when a deployment explicitly sets {@code kmosf.modules.ar.enabled=true}. This is the
+ * deliberate inverse of the default-ON vertical modules (the {@code GbpReviewPoller} /
+ * {@code CoverageNudgeJob} default-OFF posture): a non-AR tenant gets no aging sweep, no SENT→OVERDUE
+ * transition, no dunning — byte-identical to before this module existed. Per-tenant membership (once a
+ * deployment opts the module in) is then enforced by {@code TenantModuleRegistry.requireEnabled("ar")}
+ * in the AR-4 read controller.
+ *
+ * <p><strong>The scheduled {@link ArAgingSweepJob} is NOT registered here</strong> — it is its own
+ * {@code @Component} carrying the <em>same</em> {@code kmosf.modules.ar} gate (also
+ * {@code matchIfMissing=false}), so the whole module — definition and sweep — flips together with the
+ * single {@code kmosf.modules.ar.enabled} flag (the {@code NurtureAutoConfiguration} +
+ * {@code NurtureRunner} split, here collapsed onto one flag because the AR module is OFF by default and
+ * has no administer-while-runner-off use case). The {@link DunningLogRepository} is component-scanned
+ * by {@code @EnableReactiveMongoRepositories} (always present, like {@code CoverageNudgeLogRepository});
+ * it is simply unused while the module is off.
+ */
+@AutoConfiguration
+@ConditionalOnProperty(prefix = "kmosf.modules.ar", name = "enabled", matchIfMissing = false)
+public class ArAutoConfiguration {
+
+    public static final String MODULE_KEY = "ar";
+
+    @Bean
+    public ModuleDefinition arModuleDefinition() {
+        return ModuleAutoConfigurationSupport.module(
+                MODULE_KEY, "AR / Collections (Get Paid)", "0.1.0",
+                List.of("DUNNING_LOG", "DUNNING_DISPATCH"));
+    }
+
+    // ── AR-3: tiered AI-personalized dunning dispatch (the INVOICE_OVERDUE_* leg) ──
+
+    /**
+     * The Claude-personalized dunning-copy drafter (AR-3). A sibling of {@code ReminderCopyService} —
+     * per-tenant Anthropic key + house-key fallback, {@link AiUsageRecorder} budget gate, WireMock-able
+     * base-url. Hand-constructed so the {@code @Value}-resolved config lands on the factory params (the
+     * ChairFill {@code @Bean} construction pattern; a component-scan {@code @Value} would not fire). The
+     * reused AI core ({@code AnthropicAiAssistService} / {@code AiUsageRecorder}) stays empty-diff.
+     */
+    @Bean
+    public DunningCopyComposer dunningCopyComposer(
+            WebClient.Builder webClientBuilder,
+            IntegrationConnectionRepository connections,
+            AiUsageRecorder usageRecorder,
+            @Value("${kmosf.ai.anthropic.base-url:https://api.anthropic.com/v1/messages}") String baseUrl,
+            @Value("${kmosf.ai.anthropic.house-key:}") String houseKey,
+            @Value("${kmosf.modules.ar.dunning-draft-model:claude-haiku-4-5}") String draftModel,
+            @Value("${kmosf.modules.ar.dunning-system-prompt:}") String systemPromptOverride) {
+        return new DunningCopyComposer(webClientBuilder, connections, usageRecorder,
+                baseUrl, houseKey, draftModel, systemPromptOverride);
+    }
+
+    /**
+     * The tiered dunning-dispatch subscriber (AR-3 + AR-4 suppression guard). Subscribes to
+     * {@code INVOICE_OVERDUE_{D3,D7,D14}}; per tier it reloads the invoice (auto-stop if since-paid/
+     * voided), checks the AR-4 promise-to-pay suppression guard, mints a one-touch Stripe pay link,
+     * composes tier-aware on-brand copy, and sends one SMS. Best-effort + duplicate-safe — the
+     * one-shot upstream {@code DunningLog} is the exactly-once guarantee (no new ledger here). A
+     * dedicated event-listener (NOT a generic {@code SEND_SMS} WorkflowRule) because the generic
+     * dispatcher's body is a literal {@code SmsTemplateRegistry} template — no AI copy / Stripe link /
+     * paid-guard / promise suppression. Default-OFF via this whole auto-configuration's
+     * {@code kmosf.modules.ar} gate.
+     */
+    @Bean
+    public DunningDispatchService dunningDispatchService(
+            DomainEventPublisher eventPublisher,
+            InvoiceRepository invoiceRepository,
+            ContactRepository contactRepository,
+            StripeCheckoutService stripeCheckoutService,
+            DunningCopyComposer dunningCopyComposer,
+            TwilioSmsService twilioSmsService,
+            PromiseToPayRepository promiseToPayRepository,
+            ObjectProvider<Clock> clockProvider,
+            @Value("${kmosf.modules.ar.brand-tone:}") String brandTone) {
+        return new DunningDispatchService(eventPublisher, invoiceRepository, contactRepository,
+                stripeCheckoutService, dunningCopyComposer, twilioSmsService, brandTone,
+                promiseToPayRepository,
+                clockProvider.getIfAvailable(Clock::systemUTC));
+    }
+
+    // ── AR-4: AR-aging read controller + promise-to-pay ───────────────────────────────────────
+
+    /**
+     * The AR-aging read controller (AR-4). Provides the {@code GET /ar/aging} dashboard
+     * (5-bucket aging report) and the {@code POST /ar/promises} / {@code GET /ar/promises?invoiceId}
+     * promise-to-pay surface. Module-gated + per-tenant membership + STAFF role. Read-only aging;
+     * promise-to-pay creates ACTIVE records that suppress dunning while the promise holds.
+     */
+    @Bean
+    public ArAgingController arAgingController(
+            TenantModuleRegistry tenantModuleRegistry,
+            InvoiceRepository invoiceRepository,
+            PromiseToPayRepository promiseToPayRepository,
+            ObjectProvider<Clock> clockProvider) {
+        return new ArAgingController(tenantModuleRegistry, invoiceRepository,
+                promiseToPayRepository, clockProvider);
+    }
+}

@@ -55,4 +55,16 @@ public interface InvoiceRepository extends TenantScopedReactiveMongoRepository<I
             sort = "{ 'issuedAt': -1 }")
     Flux<Invoice> findAllByTenantAndContactOrCompanyAndStatus(
             UUID tenantId, UUID contactId, UUID companyId, Invoice.Status status);
+
+    /**
+     * "Get Paid" AR / collections (band 4600-4619) — the default-OFF {@code ArAgingSweepJob}'s
+     * per-tenant candidate query: every invoice in one of the supplied statuses (the sweep passes
+     * {@code [SENT, OVERDUE]}) so it can flip newly-past-due SENT invoices to OVERDUE and re-evaluate
+     * already-OVERDUE invoices for higher dunning tiers. The explicit {@code tenantId} predicate scopes
+     * the read — the {@code TenantScopedReactiveMongoRepository} marker does NOT auto-scope derived
+     * finders. Backed by the existing {@code tenant_status_idx}. Strictly additive (no behavior change
+     * to any existing path).
+     */
+    Flux<Invoice> findAllByTenantIdAndStatusIn(
+            UUID tenantId, java.util.Collection<Invoice.Status> statuses);
 }

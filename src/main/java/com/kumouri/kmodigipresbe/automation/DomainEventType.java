@@ -444,6 +444,20 @@ public final class DomainEventType {
     public static final String RESPONDER_INTENT_HANDLED     = "responder.intentHandled";
     public static final String RESPONDER_HANDED_OFF         = "responder.handedOff";
 
+    // "Get Paid" AR / collections (band 4600-4619) — tiered overdue-invoice dunning. All advisory
+    // (RuleEngine / webhook fan-out) — they do NOT drive any core mutation; the default-OFF
+    // ArAgingSweepJob flips SENT->OVERDUE and emits these synchronously, gated by an explicit-boolean
+    // DunningLog ledger-insert-FIRST (one row per (invoice, tier)). Emitted only when the `ar` module
+    // is on. Payload: {invoiceId, contactId, daysOverdue, balance, currency}.
+    public static final String INVOICE_OVERDUE_D3  = "invoice.overdueD3";
+    public static final String INVOICE_OVERDUE_D7  = "invoice.overdueD7";
+    public static final String INVOICE_OVERDUE_D14 = "invoice.overdueD14";
+    // AR-3 — emitted by the default-OFF DunningDispatchService after a tiered, Claude-personalized
+    // dunning SMS (carrying a one-touch Stripe pay link) is sent for an overdue invoice. Advisory only
+    // (a timeline/audit breadcrumb) — drives no core mutation; the send itself is the effect, and the
+    // upstream INVOICE_OVERDUE_* one-shot is the exactly-once guarantee (AR-3 adds no new ledger).
+    // Emitted only when the `ar` module is on. Payload: {invoiceId, contactId, tier, channel}.
+    public static final String DUNNING_SENT = "ar.dunningSent";
     // E3 (Review Engine) — post-visit review-REQUEST delivery + sentiment triage + per-entity insights.
     // All four are advisory (RuleEngine / webhook fan-out) — they do NOT drive any core mutation; the
     // request create-on-completion, the default-OFF scheduled send, the sentiment store, and the
