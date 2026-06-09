@@ -747,6 +747,32 @@ import java.util.UUID;
  *       OpenAPI spec when the module is off; the default-OFF runner means no live send in CI / any
  *       default run. <strong>Strictly additive — the shipped Sequence engine, InboundSmsService,
  *       TwilioSmsService, EmailService, and AnthropicAiAssistService are empty-diff vs {@code main}.</strong></li>
+ *   <li>{@code 4320-4339} — <em>Inbound Responder + Intent Router (E2)</em>: the reusable inbound-SMS
+ *       responder engine (a generic free-text intent classifier + a pluggable {@code IntentHandler}
+ *       registry + lightweight conversation state). The {@code responder} module is gated
+ *       {@code @ConditionalOnProperty(kmosf.modules.responder.enabled, matchIfMissing=true)}; per-tenant
+ *       membership is enforced by {@code TenantModuleRegistry.requireEnabled("responder")} (1130/1132) in
+ *       {@code ResponderConfigController}. The generic inbound delegation only ACTIVATES for a tenant with
+ *       a usable {@code ResponderConfig} — absent/disabled/empty config makes the {@code InboundIntentRouter}
+ *       return {@code IGNORED}, so the shipped {@code InboundSmsService} STOP/YES/realestate path is
+ *       byte-identical (the regression-gate invariant). New codes: {@code 4320} responder not enabled for
+ *       the tenant (404 — the in-range parity echo of the {@code requireEnabled} gate; the {@code 4250}/
+ *       {@code 4300}/{@code 2700}/{@code 3930} not-enabled posture); {@code 4321} responder config not
+ *       found for the tenant on a read (404 — a genuine {@code switchIfEmpty}); {@code 4322} invalid
+ *       responder config — an intent with a blank name (400). The band {@code 4323-4339} is RESERVED for
+ *       responder growth. Reused (NOT re-allocated): {@code 1130}/{@code 1131}/{@code 1132} (the module
+ *       gate), {@code 1200}-{@code 1203} (AI budget / Anthropic upstream / missing-key — surfaced
+ *       best-effort by the {@code InboundIntentClassifier}, which degrades to {@code UNKNOWN}+handoff
+ *       rather than throwing), {@code 2530}-{@code 2532} (Twilio SMS — the reply + handoff-notify paths),
+ *       {@code 1300} (Activity, if a handler logs one), {@code 1800} (RoleGuard ADMIN on the config
+ *       controller), {@code 3100} ({@code @IdempotentRoute} missing key on test-classify), {@code 4000}/
+ *       {@code 4001} (the inbound webhook's Twilio signature / not-connected — owned by the unchanged
+ *       {@code InboundSmsService}). Consent is the {@code sms-opt-out} tag (a skip, not an error). The
+ *       {@code ResponderConfigController} is {@code @ConditionalOnProperty}-gated (matchIfMissing=true);
+ *       the classifier is WireMock-able and the reply/notify SMS+email are mocked in ITs (no live send in
+ *       CI). <strong>The ONLY pre-existing service touched is {@code InboundSmsService} (an additive
+ *       IGNORED-fallthrough delegation); {@code TwilioSmsService}, {@code WaitlistClaimService},
+ *       {@code ConciergeInboundRouter}, and the AI transports are empty-diff vs {@code main}.</strong></li>
  * </ul>
  */
 @Slf4j
