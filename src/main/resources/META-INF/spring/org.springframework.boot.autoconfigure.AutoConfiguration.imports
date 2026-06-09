@@ -5,4 +5,5 @@ com.kumouri.kmodigipresbe.module.salonspa.SalonSpaAutoConfiguration
 com.kumouri.kmodigipresbe.module.chairfill.ChairFillAutoConfiguration
 com.kumouri.kmodigipresbe.module.realestate.RealEstateAutoConfiguration
 com.kumouri.kmodigipresbe.module.frontdesk.FrontDeskAutoConfiguration
+com.kumouri.kmodigipresbe.module.nurture.NurtureAutoConfiguration
 com.kumouri.kmodigipresbe.integration.square.SquareAutoConfiguration
