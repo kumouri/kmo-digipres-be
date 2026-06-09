@@ -21,16 +21,19 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * and test webhook signing secrets. Wiring a real Documenso deployment or a live
  * API token is a separate human action — NOT authorized by the implementation loop.
  *
- * <h2>Documenso-payload-format ASSUMPTION (F-D7)</h2>
+ * <h2>Documenso webhook + payload format (corrected against the real product)</h2>
  * <ul>
- *   <li>Signature header (assumed): {@code X-Documenso-Signature} — referenced ONLY
- *       in {@code DocumensoWebhookController} and {@code DocumensoSignatureVerifier}.
- *       Correcting against a real deployment = one {@code @RequestHeader} rename.</li>
- *   <li>Digest scheme (assumed): HMAC-SHA256 over the raw request body, hex-encoded,
- *       constant-time compare against the header value — {@code DocumensoSignatureVerifier}
- *       is the ONLY place the scheme lives.</li>
- *   <li>Payload shape (assumed): see {@code DocumensoEventAdapter.parse} — the ONLY
- *       place the wire format is assumed.</li>
+ *   <li>Webhook secret header: {@code X-Documenso-Secret} — referenced ONLY in
+ *       {@code DocumensoWebhookController}'s {@code @RequestHeader}.</li>
+ *   <li>Verification scheme: Documenso sends the configured webhook secret verbatim
+ *       in that header; {@code DocumensoSignatureVerifier} does a constant-time
+ *       equality of the header value against the tenant's stored
+ *       {@code webhookSigningSecret} (NOT an HMAC over the body) — that verifier is
+ *       the ONLY place the scheme lives.</li>
+ *   <li>Payload shape: event type {@code DOCUMENT_COMPLETED} (uppercase enum), the
+ *       document id at {@code payload.id} (integer); see
+ *       {@code DocumensoEventAdapter.parse} — the ONLY place the wire format is
+ *       parsed.</li>
  * </ul>
  */
 @Data

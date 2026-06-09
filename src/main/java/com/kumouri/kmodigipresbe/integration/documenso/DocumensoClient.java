@@ -19,9 +19,7 @@ import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
 import java.time.Duration;
-import java.util.Base64;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -69,6 +67,16 @@ public class DocumensoClient {
     static final String PROVIDER = "documenso";
     private static final String CB_NAME = "documenso";
 
+    // Default placement of the single SIGNATURE field on the rendered contract.
+    // Documenso page coordinates are percentages of the page (0-100); page 1, a
+    // signature box in the lower-left. A real per-template field layout is a future
+    // refinement — this guarantees a signable field exists so the send call succeeds.
+    private static final int SIGNATURE_PAGE = 1;
+    private static final double SIGNATURE_PAGE_X = 10.0;
+    private static final double SIGNATURE_PAGE_Y = 80.0;
+    private static final double SIGNATURE_PAGE_WIDTH = 30.0;
+    private static final double SIGNATURE_PAGE_HEIGHT = 8.0;
+
     private final IntegrationConnectionRepository connections;
     private final WebClient.Builder webClientBuilder;
     private final ObjectMapper objectMapper;
@@ -78,8 +86,12 @@ public class DocumensoClient {
     /**
      * Result of a successful {@link #sendForSignature} call.
      *
-     * @param documensoDocumentId the document id assigned by Documenso — used as
-     *                            the webhook correlation key (F-D7)
+     * @param documensoDocumentId the document id assigned by Documenso — the
+     *                            integer document id rendered as its canonical
+     *                            string form ({@code Long.toString}). Stored on
+     *                            {@code Contract.documensoDocumentId} and matched by
+     *                            the webhook's {@code payload.id} (also an integer
+     *                            read as text) — the webhook correlation key (F-D7).
      */
     public record DocumensoSendResult(String documensoDocumentId) {}
 
@@ -150,8 +162,9 @@ public class DocumensoClient {
 
     /**
      * Downloads the signed PDF from a direct URL (primary path when the webhook
-     * payload includes a {@code downloadUrl} — F-D7 adapter). The {@code apiToken}
-     * is still required as a Bearer credential.
+     * payload includes a {@code downloadUrl}, and the second hop of
+     * {@link #downloadSignedPdf} — F-D7 adapter). The {@code apiToken} is still
+     * required as the raw {@code Authorization} header value.
      *
      * @param downloadUrl absolute URL of the signed PDF served by Documenso
      * @return raw PDF bytes; errors with {@code DigiPresBeException(3721, 502)} on
@@ -195,51 +208,65 @@ public class DocumensoClient {
     }
 
     /**
-     * Calls the Documenso "create document + send" API endpoint.
-     *
-     * <p>The assumed request shape (F-D5 / F-D7 — encapsulated here; correcting
-     * against a real Documenso deployment is a change to this method only):
-     * {@code POST /api/v1/documents} with a JSON body carrying the PDF (base64),
-     * title, and recipient list. The response must contain a {@code documentId}
-     * field.
+     * Runs the real Documenso v1 multi-step send flow (corrected against the live
+     * product / saved {@code openapi-v1} spec). The single placeholder
+     * {@code POST /api/v1/documents}-with-base64-PDF was wrong; the real flow is:
+     * <ol>
+     *   <li><b>Create</b> — {@code POST /api/v1/documents} {@code {title}} →
+     *       captures the integer {@code documentId} and the presigned
+     *       {@code uploadUrl} from the response.</li>
+     *   <li><b>Upload</b> — {@code PUT} the rendered PDF bytes to that
+     *       {@code uploadUrl} (S3 presigned PUT — no Authorization header; the URL is
+     *       pre-authorized).</li>
+     *   <li><b>Recipient</b> — {@code POST /api/v1/documents/{id}/recipients}
+     *       {@code {name,email,role:SIGNER}} → captures the integer recipient
+     *       {@code id} (the response field is {@code id}, not {@code recipientId}).</li>
+     *   <li><b>Field</b> — {@code POST /api/v1/documents/{id}/fields}
+     *       {@code {recipientId, type:SIGNATURE, pageNumber, pageX, pageY, pageWidth,
+     *       pageHeight}} — one signature field for that recipient.</li>
+     *   <li><b>Send</b> — {@code POST /api/v1/documents/{id}/send} {@code {sendEmail:true}}
+     *       — emails the signer.</li>
+     * </ol>
+     * Each HTTP call is individually wrapped in the per-call Resilience4j
+     * {@code documenso} breaker + 3-retry + timeout (the established per-call posture;
+     * the create step is the only non-idempotent call, exactly as the prior single
+     * POST was). The integer {@code documentId} is returned as its canonical string
+     * form in {@link DocumensoSendResult} — the same string the webhook's
+     * {@code payload.id} resolves to and the value stored in
+     * {@code Contract.documensoDocumentId}.
      */
     private Mono<DocumensoSendResult> callSend(
             String baseUrl, String apiToken, Contract contract,
             byte[] renderedPdf, String recipientEmail, String recipientName) {
 
-        CircuitBreaker breaker = breakers.circuitBreaker(CB_NAME);
         WebClient client = webClientBuilder.baseUrl(baseUrl).build();
+        String email = recipientEmail != null ? recipientEmail : "";
+        String name = recipientName != null ? recipientName : "";
 
-        Map<String, Object> body = new HashMap<>();
-        body.put("title", contract.getTitle());
-        body.put("documentContent", Base64.getEncoder().encodeToString(renderedPdf));
-        Map<String, String> recipient = new HashMap<>();
-        recipient.put("email", recipientEmail != null ? recipientEmail : "");
-        recipient.put("name", recipientName != null ? recipientName : "");
-        body.put("recipients", List.of(recipient));
+        // 1. Create document → { documentId (int), uploadUrl, recipients[...] }
+        Map<String, Object> createBody = new HashMap<>();
+        createBody.put("title", contract.getTitle() != null ? contract.getTitle() : "Contract");
 
-        Mono<DocumensoSendResult> attempt = Mono.defer(() ->
-                client.post()
+        return resilientCall(client.post()
                         .uri("/api/v1/documents")
-                        .header("Authorization", "Bearer " + apiToken)
+                        .header("Authorization", apiToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .accept(MediaType.APPLICATION_JSON)
-                        .bodyValue(body)
-                        .retrieve()
-                        .bodyToMono(String.class)
-                        .timeout(Duration.ofSeconds(properties.getRequestTimeoutSeconds()))
-                        .cache()
-                        .flatMap(this::extractDocumentId));
-
-        return attempt
-                .transformDeferred(CircuitBreakerOperator.of(breaker))
-                .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
-                        .maxBackoff(Duration.ofSeconds(4))
-                        .filter(t ->
-                                !(t instanceof io.github.resilience4j.circuitbreaker
-                                        .CallNotPermittedException)
-                                && !(t instanceof WebClientResponseException.Unauthorized)
-                                && !(t instanceof DigiPresBeException)))
+                        .bodyValue(createBody))
+                .flatMap(this::parseCreateResponse)
+                .flatMap(created ->
+                        // 2. PUT the PDF bytes to the presigned upload URL (if provided).
+                        uploadPdf(created.uploadUrl(), renderedPdf)
+                                // 3. Add the signer recipient → recipient id (int)
+                                .then(addRecipient(client, apiToken, created.documentId(),
+                                        email, name))
+                                // 4. Add a SIGNATURE field for that recipient
+                                .flatMap(recipientId -> addSignatureField(
+                                        client, apiToken, created.documentId(), recipientId))
+                                // 5. Send for signature (emails the signer)
+                                .then(sendDocument(client, apiToken, created.documentId()))
+                                .thenReturn(new DocumensoSendResult(
+                                        Long.toString(created.documentId()))))
                 .onErrorMap(err -> {
                     if (err instanceof DigiPresBeException) return err;
                     return new DigiPresBeException(
@@ -248,24 +275,159 @@ public class DocumensoClient {
     }
 
     /**
-     * Downloads the signed PDF via {@code GET /api/v1/documents/{id}/download}.
-     * Used when the webhook payload does not include a {@code downloadUrl}.
+     * Step 1 → parses the {@code POST /api/v1/documents} create response, returning
+     * the integer {@code documentId} (required) and the {@code uploadUrl} (presigned
+     * PUT target; may be blank if the deployment streams uploads differently).
      */
-    private Mono<byte[]> callDownload(
-            String baseUrl, String apiToken, String documensoDocumentId) {
+    private Mono<CreatedDocument> parseCreateResponse(String responseBody) {
+        try {
+            JsonNode root = objectMapper.readTree(responseBody);
+            JsonNode idNode = root.path("documentId");
+            // Tolerate the old "id" field name as a fallback.
+            if (idNode.isMissingNode() || idNode.isNull()) {
+                idNode = root.path("id");
+            }
+            if (idNode.isMissingNode() || idNode.isNull() || !idNode.canConvertToLong()) {
+                return Mono.error(new DigiPresBeException(
+                        "Documenso create response missing integer documentId", 3721, 502));
+            }
+            long documentId = idNode.asLong();
+            String uploadUrl = root.path("uploadUrl").asText(null);
+            if (uploadUrl != null && uploadUrl.isBlank()) {
+                uploadUrl = null;
+            }
+            return Mono.just(new CreatedDocument(documentId, uploadUrl));
+        } catch (Exception ex) {
+            return Mono.error(new DigiPresBeException(
+                    "Documenso create response not JSON: " + ex.getMessage(), 3721, 502));
+        }
+    }
 
+    /**
+     * Step 2 → PUTs the raw PDF bytes to the presigned {@code uploadUrl}. The URL is
+     * pre-authorized (S3 presigned PUT) so it carries NO Authorization header and is
+     * used as-is via a fresh (non-base-URL) {@link WebClient}. A blank/absent
+     * {@code uploadUrl} is a no-op (defensive — some deployments may not return one).
+     */
+    private Mono<Void> uploadPdf(String uploadUrl, byte[] pdfBytes) {
+        if (uploadUrl == null || uploadUrl.isBlank()) {
+            return Mono.empty();
+        }
         CircuitBreaker breaker = breakers.circuitBreaker(CB_NAME);
-        WebClient client = webClientBuilder.baseUrl(baseUrl).build();
+        WebClient absolute = webClientBuilder.build();
+        Mono<Void> attempt = Mono.defer(() -> absolute.put()
+                .uri(uploadUrl)
+                .contentType(MediaType.APPLICATION_PDF)
+                .bodyValue(pdfBytes)
+                .retrieve()
+                .bodyToMono(Void.class)
+                .timeout(Duration.ofSeconds(properties.getRequestTimeoutSeconds()))
+                .cache());
+        return withResilience(attempt, breaker);
+    }
 
-        Mono<byte[]> attempt = Mono.defer(() ->
-                client.get()
-                        .uri("/api/v1/documents/{id}/download", documensoDocumentId)
-                        .header("Authorization", "Bearer " + apiToken)
-                        .retrieve()
-                        .bodyToMono(byte[].class)
-                        .timeout(Duration.ofSeconds(properties.getRequestTimeoutSeconds()))
-                        .cache());
+    /**
+     * Step 3 → {@code POST /api/v1/documents/{id}/recipients} {@code {name,email,
+     * role:SIGNER}}; returns the integer recipient {@code id} from the response (the
+     * field is {@code id}, not {@code recipientId}).
+     */
+    private Mono<Long> addRecipient(WebClient client, String apiToken, long documentId,
+                                    String email, String name) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("name", name);
+        body.put("email", email);
+        body.put("role", "SIGNER");
+        return resilientCall(client.post()
+                        .uri("/api/v1/documents/{id}/recipients", documentId)
+                        .header("Authorization", apiToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.APPLICATION_JSON)
+                        .bodyValue(body))
+                .flatMap(responseBody -> {
+                    try {
+                        JsonNode root = objectMapper.readTree(responseBody);
+                        JsonNode idNode = root.path("id");
+                        if (idNode.isMissingNode() || idNode.isNull()
+                                || !idNode.canConvertToLong()) {
+                            return Mono.error(new DigiPresBeException(
+                                    "Documenso recipient response missing integer id",
+                                    3721, 502));
+                        }
+                        return Mono.just(idNode.asLong());
+                    } catch (Exception ex) {
+                        return Mono.error(new DigiPresBeException(
+                                "Documenso recipient response not JSON: " + ex.getMessage(),
+                                3721, 502));
+                    }
+                });
+    }
 
+    /**
+     * Step 4 → {@code POST /api/v1/documents/{id}/fields} adds one {@code SIGNATURE}
+     * field for the given recipient. Per the spec a single-field create requires
+     * {@code recipientId, type, pageNumber, pageX, pageY, pageWidth, pageHeight}.
+     * Position is a sensible default signature box on page 1 (Documenso page
+     * coordinates are percentages of the page).
+     */
+    private Mono<Void> addSignatureField(WebClient client, String apiToken,
+                                         long documentId, long recipientId) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("recipientId", recipientId);
+        body.put("type", "SIGNATURE");
+        body.put("pageNumber", SIGNATURE_PAGE);
+        body.put("pageX", SIGNATURE_PAGE_X);
+        body.put("pageY", SIGNATURE_PAGE_Y);
+        body.put("pageWidth", SIGNATURE_PAGE_WIDTH);
+        body.put("pageHeight", SIGNATURE_PAGE_HEIGHT);
+        return resilientCall(client.post()
+                        .uri("/api/v1/documents/{id}/fields", documentId)
+                        .header("Authorization", apiToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.APPLICATION_JSON)
+                        .bodyValue(body))
+                .then();
+    }
+
+    /**
+     * Step 5 → {@code POST /api/v1/documents/{id}/send} {@code {sendEmail:true}} —
+     * this is the call that actually emails the signer the signing link.
+     */
+    private Mono<Void> sendDocument(WebClient client, String apiToken, long documentId) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("sendEmail", true);
+        return resilientCall(client.post()
+                        .uri("/api/v1/documents/{id}/send", documentId)
+                        .header("Authorization", apiToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.APPLICATION_JSON)
+                        .bodyValue(body))
+                .then();
+    }
+
+    /**
+     * Wraps a prepared {@link WebClient.RequestHeadersSpec} call into a resilient
+     * {@code Mono<String>} body: fresh {@code Mono.defer} per attempt + {@code .cache()}
+     * (so a retry re-subscription doesn't hit a released response body — the
+     * {@code QuickBooksInvoiceSync}/{@code StripeCheckoutService} precedent), the
+     * per-call {@code documenso} circuit breaker, 3-retry backoff, and the request
+     * timeout. {@code Unauthorized} / {@code DigiPresBeException} /
+     * {@code CallNotPermittedException} are not retried.
+     */
+    private Mono<String> resilientCall(WebClient.RequestHeadersSpec<?> spec) {
+        CircuitBreaker breaker = breakers.circuitBreaker(CB_NAME);
+        Mono<String> attempt = Mono.defer(() -> spec
+                .retrieve()
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(properties.getRequestTimeoutSeconds()))
+                .cache());
+        return withResilience(attempt, breaker);
+    }
+
+    /**
+     * Applies the shared circuit-breaker + filtered 3-retry-backoff to a per-attempt
+     * (already {@code .cache()}d) {@code Mono}.
+     */
+    private <T> Mono<T> withResilience(Mono<T> attempt, CircuitBreaker breaker) {
         return attempt
                 .transformDeferred(CircuitBreakerOperator.of(breaker))
                 .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
@@ -274,7 +436,52 @@ public class DocumensoClient {
                                 !(t instanceof io.github.resilience4j.circuitbreaker
                                         .CallNotPermittedException)
                                 && !(t instanceof WebClientResponseException.Unauthorized)
-                                && !(t instanceof DigiPresBeException)))
+                                && !(t instanceof DigiPresBeException)));
+    }
+
+    /** Parsed result of the create-document step. */
+    private record CreatedDocument(long documentId, String uploadUrl) {}
+
+    /**
+     * Downloads the signed PDF via {@code GET /api/v1/documents/{id}/download}.
+     * Used when the webhook payload does not include a {@code downloadUrl}.
+     *
+     * <p><b>Corrected against the spec (brief contradiction recorded):</b> the brief
+     * said this endpoint returns the signed PDF bytes directly. The saved
+     * {@code openapi-v1} spec (operation {@code downloadSignedDocument}, summary
+     * "Download a signed document when the storage transport is S3") shows it returns
+     * JSON {@code { "downloadUrl": "<presigned URL>" }} — NOT raw bytes. So this is a
+     * two-hop: GET the JSON, then fetch the bytes from the returned presigned URL via
+     * {@link #callDownloadUrl}. The placeholder's {@code bodyToMono(byte[].class)}
+     * against this endpoint would have parsed the JSON envelope as the "PDF".
+     */
+    private Mono<byte[]> callDownload(
+            String baseUrl, String apiToken, String documensoDocumentId) {
+
+        WebClient client = webClientBuilder.baseUrl(baseUrl).build();
+
+        return resilientCall(client.get()
+                        .uri("/api/v1/documents/{id}/download", documensoDocumentId)
+                        .header("Authorization", apiToken)
+                        .accept(MediaType.APPLICATION_JSON))
+                .flatMap(responseBody -> {
+                    String downloadUrl;
+                    try {
+                        JsonNode root = objectMapper.readTree(responseBody);
+                        downloadUrl = root.path("downloadUrl").asText(null);
+                    } catch (Exception ex) {
+                        return Mono.<String>error(new DigiPresBeException(
+                                "Documenso download response not JSON: " + ex.getMessage(),
+                                3721, 502));
+                    }
+                    if (downloadUrl == null || downloadUrl.isBlank()) {
+                        return Mono.<String>error(new DigiPresBeException(
+                                "Documenso download response missing downloadUrl", 3721, 502));
+                    }
+                    return Mono.just(downloadUrl);
+                })
+                // Second hop: fetch the bytes from the presigned URL.
+                .flatMap(url -> callDownloadUrl(apiToken, url))
                 .onErrorMap(err -> {
                     if (err instanceof DigiPresBeException) return err;
                     return new DigiPresBeException(
@@ -294,7 +501,10 @@ public class DocumensoClient {
         Mono<byte[]> attempt = Mono.defer(() ->
                 client.get()
                         .uri(downloadUrl)
-                        .header("Authorization", "Bearer " + apiToken)
+                        // Documenso v1 auth: the raw API token is the Authorization
+                        // header VALUE itself (the spec's apiKey-in-header scheme).
+                        // NOT "Bearer <token>", NOT "api_<token>".
+                        .header("Authorization", apiToken)
                         .retrieve()
                         .bodyToMono(byte[].class)
                         .timeout(Duration.ofSeconds(properties.getRequestTimeoutSeconds()))
@@ -316,22 +526,4 @@ public class DocumensoClient {
                 });
     }
 
-    private Mono<DocumensoSendResult> extractDocumentId(String responseBody) {
-        try {
-            JsonNode root = objectMapper.readTree(responseBody);
-            // Tolerate both "documentId" and "id" field names in the response
-            String docId = root.path("documentId").asText(null);
-            if (docId == null || docId.isBlank()) {
-                docId = root.path("id").asText(null);
-            }
-            if (docId == null || docId.isBlank()) {
-                return Mono.error(new DigiPresBeException(
-                        "Documenso send response missing documentId", 3721, 502));
-            }
-            return Mono.just(new DocumensoSendResult(docId));
-        } catch (Exception ex) {
-            return Mono.error(new DigiPresBeException(
-                    "Documenso send response not JSON: " + ex.getMessage(), 3721, 502));
-        }
-    }
 }

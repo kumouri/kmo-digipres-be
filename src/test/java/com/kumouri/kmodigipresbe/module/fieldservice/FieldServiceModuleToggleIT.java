@@ -29,7 +29,11 @@ class FieldServiceModuleToggleIT {
         void fieldServiceBeansAbsent() {
             assertThatThrownBy(() -> ctx.getBean(JobSiteService.class))
                     .isInstanceOf(NoSuchBeanDefinitionException.class);
-            assertThat(ctx.getBeansOfType(ModuleDefinition.class)).isEmpty();
+            // Assert the field-service module specifically is absent — NOT that zero
+            // ModuleDefinition beans exist (other always-on modules such as
+            // nurture/responder/waitlist legitimately register their own defs).
+            assertThat(ctx.getBeansOfType(ModuleDefinition.class).values())
+                    .noneSatisfy(def -> assertThat(def.key()).isEqualTo("field-service"));
         }
     }
 
@@ -46,9 +50,10 @@ class FieldServiceModuleToggleIT {
         @Test
         void fieldServiceBeansPresentAndRegistered() {
             assertThat(ctx.getBean(JobSiteService.class)).isNotNull();
-            assertThat(ctx.getBeansOfType(ModuleDefinition.class))
-                    .hasSize(1)
-                    .anySatisfy((name, def) -> assertThat(def.key()).isEqualTo("field-service"));
+            // field-service is registered among possibly-many module definitions; do
+            // not assert the total count (it grows as new modules are added).
+            assertThat(ctx.getBeansOfType(ModuleDefinition.class).values())
+                    .anySatisfy(def -> assertThat(def.key()).isEqualTo("field-service"));
         }
     }
 }
