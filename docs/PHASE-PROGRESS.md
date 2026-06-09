@@ -27,7 +27,7 @@ the composer at module init. The composer is the ONE E1 file with a (strictly ad
 | T1.2 | `module/realestate/nurture/`: `FairHousingCopyFilter`(+`Test`), `RealEstateNurtureReplyHandler` (E2 `IntentHandler`), `RealEstateNurtureService`+`RealEstateNurtureController`, `RealEstateNurtureAutoConfiguration` (two-module gate + composer-wiring side-effect bean), 4360-4369 Javadoc | DONE |
 | T1.3 | Demo seeder (`@Profile("demo-realestate")` `RealEstateNurtureDemoSeeder`, "Gateway Realty" + 12 dormant leads + RE campaign) | DONE |
 | T1.4 | T1 ITs (segmentation / fair-housing / reply-book / analytics) + ran new + regression ITs locally; counts captured | DONE |
-| T1.5 | Regen+commit `docs/api/openapi.json`; update repo `CLAUDE.md` T1 entry; push + PR | TODO |
+| T1.5 | Regen `docs/api/openapi.json` (no diff — module default-OFF, flagship-5b precedent); repo `CLAUDE.md` T1 entry added; pushed + PR #112 | DONE |
 
 ## Invariants (carried from E1)
 - Fair-housing lint enforced on ALL RE nurture outbound (AI-personalized AND template), at the composer
@@ -80,3 +80,10 @@ the composer at module init. The composer is the ONE E1 file with a (strictly ad
   non-ADMIN 1800; tenant-missing-nurture-module rejected), `FairHousingCopyFilterTest` (7, unit). Total
   19 T1 tests, 0 failures. **REGRESSION GREEN:** 5 E1 nurture ITs (21, 0 fail), `RealEstateConciergeIT`
   (5, 0 fail), `OpenApiEndpointIT` (2, 0 fail). Naming: `*IT` (full-ci lane) + `*Test` (fast lane).
+- T1.5 — ran `*OpenApiEndpointIT verifyOpenApi`: **`docs/api/openapi.json` already matches — no diff**
+  (the RE-nurture controller is `@ConditionalOnProperty(realestate)` default-OFF, so its endpoints aren't
+  in the spec when `OpenApiEndpointIT` runs without the flag — the flagship-5b/AR precedent; the FE leg
+  uses hand-written `api/*.ts`). Added the **T1 entry to repo `CLAUDE.md`** (new "Wave-2 vertical AI
+  tools" subsection after E4: module gates, error band 4360-4369, Fair-Housing guarantee, what it
+  deploys, empty-diff statement). Branch pushed; **draft PR #112** open (will un-draft after this commit).
+  **T1 BE leg COMPLETE.**
