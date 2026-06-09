@@ -1,63 +1,55 @@
-# PHASE-PROGRESS — T3 "Real Estate Midnight Responder" (`re-midnight-responder`)
+# PHASE-PROGRESS — T4 Health "Switchboard AI" (`health-switchboard-ai`)
 
-> Fresh ledger for this branch (off `main` @ `06eadff`). Replaces the prior `health-revenuerevive` (T2)
-> ledger that occupied this path — that work is already on `main`.
+> Fresh ledger for this branch (off `main` @ `e13cd80`). Replaces the prior `re-midnight-responder`
+> (T3) ledger that occupied this path — that work is already on `main`.
 
-Branch `re-midnight-responder`. Error band **4380-4389**. Module gate: BOTH `kmosf.modules.realestate`
-AND `kmosf.modules.responder`. Detail plan: `~/.claude/plans/re-midnight-responder.md`.
+Branch `health-switchboard-ai`. Error band **4390–4399**. Module gate: BOTH `kmosf.modules.frontdesk`
+AND `kmosf.modules.responder` (default-OFF). Deploys the **E2 inbound responder** to the `frontdesk`
+(health) vertical as a logistics-only, PHI-free front-desk overflow + a clinical-message tripwire (no
+transcript retained) + deflection analytics. Detail plan: `~/.claude/plans/health-switchboard-ai.md`.
 
-T3 is the **routing + completeness layer** over the shipped RE concierge (RE-1..RE-5) + T1 (RE nurture) +
-E2 (responder). It does NOT rebuild RAG / qualification / scoring / booking / nurture. Four pieces:
-tier-routing on qualification (WARM→nurture, COLD→long-cadence, HOT→existing hot-handoff), off-listing
-HANDOFF→E2-responder delegation, response-latency instrumentation, and the demo seed.
+This ledger is the source of truth for resume-after-interrupt: each sub-phase lists its commit + its
+validation state. Never trust a missing summary; reconstruct from `git log` + this file.
 
-## Sub-phase ledger
+## Sub-phases
 
-| Sub | Scope | State |
-|---|---|---|
-| T3.0 | Detail plan + this ledger (first commit) | DONE |
-| T3.1 | Per-tenant config doc + repo + CRUD controller + DTO (`MidnightResponderConfig`, 4380/4381) | DONE |
-| T3.2 | Tier routing — `TierRoutingService` (`LEAD_SCORE_UPDATED` WARM/COLD direct-enroll; HOT no-op) + `CONCIERGE_TIER_ROUTED` event + the both-module auto-config | DONE |
-| T3.3 | Off-listing delegation — `ResponderHandoffDelegate` seam on `ConciergeInboundRouter` + impl over E2 `DefaultHandoffIntentHandler` + wiring | DONE |
-| T3.4 | Latency instrumentation — additive `ConciergeTurn.receivedAt`/`latencyMs` + the stats read endpoint | DONE |
-| T3.5 | Demo seed — `MidnightResponderDemoSeeder` (`@Profile("demo-realestate-responder")`) | DONE |
-| T3.6 | Tests — new T3 ITs + ALL regression groups green | DONE |
-| T3.7 | Docs — `CLAUDE.md` T3 entry + `GlobalErrorHandler` 4380-4389 `<li>` + openapi verify | DONE |
+- [x] **T4.0 — detail plan + ledger** (this commit). Plan written, ledger seeded. No code yet.
+- [ ] **T4.1 — data + config layer.** `SwitchboardConfig` (+repo), `SwitchboardDeflectionLog` (+repo),
+      `SwitchboardIntents` (canonical intent constants + default `IntentDefinition`s + the
+      PHI-forbidding health classifier prompt), `SwitchboardRedaction` (the fixed marker). PHI-free
+      deflection ledger (no phone/content).
+- [ ] **T4.2 — logistics handlers + tripwire.** `LogisticsIntentHandler` (7 intents, answered from
+      `SwitchboardConfig`), `ClinicalTripwireHandler` (CLINICAL_SYMPTOM → redaction-only Activity +
+      staff notify + safe reply, body never persisted), `SwitchboardDeflectionService`. Reuses E2
+      `IntentHandler` discovery — no router edit.
+- [ ] **T4.3 — deflection analytics + controller + handoff recorder.**
+      `SwitchboardDeflectionRecorder` (`RESPONDER_HANDED_OFF` subscriber, health-scoped),
+      `SwitchboardController` (config CRUD + deflection-stats), `SwitchboardDeflectionStats`.
+- [ ] **T4.4 — both-modules auto-config.** `SwitchboardAutoConfiguration`
+      (`@ConditionalOnProperty(frontdesk)` + `@ConditionalOnBean(InboundIntentRouter)`); registers the
+      `META-INF/spring/...AutoConfiguration.imports` entry. Default-OFF; blast-radius zero.
+- [ ] **T4.5 — demo seed.** `SwitchboardDemoSeeder` (`@Profile("demo-health-switchboard")`,
+      idempotent). The 60-second "watch this".
+- [ ] **T4.6 — tests.** `SwitchboardLogisticsIT`, `SwitchboardTripwireIT` (the PHI fence — serialize-
+      and-scan forbidden clinical tokens), `SwitchboardModuleGateIT`, `SwitchboardDeflectionStatsIT`.
+- [ ] **T4.7 — docs + error codes + openapi.** `GlobalErrorHandler` Javadoc 4390-4399 (`<li>` after
+      T3's 4380-4389), `DomainEventType` (no new event — reuses `RESPONDER_HANDED_OFF`), CLAUDE.md T4
+      entry, openapi regen (no-diff, default-OFF). PR opened READY.
 
-## Empty-diff cores (verified vs `main` — see the PR report)
-`ConciergeAnswerService`, `ListingConciergeService`, `RagRetrievalService`/`AskAiService`,
-`LeadScoringV2Service`, `LeadHandoffService`, `QualificationService`, `NurtureRunner`/
-`NurtureSegmentationService`/`NurtureReplyService`/`NurtureMessageComposer`, `InboundSmsService`,
-`TwilioSmsService`, `InboundIntentRouter`, `DefaultHandoffIntentHandler`, `RealEstateAutoConfiguration`,
-`RealEstateNurtureAutoConfiguration`, `ResponderAutoConfiguration`.
+## Validation log
 
-## Additive seams (justified — NOT empty-diff)
-- `ConciergeInboundRouter` — `@Nullable ResponderHandoffDelegate` + `setResponderHandoff(...)` + 2 call-sites
-  (NO_LISTING always-if-wired; HANDOFF if the per-tenant config flag) + `receivedAt`/`latencyMs` stamping.
-  Null delegate ⇒ byte-identical RE-1/RE-2/RE-3 (the RE regression ITs prove it). `ConciergeInboundRouter`
-  is the realestate routing owner (T1 doc), NOT a shared core — the setter-injection precedent
-  (`setConciergeRouter`/`setIntentRouter`/`setCopyFilter`).
-- `ConciergeTurn` — additive nullable `receivedAt` + `latencyMs` (legacy turns deserialize null).
-- `DomainEventType` — `CONCIERGE_TIER_ROUTED` (advisory).
-- `GlobalErrorHandler` — the 4380-4389 Javadoc `<li>`.
+- T4.1–T4.5: `./gradlew compileJava` green (see commit messages).
+- T4.6: new T4 ITs PASS (counts in the PR body + final report).
+- Regression: `module.responder.*`, the frontdesk + `module.frontdesk.nurture.*` ITs,
+  `OpenApiEndpointIT` — re-run green (counts in the final report).
+- Reused-cores empty-diff vs `main` confirmed (`git diff main --stat` shows no E2 / voicemail core).
 
-## §9 invariants held
-Tier-route enroll is explicit-boolean over the E1 `tenant_campaign_contact_idx` unique index
-(`findBy…().map(true).defaultIfEmpty(false)` + `onErrorResume(DuplicateKeyException→false)`) — never
-`switchIfEmpty(create)`. No `.block()` in production. No live external (Anthropic/OpenAI→WireMock,
-Twilio→`@MockitoBean`). Every webhook-reachable path is best-effort (the tier router + the delegate swallow
-errors to a no-op) — never 500 a webhook.
+## PHI fence proof (release-blocking)
 
-## Validation (this branch)
-- **All 5 new T3 ITs green:** `MidnightResponderTierRoutingIT` (7), `MidnightResponderConfigIT` (4),
-  `MidnightResponderModuleGateIT` (3), `MidnightResponderLatencyIT` (2),
-  `MidnightResponderHandoffDelegationIT` (2 — both nested contexts).
-- **All regression groups green:** the 5 RE concierge ITs, `module.realestate.nurture.*`, `nurture.*` (E1),
-  `module.responder.*`, `OpenApiEndpointIT`.
-- **openapi.json no-diff** (the T3 controllers are realestate-gated; the spec boots without that flag → FE
-  hand-writes its client).
-- **Empty-diff verified** for all 16 named cores + `RagRetrievalService`/`AskAiService`/`LeadScoringV2Service`.
-- **Test-URI lesson:** `@AutoConfigureWebTestClient`+RANDOM_PORT binds at the declared controller path
-  WITHOUT the `spring.webflux.base-path` (`/api/v1`) prefix (the `RealEstateConciergeConversationReadIT`
-  precedent). T3 ITs hit `/realestate/responder/...`, NOT `/api/v1/...` (a prepended prefix 404s to the
-  static-resource handler).
+`SwitchboardTripwireIT.symptomInbound_handsOff_persistsNoClinicalText` asserts: a symptom inbound →
+safe handoff reply + staff notify + a redaction-only Activity (body = the fixed marker); the persisted
+`ConversationState.slots` is empty + `currentIntent` = the category label; a full serialize-and-scan of
+`ConversationState` + every `Activity` + the deflection log contains NONE of the forbidden clinical
+tokens from the inbound body. The body is never persisted (ConversationState has no body field; the
+tripwire handler writes only the marker). Mirrors `HealthFrontDeskVoicemailIT`'s FD-2 forbidden-token
+technique.
