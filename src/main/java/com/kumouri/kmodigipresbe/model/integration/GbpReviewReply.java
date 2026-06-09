@@ -77,6 +77,20 @@ public class GbpReviewReply implements TenantScoped {
     /** When the (optionally edited) reply was posted back to Google (nullable until POSTED). */
     private Instant postedAt;
 
+    /**
+     * The sentiment classification of this review (E3 Review Engine — sentiment triage). Additive
+     * nullable: computed by {@code ReviewSentimentService} on ingest and stored here so the admin
+     * list + the per-entity insights breakdown can read it. Legacy rows (ingested before E3)
+     * deserialize {@code null} (the E-D8 additive-nullable precedent).
+     */
+    private ReviewSentiment sentiment;
+
+    /**
+     * How {@link #sentiment} was determined ({@code RATING} baseline or {@code AI}-refined). Additive
+     * nullable; null on legacy rows and whenever {@link #sentiment} is null.
+     */
+    private SentimentSource sentimentSource;
+
     private Instant receivedAt;
 
     @Version

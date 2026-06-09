@@ -444,6 +444,27 @@ public final class DomainEventType {
     public static final String RESPONDER_INTENT_HANDLED     = "responder.intentHandled";
     public static final String RESPONDER_HANDED_OFF         = "responder.handedOff";
 
+    // E3 (Review Engine) — post-visit review-REQUEST delivery + sentiment triage + per-entity insights.
+    // All four are advisory (RuleEngine / webhook fan-out) — they do NOT drive any core mutation; the
+    // request create-on-completion, the default-OFF scheduled send, the sentiment store, and the
+    // negative manager alert all happen synchronously + explicitly inside the E3 services, gated by
+    // explicit-boolean probes over unique indexes / the atomic PENDING->SENT claim (never switchIfEmpty).
+    // REVIEW_REQUEST_CREATED: emitted by ReviewRequestService when a completed visit/job
+    //   (BOOKING_COMPLETED / MILESTONE_COMPLETED) yields a fresh PENDING ReviewRequest; payload
+    //   {subjectType, subjectId, contactId, sourceEventType}.
+    // REVIEW_REQUEST_SENT: emitted by the default-OFF ReviewRequestSenderJob after a due PENDING request
+    //   is atomically claimed and the no-incentive Google-review SMS is dispatched; payload
+    //   {reviewRequestId, subjectType, subjectId, contactId}.
+    // REVIEW_REQUEST_SKIPPED: emitted when a due request is skipped by a gate (opt-out / no review link /
+    //   frequency cap) and marked SKIPPED; payload {reviewRequestId, contactId, reason}.
+    // GBP_REVIEW_NEGATIVE_ALERTED: emitted after a negative ingested review (rating <= threshold OR
+    //   sentiment NEGATIVE) triggers the best-effort manager alert; payload
+    //   {reviewId, reviewReplyId, rating, sentiment}.
+    public static final String REVIEW_REQUEST_CREATED      = "review.requestCreated";
+    public static final String REVIEW_REQUEST_SENT         = "review.requestSent";
+    public static final String REVIEW_REQUEST_SKIPPED      = "review.requestSkipped";
+    public static final String GBP_REVIEW_NEGATIVE_ALERTED = "gbp.reviewNegativeAlerted";
+
     private DomainEventType() {
     }
 }
