@@ -38,4 +38,11 @@ public interface GbpReviewReplyRepository
      */
     Flux<GbpReviewReply> findByTenantIdAndStatusOrderByPostedAtDesc(
             UUID tenantId, GbpReviewReply.Status status);
+
+    /**
+     * All of the tenant's review rows — the corpus the E3 {@code ReviewInsightsService} aggregates for
+     * the review-content metrics (count, average rating, sentiment breakdown). Strictly additive;
+     * carries an explicit {@code tenantId} predicate (the marker does NOT auto-scope derived finders).
+     */
+    Flux<GbpReviewReply> findByTenantId(UUID tenantId);
 }

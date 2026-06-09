@@ -773,6 +773,37 @@ import java.util.UUID;
  *       CI). <strong>The ONLY pre-existing service touched is {@code InboundSmsService} (an additive
  *       IGNORED-fallthrough delegation); {@code TwilioSmsService}, {@code WaitlistClaimService},
  *       {@code ConciergeInboundRouter}, and the AI transports are empty-diff vs {@code main}.</strong></li>
+ *   <li>{@code 4340-4349} — <em>Review Engine (E3)</em>: post-visit review-REQUEST delivery + sentiment
+ *       triage + per-entity insights, extending the shipped {@code integration/gbp} review pipeline
+ *       additively. On a completed visit/job ({@code BOOKING_COMPLETED} salon + {@code MILESTONE_COMPLETED}
+ *       home/project) {@code ReviewRequestService} creates a {@code ReviewRequest} (explicit-boolean over
+ *       the unique {@code tenant_subject_contact_idx}); a <strong>default-OFF</strong>
+ *       {@code ReviewRequestSenderJob} ({@code @ConditionalOnProperty(kmosf.modules.review-engine.sender-enabled,
+ *       matchIfMissing=false)} — the {@code CoverageNudgeJob}/{@code ImapInboundPoller} posture) sends due
+ *       PENDING requests as a <strong>frictionless, no-incentive</strong> Google-review SMS (Google's 2026
+ *       policy bans incentives), opt-out-aware ({@code sms-opt-out}), frequency-capped, atomic-claim
+ *       idempotent. {@code ReviewSentimentService} (a NEW sibling mirroring {@code GbpReplyDraftService} —
+ *       that core is empty-diff) classifies each ingested review (rating-first + optional best-effort
+ *       Anthropic) on the one surgical {@code GbpReviewPoller} seam; a negative ({@code rating <= threshold}
+ *       OR {@code NEGATIVE}) fires a best-effort manager alert. The generic {@code ReviewInsightsService} +
+ *       ADMIN {@code ReviewInsightsController} ({@code GET /gbp/review-insights[/{subjectType}/{subjectId}]})
+ *       aggregate per {@code (subjectType, subjectId)} + per-tenant. New codes: {@code 4340} review-insights
+ *       subject type invalid (400 — an unparseable {@code {subjectType}} path segment). The band
+ *       {@code 4341-4349} is RESERVED for review-engine growth. Reused (NOT re-allocated): {@code 1200}-
+ *       {@code 1203} (AI budget / Anthropic upstream / missing-key — surfaced best-effort by
+ *       {@code ReviewSentimentService}, which degrades to the rating-based result rather than throwing),
+ *       {@code 2530}-{@code 2532} (Twilio SMS — the request-send + negative-alert paths), {@code 1800}
+ *       (RoleGuard ADMIN on the insights controller). The insights controller is
+ *       {@code @ConditionalOnProperty(kmosf.modules.gbp-reviews, matchIfMissing=true)} + ADMIN — the
+ *       {@code GbpReviewReplyAdminController} precedent, NOT {@code requireEnabled} ({@code gbp-reviews} is
+ *       an {@code integration/} package, not a registered module — E3 deviation D1). The sender is default-OFF
+ *       (no live request SMS in CI); the sentiment Anthropic call is WireMock-able; the request-send +
+ *       negative-alert SMS/email are mocked in ITs (no live send). <strong>The ONLY pre-existing service
+ *       touched is {@code GbpReviewPoller} (a surgical additive sentiment-store + negative-alert seam in
+ *       {@code draftAndFinish}, all {@code onErrorResume}'d); {@code GbpReviewReply} gains 2 additive nullable
+ *       fields; {@code GbpReplyDraftService}, {@code GbpReviewReplyAdminService}, {@code GbpApiClient},
+ *       {@code TwilioSmsService}, {@code EmailService}, {@code AnthropicAiAssistService},
+ *       {@code SalonBookingService}, and {@code MilestoneService} are empty-diff vs {@code main}.</strong></li>
  * </ul>
  */
 @Slf4j
