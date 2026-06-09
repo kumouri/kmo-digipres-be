@@ -34,14 +34,18 @@ stylist's funnel side-by-side — that LIST is T6's only real net-new BE code.
 | T6.1 | Detail plan + this ledger | DONE | ebc295e | n/a (docs) |
 | T6.2 | `module/chairfill/reviewboost/` — DTOs + `SalonReviewInsightsService` (reuses `ReviewInsightsService` + `StaffMemberRepository`) + `ReviewBoostController` + `ReviewBoostAutoConfiguration`; register in AutoConfiguration.imports; app-props doc; `GlobalErrorHandler` 4410-4419 Javadoc | DONE | (this) | compileJava OK |
 | T6.3 | `SalonReviewBoostDemoSeeder` (`@Profile("demo-salon-reviewboost")`) | DONE | (this) | compileJava OK |
-| T6.4 | ITs: `SalonReviewBoostInsightsIT`, `SalonReviewBoostConfigIT` | PENDING | — |
+| T6.4 | ITs: `SalonReviewBoostInsightsIT` (5), `SalonReviewBoostConfigIT` (4) | DONE | (this) | 9/9 GREEN (Docker); end-to-end real complete()->engine attribution proven |
 | T6.5 | openapi regen + CLAUDE.md T6 entry + ledger finalize | PENDING | — |
+
+## Validation log
+- T6.4: `SalonReviewBoostInsightsIT` 5/5 + `SalonReviewBoostConfigIT` 4/4 GREEN (Testcontainers, Docker
+  29.4.3). The headline `completingABooking_createsStylistAttributedReviewRequest_viaTheShippedEngine`
+  drives the REAL `SalonBookingService.complete()` → the unchanged `ReviewRequestService` subscriber →
+  asserts a `ReviewRequest(STAFF, staffMemberId)` — proving per-stylist attribution works end-to-end with
+  zero T6 change to the create path.
 
 ## Reused cores — MUST stay empty-diff vs `main`
 `ReviewRequestService`, `ReviewSentimentService`, `ReviewNegativeAlertService`, `ReviewInsightsService`,
 `ReviewRequestSenderJob`, `GbpReplyDraftService`, `GbpReviewReplyAdminController`/`Service`,
 `SalonReviewReplyService`, `TwilioSmsService`, `SalonBookingService`, `Booking`, `StaffMember`,
 `ReviewInsightsController`, `ReviewInsights`, `ReviewRequest`(+repo). No seam needed.
-
-## Validation log
-(filled as sub-phases complete)
