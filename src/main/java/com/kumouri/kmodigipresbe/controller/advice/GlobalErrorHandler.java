@@ -1001,6 +1001,39 @@ import java.util.UUID;
  *       {@code main}</strong>; the only additive edits are the {@code ConciergeInboundRouter} delegate seam +
  *       the {@code ConciergeTurn} latency fields. Twilio is mocked + Anthropic is WireMock in ITs (no live
  *       send); the module is default-OFF.</li>
+ *   <li>{@code 4390-4399} — <em>Health "Switchboard AI" (T4)</em>: deploys the shipped E2 inbound responder
+ *       to the frontdesk (health) vertical as a logistics-only, PHI-free front-desk overflow + a
+ *       clinical-message tripwire ({@code module/frontdesk/switchboard}). Two vertical {@code IntentHandler}
+ *       beans (auto-discovered by the E2 {@code InboundIntentRouter}'s {@code List<IntentHandler>} — NO
+ *       router edit): a {@code LogisticsIntentHandler} that answers the seven logistics intents (hours /
+ *       location / accepting-new-patients / booking / reschedule / intake-form / review-request) from
+ *       per-tenant {@code SwitchboardConfig} in generic PHI-free copy, and a {@code ClinicalTripwireHandler}
+ *       that claims the {@code CLINICAL_SYMPTOM} intent and hands off with <strong>no transcript / clinical
+ *       content retained</strong> — a redaction-only {@code Activity} (the fixed
+ *       {@code SwitchboardRedaction} marker as the body, never the patient's words), best-effort staff
+ *       notify, and a safe reply. The PHI fences (FD-2 fence F2 reused as a pattern): the raw body is never
+ *       persisted (the E2 {@code ConversationState} has no body field; the tripwire writes only the marker),
+ *       the per-tenant PHI-forbidding classifier prompt keeps {@code extractedSlots} empty for clinical
+ *       messages (the last fence), and a defensive {@code HipaaReplyLint} scan is logged-only. PHI-free
+ *       deflection analytics ({@code SwitchboardDeflectionLog} — {@code tenantId/category/occurredAt} only,
+ *       no phone/content; a {@code RESPONDER_HANDED_OFF} subscriber records the HANDOFF category scoped to
+ *       health tenants) + {@code GET /frontdesk/switchboard/deflection-stats}. <strong>New codes:</strong>
+ *       {@code 4390} tripwire callback-activity write failed (advisory — best-effort, logged, never thrown);
+ *       {@code 4391} switchboard config not found for the tenant (404, on a read); {@code 4392} invalid
+ *       switchboard config (400). {@code 4393-4399} RESERVED for Switchboard growth. Module gate requires
+ *       <strong>both</strong> {@code kmosf.modules.frontdesk} AND {@code kmosf.modules.responder}
+ *       ({@code SwitchboardAutoConfiguration} composes the frontdesk {@code @ConditionalOnProperty} with
+ *       {@code @ConditionalOnBean(InboundIntentRouter)} + per-tenant {@code TenantModuleRegistry
+ *       .requireEnabled} for both keys; the T3 pattern). Reused (NOT re-allocated): {@code 1130}/{@code 1132}
+ *       (module gate), {@code 1800} (RoleGuard ADMIN), {@code 2530-2532} (Twilio notify), {@code 1300}
+ *       (Activity create), {@code 1200-1203} (the reused E2 classifier AI gate — surfaced as a degraded
+ *       UNKNOWN, never an HTTP error). <strong>The reused cores ({@code InboundIntentRouter},
+ *       {@code InboundIntentClassifier}, {@code DefaultHandoffIntentHandler}, {@code ConversationState*},
+ *       {@code InboundSmsService}, {@code TwilioSmsService}, {@code ResponderAutoConfiguration}, and the
+ *       frontdesk voicemail/transcript-suppression core) stay empty-diff vs {@code main}</strong>; the T4
+ *       package is strictly additive. Anthropic is WireMock + Twilio/email are mocked in ITs (no live send);
+ *       the module is default-OFF. A live Switchboard on real patient data implies PHI/BA status — the
+ *       separately-priced, BAA-gated compliance tier applies; the demo runs on fictional data only.</li>
  * </ul>
  */
 @Slf4j
