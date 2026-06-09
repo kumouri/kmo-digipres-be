@@ -1,10 +1,19 @@
 package com.kumouri.kmodigipresbe.module.ar;
 
+import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
 import com.kumouri.kmodigipresbe.extension.ModuleAutoConfigurationSupport;
 import com.kumouri.kmodigipresbe.extension.ModuleDefinition;
+import com.kumouri.kmodigipresbe.integration.IntegrationConnectionRepository;
+import com.kumouri.kmodigipresbe.integration.twilio.TwilioSmsService;
+import com.kumouri.kmodigipresbe.repository.ContactRepository;
+import com.kumouri.kmodigipresbe.repository.InvoiceRepository;
+import com.kumouri.kmodigipresbe.service.ai.AiUsageRecorder;
+import com.kumouri.kmodigipresbe.service.billing.StripeCheckoutService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
+import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.List;
 
@@ -41,6 +50,50 @@ public class ArAutoConfiguration {
     public ModuleDefinition arModuleDefinition() {
         return ModuleAutoConfigurationSupport.module(
                 MODULE_KEY, "AR / Collections (Get Paid)", "0.1.0",
-                List.of("DUNNING_LOG"));
+                List.of("DUNNING_LOG", "DUNNING_DISPATCH"));
+    }
+
+    // ── AR-3: tiered AI-personalized dunning dispatch (the INVOICE_OVERDUE_* leg) ──
+
+    /**
+     * The Claude-personalized dunning-copy drafter (AR-3). A sibling of {@code ReminderCopyService} —
+     * per-tenant Anthropic key + house-key fallback, {@link AiUsageRecorder} budget gate, WireMock-able
+     * base-url. Hand-constructed so the {@code @Value}-resolved config lands on the factory params (the
+     * ChairFill {@code @Bean} construction pattern; a component-scan {@code @Value} would not fire). The
+     * reused AI core ({@code AnthropicAiAssistService} / {@code AiUsageRecorder}) stays empty-diff.
+     */
+    @Bean
+    public DunningCopyComposer dunningCopyComposer(
+            WebClient.Builder webClientBuilder,
+            IntegrationConnectionRepository connections,
+            AiUsageRecorder usageRecorder,
+            @Value("${kmosf.ai.anthropic.base-url:https://api.anthropic.com/v1/messages}") String baseUrl,
+            @Value("${kmosf.ai.anthropic.house-key:}") String houseKey,
+            @Value("${kmosf.modules.ar.dunning-draft-model:claude-haiku-4-5}") String draftModel,
+            @Value("${kmosf.modules.ar.dunning-system-prompt:}") String systemPromptOverride) {
+        return new DunningCopyComposer(webClientBuilder, connections, usageRecorder,
+                baseUrl, houseKey, draftModel, systemPromptOverride);
+    }
+
+    /**
+     * The tiered dunning-dispatch subscriber (AR-3). Subscribes to {@code INVOICE_OVERDUE_{D3,D7,D14}};
+     * per tier it reloads the invoice (auto-stop if since-paid/voided), mints a one-touch Stripe pay
+     * link, composes tier-aware on-brand copy, and sends one SMS. Best-effort + duplicate-safe — the
+     * one-shot upstream {@code DunningLog} is the exactly-once guarantee (no new ledger here). A
+     * dedicated event-listener (NOT a generic {@code SEND_SMS} WorkflowRule) because the generic
+     * dispatcher's body is a literal {@code SmsTemplateRegistry} template — no AI copy / Stripe link /
+     * paid-guard. Default-OFF via this whole auto-configuration's {@code kmosf.modules.ar} gate.
+     */
+    @Bean
+    public DunningDispatchService dunningDispatchService(
+            DomainEventPublisher eventPublisher,
+            InvoiceRepository invoiceRepository,
+            ContactRepository contactRepository,
+            StripeCheckoutService stripeCheckoutService,
+            DunningCopyComposer dunningCopyComposer,
+            TwilioSmsService twilioSmsService,
+            @Value("${kmosf.modules.ar.brand-tone:}") String brandTone) {
+        return new DunningDispatchService(eventPublisher, invoiceRepository, contactRepository,
+                stripeCheckoutService, dunningCopyComposer, twilioSmsService, brandTone);
     }
 }

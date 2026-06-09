@@ -452,6 +452,12 @@ public final class DomainEventType {
     public static final String INVOICE_OVERDUE_D3  = "invoice.overdueD3";
     public static final String INVOICE_OVERDUE_D7  = "invoice.overdueD7";
     public static final String INVOICE_OVERDUE_D14 = "invoice.overdueD14";
+    // AR-3 — emitted by the default-OFF DunningDispatchService after a tiered, Claude-personalized
+    // dunning SMS (carrying a one-touch Stripe pay link) is sent for an overdue invoice. Advisory only
+    // (a timeline/audit breadcrumb) — drives no core mutation; the send itself is the effect, and the
+    // upstream INVOICE_OVERDUE_* one-shot is the exactly-once guarantee (AR-3 adds no new ledger).
+    // Emitted only when the `ar` module is on. Payload: {invoiceId, contactId, tier, channel}.
+    public static final String DUNNING_SENT = "ar.dunningSent";
 
     private DomainEventType() {
     }
