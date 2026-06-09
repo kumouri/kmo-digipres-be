@@ -15,8 +15,10 @@ import com.kumouri.kmodigipresbe.module.realestate.model.Listing;
 import com.kumouri.kmodigipresbe.module.realestate.model.ListingDisclosure;
 import com.kumouri.kmodigipresbe.module.realestate.model.ListingDisclosureRepository;
 import com.kumouri.kmodigipresbe.module.realestate.model.ListingRepository;
+import com.kumouri.kmodigipresbe.module.realestate.responder.ResponderHandoffDelegate;
 import com.kumouri.kmodigipresbe.tenancy.TenantContext;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
+import jakarta.annotation.Nullable;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -82,6 +84,17 @@ public class ConciergeInboundRouter {
     private final String handoffSmsBody;
     private final String disambiguationSmsBody;
 
+    /**
+     * T3 (Midnight Responder) — the off-listing / unknown-intent handoff delegate (the E2 responder
+     * default-handoff). Wired (via {@link #setResponderHandoff}) only when BOTH the realestate AND responder
+     * modules are loaded; <strong>null otherwise → byte-identical RE-1</strong> (the disambiguation /
+     * handoff reply is the only effect, exactly as before T3). The bean is hand-constructed (not
+     * component-scanned), so this is a setter the T3 auto-config invokes, not field-{@code @Autowired} —
+     * exactly the {@code setConciergeRouter} / {@code setIntentRouter} precedents.
+     */
+    @Nullable
+    private ResponderHandoffDelegate responderHandoff;
+
     public ConciergeInboundRouter(ListingRepository listings,
                                   ListingDisclosureRepository disclosures,
                                   ConciergeConversationRepository conversations,
@@ -111,6 +124,15 @@ public class ConciergeInboundRouter {
     }
 
     /**
+     * T3 (Midnight Responder) — wire the off-listing / unknown-intent handoff delegate. Invoked by
+     * {@code RealEstateMidnightAutoConfiguration} only when BOTH realestate + responder are enabled; never
+     * called otherwise (the seam stays inert and RE-1 is byte-identical). Idempotent / last-wins.
+     */
+    public void setResponderHandoff(@Nullable ResponderHandoffDelegate responderHandoff) {
+        this.responderHandoff = responderHandoff;
+    }
+
+    /**
      * Entry point the {@code InboundSmsService} seam calls (tenant resolved from the path; STOP already
      * handled). Establishes the synthetic tenant context and routes the body as a single-turn question.
      * Best-effort: any failure resolves to {@link Outcome#IGNORED} (the webhook still 200s).
@@ -124,7 +146,7 @@ public class ConciergeInboundRouter {
                 .flatMap(listing -> handleForListing(tenantId, from, listing, body))
                 // Mono.defer so the disambiguation reply (and its eager SMS-mock invocation) only happens
                 // on actual subscription — i.e. only when resolveListing was genuinely empty.
-                .switchIfEmpty(Mono.defer(() -> noListing(from)))
+                .switchIfEmpty(Mono.defer(() -> noListing(tenantId, from, to, body)))
                 .onErrorResume(err -> {
                     log.warn("RE-1 concierge inbound failed (best-effort) for tenant {} from {}: {}",
                             tenantId, from, err.toString());
@@ -157,12 +179,16 @@ public class ConciergeInboundRouter {
     private Mono<Outcome> handleForListing(UUID tenantId, String from, Listing listing, String body) {
         return findOrCreateConversation(tenantId, from, listing.getId())
                 .flatMap(conv -> {
+                    Instant received = Instant.now();
                     conv.getTurns().add(ConciergeTurn.builder()
                             .role(ConciergeTurn.Role.BUYER)
                             .body(body)
-                            .at(Instant.now())
+                            .at(received)
+                            // T3 (Midnight Responder) — stamp inbound-receipt for the received→replied
+                            // latency the assistant turn computes (the "<30s, 24/7" demo stat).
+                            .receivedAt(received)
                             .build());
-                    conv.setLastInboundAt(Instant.now());
+                    conv.setLastInboundAt(received);
                     return conversations.save(conv)
                             .doOnNext(saved -> events.publish(DomainEvent.of(
                                     DomainEventType.CONCIERGE_INBOUND_RECEIVED, tenantId, saved.getId(),
@@ -216,6 +242,11 @@ public class ConciergeInboundRouter {
                                 // in the same text that we couldn't answer) — but keep the HANDED_OFF state.
                                 .flatMap(savedConv -> notifyAgent(listing, from, question)
                                         .then(qualifyAndPersist(tenantId, listing, savedConv, true)))
+                                // T3 (Midnight Responder) additive: a strict HANDOFF additionally delegates
+                                // to the E2 responder default-handoff iff the per-tenant flag is set (the
+                                // delegate owns that policy check). Best-effort; never changes the outcome.
+                                // Null delegate / flag off ⇒ byte-identical RE-1 handoff.
+                                .flatMap(c -> delegateHandoff(tenantId, from, question).thenReturn(c))
                                 .thenReturn(Outcome.HANDED_OFF);
                     }
                     return resolveCitations(tenantId, answer.citations())
@@ -350,15 +381,37 @@ public class ConciergeInboundRouter {
                                                         boolean handoff,
                                                         List<ConciergeTurn.TurnCitation> citations,
                                                         ConversationState newState) {
+        Instant repliedAt = Instant.now();
+        // T3 (Midnight Responder) — the received→replied latency, paired off the most-recent BUYER turn's
+        // inbound-receipt time. Null-safe: a legacy/unstamped buyer turn ⇒ null latency (no stat recorded).
+        Instant receivedAt = lastBuyerReceivedAt(conv);
+        Long latencyMs = (receivedAt == null) ? null
+                : Math.max(0L, java.time.Duration.between(receivedAt, repliedAt).toMillis());
         conv.getTurns().add(ConciergeTurn.builder()
                 .role(ConciergeTurn.Role.ASSISTANT)
                 .body(body)
-                .at(Instant.now())
+                .at(repliedAt)
                 .handoff(handoff)
                 .citations(citations)
+                .receivedAt(receivedAt)
+                .latencyMs(latencyMs)
                 .build());
         conv.setState(newState);
         return conversations.save(conv);
+    }
+
+    /** The inbound-receipt instant of the most-recent BUYER turn (for the assistant-turn latency), or null. */
+    private static Instant lastBuyerReceivedAt(ConciergeConversation conv) {
+        if (conv.getTurns() == null) {
+            return null;
+        }
+        for (int i = conv.getTurns().size() - 1; i >= 0; i--) {
+            ConciergeTurn t = conv.getTurns().get(i);
+            if (t.getRole() == ConciergeTurn.Role.BUYER) {
+                return t.getReceivedAt() != null ? t.getReceivedAt() : t.getAt();
+            }
+        }
+        return null;
     }
 
     private Mono<ConciergeConversation> findOrCreateConversation(UUID tenantId, String from, UUID listingId) {
@@ -396,8 +449,35 @@ public class ConciergeInboundRouter {
         return Mono.empty();
     }
 
-    private Mono<Outcome> noListing(String from) {
-        return reply(from, disambiguationSmsBody).thenReturn(Outcome.NO_LISTING)
+    /**
+     * T3 (Midnight Responder) — best-effort HANDOFF delegation to the E2 responder default-handoff. The
+     * delegate itself gates on the per-tenant {@code delegateHandoffToResponder} flag (NO_LISTING vs
+     * HANDOFF policy lives in the delegate). Null delegate ⇒ no-op (byte-identical RE-1). Never propagates.
+     */
+    private Mono<Void> delegateHandoff(UUID tenantId, String from, String body) {
+        if (responderHandoff == null) {
+            return Mono.empty();
+        }
+        return responderHandoff.delegate(tenantId, from, null, body, ResponderHandoffDelegate.Reason.HANDOFF)
+                .onErrorReturn(false)
+                .then();
+    }
+
+    /**
+     * No listing resolved for this inbound. RE-1 behavior: reply the disambiguation template. T3 (Midnight
+     * Responder) additive: when the responder handoff is wired, ALSO delegate to the E2 default-handoff
+     * (staff notify + generic follow-up reply) so an off-listing buyer doesn't die at a disambiguation
+     * prompt — best-effort, never changes the {@code NO_LISTING} outcome. Null delegate ⇒ byte-identical
+     * RE-1 (the disambiguation reply only).
+     */
+    private Mono<Outcome> noListing(UUID tenantId, String from, String to, String body) {
+        Mono<Boolean> delegated = responderHandoff == null
+                ? Mono.just(false)
+                : responderHandoff.delegate(tenantId, from, to, body, ResponderHandoffDelegate.Reason.NO_LISTING)
+                        .onErrorReturn(false);
+        return reply(from, disambiguationSmsBody)
+                .then(delegated)
+                .thenReturn(Outcome.NO_LISTING)
                 .doOnSubscribe(s -> log.debug(
                         "RE-1 concierge: could not resolve a listing for inbound from {} (4251)", from));
     }

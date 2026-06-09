@@ -5,6 +5,7 @@ com.kumouri.kmodigipresbe.module.salonspa.SalonSpaAutoConfiguration
 com.kumouri.kmodigipresbe.module.chairfill.ChairFillAutoConfiguration
 com.kumouri.kmodigipresbe.module.realestate.RealEstateAutoConfiguration
 com.kumouri.kmodigipresbe.module.realestate.nurture.RealEstateNurtureAutoConfiguration
+com.kumouri.kmodigipresbe.module.realestate.responder.RealEstateMidnightAutoConfiguration
 com.kumouri.kmodigipresbe.module.frontdesk.FrontDeskAutoConfiguration
 com.kumouri.kmodigipresbe.module.frontdesk.nurture.FrontDeskNurtureAutoConfiguration
 com.kumouri.kmodigipresbe.module.nurture.NurtureAutoConfiguration

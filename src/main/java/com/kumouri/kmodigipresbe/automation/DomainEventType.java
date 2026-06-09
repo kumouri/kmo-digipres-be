@@ -503,6 +503,16 @@ public final class DomainEventType {
     // {quoteId, contactId (nullable), lineItemCount, aiApplied}.
     public static final String PROPOSAL_DRAFTED = "proposal.drafted";
 
+    // T3 (Real Estate "Midnight Responder", band 4380-4389) — tier routing on qualification. Advisory only
+    // (RuleEngine / webhook fan-out) — it does NOT drive any core mutation; the WARM/COLD nurture
+    // auto-enroll happens synchronously + explicitly inside the realestate+responder-gated TierRoutingService
+    // (a LEAD_SCORE_UPDATED subscriber, the LeadHandoffService mirror), gated by the explicit-boolean E1
+    // tenant_campaign_contact_idx unique-index enroll (never switchIfEmpty). HOT is NOT routed here — the
+    // RE-2 LeadHandoffService hot-handoff owns HOT, untouched. Emitted only when BOTH the realestate AND
+    // responder modules are on, for a HOT-tier-excluded (WARM/COLD) concierge-sourced realestate lead that
+    // got enrolled. Payload: {contactId, dealId, tier, campaignId, enrolled}.
+    public static final String CONCIERGE_TIER_ROUTED = "realestate.conciergeTierRouted";
+
     private DomainEventType() {
     }
 }
