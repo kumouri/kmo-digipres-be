@@ -47,3 +47,17 @@ Tier-route enroll is explicit-boolean over the E1 `tenant_campaign_contact_idx` 
 `switchIfEmpty(create)`. No `.block()` in production. No live external (Anthropic/OpenAI→WireMock,
 Twilio→`@MockitoBean`). Every webhook-reachable path is best-effort (the tier router + the delegate swallow
 errors to a no-op) — never 500 a webhook.
+
+## Validation (this branch)
+- **All 5 new T3 ITs green:** `MidnightResponderTierRoutingIT` (7), `MidnightResponderConfigIT` (4),
+  `MidnightResponderModuleGateIT` (3), `MidnightResponderLatencyIT` (2),
+  `MidnightResponderHandoffDelegationIT` (2 — both nested contexts).
+- **All regression groups green:** the 5 RE concierge ITs, `module.realestate.nurture.*`, `nurture.*` (E1),
+  `module.responder.*`, `OpenApiEndpointIT`.
+- **openapi.json no-diff** (the T3 controllers are realestate-gated; the spec boots without that flag → FE
+  hand-writes its client).
+- **Empty-diff verified** for all 16 named cores + `RagRetrievalService`/`AskAiService`/`LeadScoringV2Service`.
+- **Test-URI lesson:** `@AutoConfigureWebTestClient`+RANDOM_PORT binds at the declared controller path
+  WITHOUT the `spring.webflux.base-path` (`/api/v1`) prefix (the `RealEstateConciergeConversationReadIT`
+  precedent). T3 ITs hit `/realestate/responder/...`, NOT `/api/v1/...` (a prepended prefix 404s to the
+  static-resource handler).
