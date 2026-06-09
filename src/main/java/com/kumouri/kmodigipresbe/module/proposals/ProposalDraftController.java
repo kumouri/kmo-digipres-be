@@ -124,8 +124,9 @@ public class ProposalDraftController {
      *
      * <p>Loads the tenant-scoped Quote ({@code QuoteRepository.findByTenantIdAndId}); a miss is the
      * genuine not-found {@code 2200}/404 (the {@link #get} posture). The linked {@link SowDraft} is
-     * optional — a Quote with no draft renders the priced quote half only ({@code defaultIfEmpty}). The
-     * {@code switchIfEmpty} here is again ONLY for genuine not-found; no {@code switchIfEmpty(create)}.
+     * optional — a Quote with no draft renders the priced quote half only (the empty-draft
+     * {@code switchIfEmpty} render-fallback). The {@code switchIfEmpty}s here are ONLY for genuine
+     * not-found and the optional-prose render-fallback; no {@code switchIfEmpty(create)}.
      *
      * @return the rendered PDF bytes ({@code application/pdf})
      */

@@ -23,7 +23,7 @@
 | SOW-0 | Fresh ledger + detail-plan pointer + branch + draft PR (hedge) | — | IN PROGRESS |
 | SOW-1 | `SowDraft` model + repo + `ProposalsAutoConfiguration` (gate OFF) + config props + `DomainEventType` `PROPOSAL_DRAFTED` + `GlobalErrorHandler` 4620-4639 Javadoc | `4c6a583` | **DONE** |
 | SOW-2 | `ProposalDraftService` (notes → Sonnet → priced line items + prose → DRAFT `Quote`/SOW; budget-gated; defensive) + `ProposalDraftController` (`POST /proposals/draft` + `GET /proposals/{id}`) + `ProposalDraftIT` | `101c297` | **DONE** |
-| SOW-3 | `SowPdfService` (line items + totals + prose) + `GET /proposals/{id}/pdf` + send-to-sign reuse (`ContractService.spawnFromQuote`) + `SowPdfIT` | `153405e` | **DONE** |
+| SOW-3 | `SowPdfService` (line items + totals + prose) + `GET /proposals/{id}/pdf` + send-to-sign reuse (`ContractService.spawnFromQuote`) + `SowPdfIT` | `b5d3de3` | **DONE** |
 | SOW-4 | ITs green + `verifyOpenApi` (expected no-op — default-OFF) + ledger | — | PENDING |
 | SOW-FE | proposal editor UI (paste notes → draft → edit line items/prose → send) — separate, only AFTER BE merges | — | DEFERRED |
 
