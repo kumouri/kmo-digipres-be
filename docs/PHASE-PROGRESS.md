@@ -48,9 +48,9 @@ FrontDeskNurtureReplyHandler, FrontDeskNurtureDemoSeeder}` + `controller/frontde
 
 | Sub-phase | Status | Commit | Notes |
 |---|---|---|---|
-| T2.0 — detail plan + this ledger | DONE | _(commit 1)_ | plan `~/.claude/plans/health-revenuerevive.md` |
-| T2.1 — `HipaaCopyFilter` + `HipaaCopyFilterTest` | PENDING | | the headline screen; reuses `HipaaReplyLint`; no-Docker unit first |
-| T2.2 — service + reply handler + autoconfig + controller + `GlobalErrorHandler` 4370-4379 | PENDING | | wires the 4 beans incl. `setCopyFilter` side-effect; both-module gate |
+| T2.0 — detail plan + this ledger | DONE | `e71272a` | plan `~/.claude/plans/health-revenuerevive.md` |
+| T2.1 — `HipaaCopyFilter` + `HipaaCopyFilterTest` | DONE | `d997176` | reuses `HipaaReplyLint`; unit 7/7 green (no-Docker) |
+| T2.2 — service + reply handler + autoconfig + controller + `GlobalErrorHandler` 4370-4379 | DONE | _(this commit)_ | wires the 4 beans incl. `setCopyFilter` side-effect; both-module gate; autoconfig registered in `AutoConfiguration.imports`; compiles clean |
 | T2.3 — `FrontDeskNurtureDemoSeeder` | PENDING | | `@Profile("demo-frontdesk")`; fictional clinic + logistics-only dormant-patient DB |
 | T2.4 — T2 ITs | PENDING | | PHI-safe headline + segmentation + reply-rebook + analytics |
 | T2.5 — `CLAUDE.md` + `openapi.json` | PENDING | | T2 entry; regenerate spec (expect no diff — default-OFF) |

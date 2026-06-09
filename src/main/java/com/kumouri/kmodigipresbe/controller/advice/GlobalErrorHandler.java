@@ -934,6 +934,34 @@ import java.util.UUID;
  *       {@code NurtureMessageComposer} {@code NurtureCopyFilter} hook (null ⇒ byte-identical; the 5 E1
  *       nurture ITs are the regression gate). The {@code NurtureRunner} stays default-OFF; Twilio/Email are
  *       mocked + Anthropic is WireMock in ITs (no live send).</li>
+ *   <li>{@code 4370-4379} — <em>Health "RevenueRevive" (T2)</em>: deploys the same shipped E1 Nurture/Cadence
+ *       engine to the <strong>frontdesk (health)</strong> vertical, PHI-free ({@code module/frontdesk/nurture})
+ *       — the structural twin of T1. Dormant patients are auto-segmented A/B/C/D on <strong>logistics
+ *       only</strong> (recency + an optional WON-deal value band on the health {@code NurtureCampaign} — no
+ *       engine hardcoding, and the engine reads no clinical field) and run through tiered SMS/email cadences
+ *       with backoff (the default-OFF {@code NurtureRunner}); a positive reply exits the enrollment and offers
+ *       a rebook via the booking-link SMS path ({@code NurtureReplyService}, no live Cal.com), wired through
+ *       the E2 responder seam by an additive {@code FrontDeskNurtureReplyHandler} ({@code IntentHandler},
+ *       vertical {@code frontdesk}); a per-segment reactivation funnel is exposed by
+ *       {@code FrontDeskNurtureController} (reusing {@code NurtureAnalyticsService}). <strong>The headline
+ *       correctness property is the PHI-free guardrail:</strong> every outbound nurture message —
+ *       AI-personalized AND template — is screened by {@code HipaaCopyFilter} (the same additive
+ *       {@code NurtureCopyFilter} SPI on the shared {@code NurtureMessageComposer} that T1 added — no further
+ *       E1 change) which reuses the shipped FD-4 {@code HipaaReplyLint}; a PHI-ish draft (patient-status
+ *       confirmation or clinical vocabulary) is <strong>replaced with a vetted safe generic template</strong>
+ *       (never sent PHI-ish, never dropped) and logged with code {@code 4370} (an advisory marker — the
+ *       substitution is silent+safe, not a thrown HTTP error). {@code 4371-4379} RESERVED for health-nurture
+ *       growth. Module gate requires <strong>both</strong> {@code kmosf.modules.frontdesk} AND
+ *       {@code kmosf.modules.nurture} ({@code FrontDeskNurtureAutoConfiguration} composes the frontdesk
+ *       {@code @ConditionalOnProperty} with {@code @ConditionalOnBean(NurtureMessageComposer)} + per-tenant
+ *       {@code TenantModuleRegistry.requireEnabled} for both keys). Reused (NOT re-allocated):
+ *       {@code 4301}/{@code 4302}/{@code 4303} (nurture campaign not-found / inactive / invalid),
+ *       {@code 4310} (reply-no-active-enrollment — swallowed by the handler), {@code 1130}/{@code 1132}
+ *       (module gate), {@code 1800} (RoleGuard ADMIN). <strong>The E1 nurture cores AND the frontdesk cores
+ *       ({@code Appointment}, {@code FrontDeskNoShowScoringService}, {@code HipaaReplyLint},
+ *       {@code FrontDeskAutoConfiguration}) stay empty-diff vs {@code main}</strong> — T2 needed ZERO E1
+ *       edits (T1's SPI sufficed). The {@code NurtureRunner} stays default-OFF; Twilio/Email are mocked +
+ *       Anthropic is WireMock in ITs (no live send).</li>
  * </ul>
  */
 @Slf4j
