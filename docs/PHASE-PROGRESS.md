@@ -1,94 +1,80 @@
-# PHASE-PROGRESS — E3 Review Engine (`review-engine-requests`)
+# PHASE-PROGRESS — E4 Gap-Fill Waitlist engine (`waitlist-gapfill-engine`)
 
-> Fresh ledger for this branch (off `main` @ `3fe15ab`, post-E2-responder merge). Replaces the prior
-> E2-responder ledger that occupied this path — that work is already on `main`.
+> Fresh ledger for this branch (off `main` @ `8d3ad27`, post-E3-review-engine merge). Replaces the prior
+> E3-review-engine ledger that occupied this path — that work is already on `main`.
 >
-> Detail plan: `~/.claude/plans/review-engine-requests.md`. Error band **4340–4349**.
-> Module gate `kmosf.modules.gbp-reviews` (admin/insights controller, matchIfMissing=true); the new
-> `ReviewRequestSenderJob` is **default-OFF** (`kmosf.modules.review-engine.sender-enabled`,
-> matchIfMissing=**false**, no line in `application.properties`).
+> Detail plan: `~/.claude/plans/waitlist-gapfill-engine.md`. Error band **4350–4359**.
+> Module gate `kmosf.modules.waitlist` (matchIfMissing=true). The engine is **consumer-triggered +
+> dormant by default** — no standalone `@Scheduled` live-SMS job.
 >
-> **Acceptance bar = the regression:** the 5 in-use GBP ITs MUST stay green —
-> `GbpReplyDraftServiceIT`, `GbpReviewPollerIT`, `GbpReviewReplyAdminIT`, `GbpTokenRefreshIT`,
-> `GbpTokenServiceTest`. The ONLY edit to a shipped *service* is the surgical additive sentiment-store +
-> negative-alert seam in `GbpReviewPoller.draftAndFinish` (all `onErrorResume`'d; reply-draft behavior
-> unchanged). `GbpReplyDraftService`/`GbpReviewReplyAdminService`/`GbpApiClient`/`TwilioSmsService`/
-> `EmailService`/`AnthropicAiAssistService`/`SalonBookingService`/`MilestoneService` stay empty-diff.
-
-## Completion events subscribed (verified)
-
-- `BOOKING_COMPLETED` (`SalonBookingService.complete`) — payload `{bookingId, contactId, staffMemberId, …}`
-  → attribution `subjectType=STAFF, subjectId=staffMemberId`, contactId from payload.
-- `MILESTONE_COMPLETED` (`MilestoneService`) — payload `{projectId, milestoneId, …}`
-  → attribution `subjectType=PROJECT, subjectId=projectId`, contactId resolved from `Project.primaryContactId`.
-- (No `WORK_ORDER_COMPLETED` / `APPOINTMENT_COMPLETED` event exists — frontdesk out of E3 scope; D3.)
+> **HARD RULE — chairfill byte-equivalent.** Do NOT modify any `module/chairfill/**` file. The engine is a
+> parallel generic `…/waitlist/…` package mirroring CF-3's proven pattern.
+>
+> **Acceptance bar = the regression:** `module/chairfill/.../GapFillWaitlistIT` (9 tests incl. the
+> double-YES race, STOP, bad-sig) MUST stay green, unmodified. `InboundSmsService`, `TwilioSmsService`,
+> `NoShowRiskScoringService` are empty-diff (0 lines). The double-YES race test in the NEW engine IT proves
+> exactly-one-winner.
 
 ## Sub-phase ledger
 
-| Sub-phase | Scope | Commit | Status |
+| Sub-phase | Scope | Status | Commit |
 |---|---|---|---|
-| E3.0 | Detail plan + fresh ledger | 22c2245 | DONE |
-| E3.1 | `ReviewRequest` model + `ReviewSubjectType`/`ReviewSentiment`/`SentimentSource` enums + `GbpReviewReply` +2 nullable fields + `ReviewRequestRepository` + `ReviewInsightsService` + `ReviewInsights` projection + `ReviewInsightsController` + `4340` + GlobalErrorHandler `<li>` + `DomainEventType` E3 block | 81cd619 | DONE |
-| E3.2 | `ReviewRequestService` (subscriber, create-on-completion idempotent) + `ReviewRequestSenderJob` (default-OFF, due-send, atomic-claim idempotent, opt-out, freq-cap, no-incentive template) + `kmosf.review-engine.*` config | a3c3ba9 | DONE |
-| E3.3 | `ReviewSentimentService` + `ReviewNegativeAlertService` + the one `GbpReviewPoller` seam (AI-refine + alert both default-OFF → existing poller byte-identical) | 7d33135 | DONE |
-| E3.4 | openapi regen (`docs/api/openapi.json`) + ledger finalize | _this commit_ | DONE |
+| W0 | Detail plan + fresh ledger | DONE | 0e8137f |
+| W1 | model (`WaitlistSlot`/`WaitlistEntry`/`WaitlistOffer`) + repos + `SlotMaterializer` SPI + `NoOpSlotMaterializer` | DONE | 7d09a18 |
+| W2 | `WaitlistRankingService` + `GapFillEngine` + `WaitlistOfferExpiryService` | DONE | fc54dc6 |
+| W3 | `WaitlistClaimEngine` (atomic findAndModify + materializer dispatch) | DONE | e3e2b82 |
+| W4 | `WaitlistAutoConfiguration` + controller + `DomainEventType` block + `GlobalErrorHandler` 4350-4359 + imports | DONE (compileJava green) | a444dc5 |
+| W5 | ITs + repo-rename fix + run new + REGRESSION (`GapFillWaitlistIT`) + `OpenApiEndpointIT` | DONE (all green) | (this commit) |
+| W6 | regen + commit `docs/api/openapi.json`; final ledger + report | DONE | (this commit) |
 
-## Test ledger (filled as ITs land)
+## W5 fix — repository simple-name collision (a real bug, caught by the ITs)
 
-| IT/Test | Covers | Result |
-|---|---|---|
-| `ReviewInsightsIT` | per-subject + per-tenant aggregation; cross-tenant isolation; case-insensitive type; 4340; 1800 | **5/0** |
-| `ReviewRequestCreationIT` | BOOKING_COMPLETED + MILESTONE_COMPLETED → one PENDING each, attribution; no-staff→OTHER; re-emit idempotent; no-contact → none ×2 | **6/0** |
-| `ReviewRequestSenderIT` | default-OFF; opted-ON sends due once + atomic claim; zero-dup 2nd sweep; opt-out skip; no-reviewLink stays PENDING; freq-cap; no-incentive template | **4/0** |
-| `ReviewSentimentServiceIT` | rating-only (no AI call) 5/3/1; commented→AI refine source AI; upstream 500→degrade to RATING | **3/0** |
-| `GbpReviewSentimentAlertIT` | poller path: 2★→NEGATIVE stored + manager alert email+SMS + event; 5★→POSITIVE no alert; existing poller behavior preserved (2 DRAFTED + 2 events) | **1/0** |
-| REGRESSION `GbpReplyDraftServiceIT` | unchanged GBP draft | **4/0** |
-| REGRESSION `GbpReviewPollerIT` | unchanged GBP poll (the headline regression gate) | **2/0** |
-| REGRESSION `GbpReviewReplyAdminIT` | unchanged GBP admin approve/post | **6/0** |
-| REGRESSION `GbpTokenRefreshIT` | unchanged GBP OAuth refresh | **3/0** |
-| REGRESSION `GbpTokenServiceTest` | unchanged GBP token service (no-Docker) | **5/0** |
-| `OpenApiEndpointIT` | context boots + 2 new `/gbp/review-insights` paths in spec | **2/0** |
+Spring Data derives a repository's bean name from the uncapitalized **simple** name. My initial generic
+repos `repository.waitlist.WaitlistEntryRepository` / `WaitlistOfferRepository` collided with the shipped
+chairfill `module.chairfill.model.WaitlistEntryRepository` / `WaitlistOfferRepository` (same simple names)
+→ `BeanDefinitionOverrideException` at context load (would have broken the whole app, not just the test).
+Fix: renamed the generic repos to **`WaitlistEngineEntryRepository`** / **`WaitlistEngineOfferRepository`**
+(distinct simple names) — chairfill untouched (byte-equivalent preserved). All references updated
+(engines, auto-config, controller).
 
-## Key invariants for this branch (carry-forward)
+## Key design decisions (mirrors the detail plan)
 
-- **`switchIfEmpty` only for genuine not-found.** Request creation is explicit-boolean over the unique
-  `tenant_subject_contact_idx`; request send is atomic-claim/ledger-insert-FIRST; sentiment/alert ride the
-  poller's existing review-id idempotency. **Never `switchIfEmpty(create/send/process)`.**
-- **No-incentive template** — the review-request SMS carries no discount/gift/reward language (Google 2026
-  policy); asserted in `ReviewRequestSenderIT`.
-- **Default-OFF sender** — `ReviewRequestSenderJob` bean not created unless opted-in; no live request SMS in CI.
-- **No live external** — Anthropic (sentiment) → WireMock; Twilio/Email send → `@MockitoBean`; sandbox fakes;
-  per-tenant review link (never hardcoded).
-- **Empty-diff** (verify `git diff main`, 0 lines each): `GbpReplyDraftService`, `GbpReviewReplyAdminService`,
-  `GbpReviewReplyAdminController`, `GbpApiClient`, `GbpTokenService`, `GbpProperties`, `GbpConfig`,
-  `TwilioSmsService`, `EmailService`, `AnthropicAiAssistService`, `AiUsageRecorder`, `SalonBookingService`,
-  `MilestoneService`, `IntegrationConnection`(+repo+service). The pre-existing files touched: `GbpReviewPoller`
-  (surgical sentiment+alert seam — the ONLY shipped *service*), `GbpReviewReply` (+2 nullable fields),
-  `GbpReviewReplyRepository` (+1 additive `findByTenantId` finder), `GlobalErrorHandler` (Javadoc `<li>`),
-  `DomainEventType` (additive E3 block), `application.properties` (additive keys), `docs/api/openapi.json` (regen).
+- **Duplication-vs-shared-util (directive #1):** reimplement the pure ranking rules in
+  `WaitlistRankingService`; do NOT extract a shared util (would force a chairfill edit / break
+  byte-equivalence). The data source differs (engine = entry-carried stats; chairfill = salon Booking
+  history), so it is not literal duplication. ~10-line polarity overlap noted + accepted.
+- **`SlotMaterializer` SPI (directive #2):** the E2 `IntentHandler` precedent — consumer registers a
+  `@Bean`; engine auto-discovers via `List<SlotMaterializer>` + dispatches to first `supports(slotType)`;
+  default `NoOpSlotMaterializer` is the fallback (excluded from the first-pass match). The actual domain
+  booking creation is delegated to the consumer (T7 Health RescheduleFlow → PHI-free `Appointment`).
+- **Atomic claim (directive #3/#6 — the showpiece):** identical to CF-3 `WaitlistClaimService` —
+  `findAndModify` on `waitlist_slot_claims` (`_id = tenantId:slotKey`, `claimedByContactId:null` guard,
+  `upsert(true)`, `returnNew(true)`); winner gets the doc, loser hits `DuplicateKeyException` on the
+  upsert insert → apology. NEVER `switchIfEmpty(claim)`.
+- **No live external (directive #7):** `TwilioSmsService` `@MockitoBean` in ITs; **no AI dependency at
+  all** (generic template copy), so no Anthropic/WireMock in the engine.
 
-## Deviations / decisions (running)
+## Error codes minted
+`4350` entry not found (404); `4351` entry invalid (400); `4352` gap-fill slot request invalid (400);
+`4353-4359` reserved. Reused: `1130/1132` (module gate), `2530-2532` (Twilio SMS), `1800` (ADMIN guard).
 
-- **D1** — admin/insights controller uses `@ConditionalOnProperty(kmosf.modules.gbp-reviews, matchIfMissing=true)`
-  + `RoleGuard.requireRole("ADMIN")` (the shipped `GbpReviewReplyAdminController` precedent), **NOT**
-  `requireEnabled("gbp-reviews")` — `gbp-reviews` is not a registered `ModuleDefinition` so `requireEnabled`
-  would error 1130. The briefing's `requireEnabled` is a carry-over from the E1/E2 `module/`-based engines.
-- **D2** — `GbpReviewReply` +2 additive nullable fields (`sentiment`, `sentimentSource`); additive-nullable
-  precedent (E-D8 `paymentTerms`); no index/contract change; legacy rows null.
-- **D3** — subscribe to the 2 completion events that exist (salon booking + project milestone); frontdesk
-  Appointment has no completion event (out of scope; generic subscriber picks one up later for free).
-- **D4** — send-idempotency seam: **atomic PENDING→SENT claim** chosen (a conditional
-  `ReactiveMongoTemplate.findAndModify` on the `ReviewRequest` itself: `{_id, tenantId, status:PENDING}` →
-  `{status:SENT, sentAt}`, `returnNew`; winner-only send, `null` = already claimed → zero duplicate). The
-  `WaitlistClaimService` per-slot `findAndModify` precedent — exactly-once with one fewer collection than a
-  separate `ReviewRequestSendLog`. `markSkipped` uses the same atomic PENDING→SKIPPED flip.
-- **D5 (regression-gate resolution — important)** — the surgical `GbpReviewPoller` sentiment+alert seam
-  initially regressed `GbpReviewPollerIT` (it pins exactly 2 Anthropic POSTs + 2 notify SMS; the seam's AI
-  refine added Anthropic calls and the negative alert added an SMS for the seeded 2★ review). Resolved by
-  making **both the AI refinement (`kmosf.review-engine.ai-refine-enabled`) and the negative alert
-  (`kmosf.review-engine.negative-alert-enabled`) DEFAULT-OFF**: by default the seam stores only the
-  rating-based sentiment (a Mongo field write, no external call) and fires no alert, so the existing poller
-  behavior is byte-identical and `GbpReviewPollerIT` passes unchanged (2/0). The new ITs opt the flags ON to
-  exercise the AI-refine + alert paths. Rationale: the poller already notifies on every new review, so the
-  dedicated negative alert is a legitimate opt-in extra (not a default), and the AI refine is a cost opt-in.
-  No existing gbp IT was modified.
+## Domain events
+`WAITLIST_ENGINE_OFFER_SENT`, `WAITLIST_ENGINE_SLOT_CLAIMED` (prefixed to NOT collide with chairfill's
+`WAITLIST_OFFER_SENT`/`WAITLIST_SLOT_CLAIMED`, which stay byte-equivalent).
+
+## Test results (W5 — all green, local Docker/Testcontainers Mongo)
+- `GapFillWaitlistIT` (REGRESSION, chairfill): **11 tests, 0 failures, 0 skipped** — green + unchanged.
+- `WaitlistEngineIT` (new engine): **7 tests, 0 failures** — incl. the double-YES race showpiece
+  (exactly one CLAIMED + one apology + one materialize).
+- `WaitlistRankingServiceTest` (no-Docker): **4 tests, 0 failures**.
+- `OpenApiEndpointIT`: **2 tests, 0 failures** — proves the full context boots with the new module.
+
+## Verification (W5/W6 — all pass)
+- `git diff main` — **zero `module/chairfill/**` files changed**; `InboundSmsService` /
+  `TwilioSmsService` / `NoShowRiskScoringService` are **0 diff lines each** (empty-diff vs `main`).
+- reactive-invariant grep: the only `switchIfEmpty` in `service/waitlist/` is in a Javadoc comment; the
+  claim is the atomic `mongo.findAndModify` with the `claimedByContactId:null` guard + `upsert(true)` +
+  `DuplicateKeyException → loser` (NOT `switchIfEmpty(claim)`). The 3 controller `switchIfEmpty` are
+  genuine entity-not-found (4350).
+- `docs/api/openapi.json` regenerated — carries `/waitlist/entries`, `/waitlist/entries/{id}`,
+  `/waitlist/offers`, `/waitlist/offers/sweep-expired`, `/waitlist/slots/gap-fill`.
