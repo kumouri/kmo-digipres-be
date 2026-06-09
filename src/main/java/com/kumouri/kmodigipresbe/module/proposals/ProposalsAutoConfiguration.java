@@ -1,10 +1,17 @@
 package com.kumouri.kmodigipresbe.module.proposals;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
 import com.kumouri.kmodigipresbe.extension.ModuleAutoConfigurationSupport;
 import com.kumouri.kmodigipresbe.extension.ModuleDefinition;
+import com.kumouri.kmodigipresbe.integration.IntegrationConnectionRepository;
+import com.kumouri.kmodigipresbe.service.ai.AiUsageRecorder;
+import com.kumouri.kmodigipresbe.service.quote.QuoteService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
+import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.List;
 
@@ -48,5 +55,37 @@ public class ProposalsAutoConfiguration {
         return ModuleAutoConfigurationSupport.module(
                 MODULE_KEY, "Proposal / SOW Generator", "0.1.0",
                 List.of("SOW_DRAFT"));
+    }
+
+    /**
+     * The SOW draft core (SOW-2). A sibling of {@code VoicemailExtractionService} /
+     * {@code DunningCopyComposer} / {@code ConciergeAnswerService} — per-tenant Anthropic key +
+     * house-key fallback, {@link AiUsageRecorder} budget gate, WireMock-able base-url. Hand-constructed
+     * so the {@code @Value}-resolved config (base-url / house-key / draft-model / max-notes-chars /
+     * optional system-prompt override) lands on the factory params (a component-scan {@code @Value}
+     * would not fire — the ChairFill / realestate / AR {@code DunningCopyComposer} lesson). It reuses
+     * {@link QuoteService#create} UNCHANGED to materialize the priced DRAFT Quote; the reused AI core
+     * ({@code AnthropicAiAssistService} / {@link AiUsageRecorder}) and billing core ({@code Quote} /
+     * {@code LineItem} / {@code QuoteService}) all stay empty-diff. Defaults to Sonnet
+     * ({@code kmosf.modules.proposals.draft-model}) — outbound SOW prose quality matters (the
+     * {@code AnthropicAiAssistService.draftModel} convention).
+     */
+    @Bean
+    public ProposalDraftService proposalDraftService(
+            WebClient.Builder webClientBuilder,
+            ObjectMapper objectMapper,
+            IntegrationConnectionRepository connections,
+            AiUsageRecorder usageRecorder,
+            QuoteService quoteService,
+            SowDraftRepository sowDrafts,
+            DomainEventPublisher events,
+            @Value("${kmosf.ai.anthropic.base-url:https://api.anthropic.com/v1/messages}") String baseUrl,
+            @Value("${kmosf.ai.anthropic.house-key:}") String houseKey,
+            @Value("${kmosf.modules.proposals.draft-model:claude-sonnet-4-6}") String draftModel,
+            @Value("${kmosf.modules.proposals.max-notes-chars:8000}") int maxNotesChars,
+            @Value("${kmosf.modules.proposals.draft-system-prompt:}") String systemPromptOverride) {
+        return new ProposalDraftService(webClientBuilder, objectMapper, connections, usageRecorder,
+                quoteService, sowDrafts, events, baseUrl, houseKey, draftModel, maxNotesChars,
+                systemPromptOverride);
     }
 }
