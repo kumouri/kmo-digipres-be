@@ -1,89 +1,72 @@
-# PHASE-PROGRESS — T1 "RE Database Goldmine" (`re-database-goldmine`)
+# PHASE-PROGRESS — T2 "Health RevenueRevive" (`health-revenuerevive`)
 
-> Fresh ledger for this branch (off `main` @ `00d4a1a`, post-E1–E4-engines-CLAUDE.md merge). Replaces the
-> prior `get-paid-ar-collections` ledger that occupied this path — that work is already on `main`.
+> Fresh ledger for this branch (off `main` @ `5de940f`, the just-merged T1 "RE Database Goldmine").
+> Replaces the prior `re-database-goldmine` (T1) ledger that occupied this path — that work is already on
+> `main`.
 >
-> **What:** Deploy the shipped E1 Nurture/Cadence engine to **real estate** — dormant-lead A/B/C/D
-> auto-segmentation → tiered **fair-housing-safe** SMS nurture cadences with backoff → positive-reply
-> auto-books a showing → per-segment ROI analytics. RE deployment + fair-housing guardrail + reply→book
-> wiring + RE analytics surface + demo seed; NOT an engine reimplementation. Module
-> `module/realestate/nurture/`; gates BOTH `kmosf.modules.realestate` AND `kmosf.modules.nurture`; error
-> band **4360-4369**. Detail plan: `~/.claude/plans/re-database-goldmine.md`.
+> **What:** Deploy the shipped E1 Nurture/Cadence engine to the **`frontdesk` (health) vertical, PHI-free** —
+> the structural twin of T1. Dormant patients are auto-segmented on **logistics only** (recency + optional
+> value band; NEVER a diagnosis/clinical feature) → multi-touch **PHI-free** SMS/email nurture cadences with
+> backoff → positive-reply auto-rebooks via the booking-link SMS path → per-segment reactivation analytics.
+> Health deployment + **HIPAA copy guardrail** + reply→rebook wiring + analytics surface + demo seed; NOT an
+> engine reimplementation. Module `module/frontdesk/nurture/`; gates BOTH `kmosf.modules.frontdesk` AND
+> `kmosf.modules.nurture`; error band **4370-4379**. Detail plan: `~/.claude/plans/health-revenuerevive.md`.
 
-## Empty-diff-vs-extend decision
-**Additively extend E1** `NurtureMessageComposer` with a strictly-additive `@Nullable NurtureCopyFilter`
-SPI (the `conciergeRouter`/`intentRouter` setter precedent) — because the RE deployment runs through the
-**same shared `NurtureRunner`**, whose compose-then-dispatch is a single method, so a pure RE-side
-post-filter cannot intercept the copy before send. Null filter ⇒ byte-identical E1 ⇒ the 5 E1 nurture ITs
-are the regression gate. The RE module wires a `FairHousingCopyFilter` (calls `FairHousingLint.lint`) onto
-the composer at module init. The composer is the ONE E1 file with a (strictly additive) non-empty diff.
+## The headline correctness property
+**PHI-free by construction on ALL nurture outbound.** Every composed message (template AND AI-personalized)
+is screened by `HipaaCopyFilter` — a `NurtureCopyFilter` impl that REUSES the shipped FD-4 `HipaaReplyLint`
+(`module/frontdesk/reviews/HipaaReplyLint.lint(body)`). A flagged draft (patient-status confirmation or
+clinical vocabulary) is **replaced with a vetted safe generic template** (never sent PHI-ish, never dropped;
+logged advisory code 4370). This is T2's analogue of T1's Fair-Housing screen, and the release-blocking
+guarantee. Wired only for a frontdesk+nurture deployment via a side-effect bean calling
+`NurtureMessageComposer.setCopyFilter` — null ⇒ byte-identical E1.
 
-## Sub-phases
+## Empty-diff decision — ZERO E1 edits
+T1 already added the lone E1 change: the `@Nullable NurtureCopyFilter` SPI + `setCopyFilter` on
+`NurtureMessageComposer` (null-safe; the `conciergeRouter`/`intentRouter` setter precedent). **T2 needs no
+further E1 change** — it only contributes a frontdesk copy-filter `@Bean` + wires it. If an E1 change were
+found necessary, STOP and flag (per the directive). It was NOT necessary.
 
-| Sub | Scope | Status |
-|---|---|---|
-| T1.0 | Detail plan + this fresh ledger | DONE |
-| T1.1 | Additive E1 `NurtureCopyFilter` SPI + composer wiring; **re-ran 5 E1 nurture ITs (regression gate)** | DONE (`FairHousingCopyFilterTest` moves to T1.2 with the filter) |
-| T1.2 | `module/realestate/nurture/`: `FairHousingCopyFilter`(+`Test`), `RealEstateNurtureReplyHandler` (E2 `IntentHandler`), `RealEstateNurtureService`+`RealEstateNurtureController`, `RealEstateNurtureAutoConfiguration` (two-module gate + composer-wiring side-effect bean), 4360-4369 Javadoc | DONE |
-| T1.3 | Demo seeder (`@Profile("demo-realestate")` `RealEstateNurtureDemoSeeder`, "Gateway Realty" + 12 dormant leads + RE campaign) | DONE |
-| T1.4 | T1 ITs (segmentation / fair-housing / reply-book / analytics) + ran new + regression ITs locally; counts captured | DONE |
-| T1.5 | Regen `docs/api/openapi.json` (no diff — module default-OFF, flagship-5b precedent); repo `CLAUDE.md` T1 entry added; pushed + PR #112 | DONE |
+**E1 nurture cores + frontdesk cores stay empty-diff vs `main`.** T2 only ADDS:
+`module/frontdesk/nurture/{HipaaCopyFilter, FrontDeskNurtureService, FrontDeskNurtureAutoConfiguration,
+FrontDeskNurtureReplyHandler, FrontDeskNurtureDemoSeeder}` + `controller/frontdesk/FrontDeskNurtureController`
++ the `GlobalErrorHandler` Javadoc `4370-4379` `<li>` + `CLAUDE.md` + (regenerated) `docs/api/openapi.json`.
 
-## Invariants (carried from E1)
-- Fair-housing lint enforced on ALL RE nurture outbound (AI-personalized AND template), at the composer
-  chokepoint → non-compliant copy falls back to a vetted safe template (never sent non-compliant, never
-  dropped silently, logged). The headline correctness property; IT-proven.
-- Module gate requires realestate AND nurture. Runner stays default-OFF
-  (`kmosf.modules.nurture-runner.enabled` matchIfMissing=false).
-- Reactive (no `.block()` on Netty loop). No live external (Twilio/Email `@MockitoBean`, Anthropic →
-  WireMock). Per-tenant config never hardcoded. Reuse the E1 ledger-insert-FIRST + explicit-boolean
-  invariants — never `switchIfEmpty(create/send)`.
+## Mirror map (T1 realestate → T2 frontdesk)
+| T1 | T2 |
+|---|---|
+| `RealEstateNurtureService` | `FrontDeskNurtureService` |
+| `FairHousingCopyFilter` (reuses `FairHousingLint`) | `HipaaCopyFilter` (reuses `HipaaReplyLint`) |
+| `RealEstateNurtureAutoConfiguration` | `FrontDeskNurtureAutoConfiguration` |
+| `RealEstateNurtureReplyHandler` (vertical=realestate) | `FrontDeskNurtureReplyHandler` (vertical=frontdesk) |
+| `RealEstateNurtureDemoSeeder` (`demo-realestate`) | `FrontDeskNurtureDemoSeeder` (`demo-frontdesk`) |
+| `RealEstateNurtureController` | `FrontDeskNurtureController` |
 
-## Regression gates (must stay green)
-- `com.kumouri.kmodigipresbe.nurture.*` (5 ITs) — proves E1 byte-equivalent under the additive SPI.
-- `RealEstateConciergeIT` — proves the RE module + inbound seam unaffected.
-- `OpenApiEndpointIT` — full-context boot + spec regen.
+---
 
-## Log
-- T1.0 — detail plan + ledger written. Reuse map verified against sources (E1 nurture engine, RE module
-  incl. `FairHousingLint:72`, the E2 `IntentHandler`/`InboundIntentRouter` seam, `InboundSmsService:262`).
-  Decided: additive E1 composer SPI (rationale above). Beginning T1.1.
-- T1.1 — added `service/nurture/NurtureCopyFilter` SPI + the `@Nullable` field/setter/`applyFilter`
-  wrapper in `NurtureMessageComposer` (existing logic verbatim → `composeRaw`; diff +63/-2, strictly
-  additive). **Regression gate GREEN: all 5 E1 nurture ITs pass (21 tests, 0 failures)** —
-  NurtureAnalyticsIT 1, NurtureCampaignControllerIT 6, NurtureReplyBookIT 5, NurtureRunnerIT 6,
-  NurtureSegmentationIT 3. E1 byte-equivalent (null filter ⇒ identical output). `compileJava` clean.
-- T1.2 — built `module/realestate/nurture/`: `FairHousingCopyFilter` (reuses `FairHousingLint`; flagged
-  copy → per-channel vetted safe template; advisory code 4360); `RealEstateNurtureReplyHandler` (E2
-  `IntentHandler`, vertical=realestate, positive intents → `NurtureReplyService.handlePositiveReplyByPhone`,
-  4310 swallowed); `RealEstateNurtureService` + `controller/RealEstateNurtureController` (RE-scoped
-  segment-and-enroll + analytics, ADMIN + both-module `requireEnabled`);
-  `RealEstateNurtureAutoConfiguration` (gate = realestate `@ConditionalOnProperty` AND
-  `@ConditionalOnBean(NurtureMessageComposer)`; wires the filter onto the composer via the
-  `RealEstateNurtureSmsWiring` side-effect bean — the `ConciergeInboundSmsWiring` precedent). Registered
-  in `AutoConfiguration.imports`. Error band 4360-4369 `<li>` added after E4's 4350-4359 in
-  `GlobalErrorHandler`. `compileJava` clean; **`FairHousingCopyFilterTest` GREEN (7 tests, 0 failures)**.
-- T1.3 — `RealEstateNurtureDemoSeeder` (`@Profile("demo-realestate")` `CommandLineRunner`, the
-  `DataSeeder` precedent; idempotent on slug `gateway-realty`). Seeds tenant "Gateway Realty"
-  (realestate+nurture+responder modules, $25 AI budget) + ADMIN user + Twilio connection
-  (`config.bookingLink`/`notifyPhone`/`notifyEmail`, smsMode UNSET so the E2 reply handler path is live) +
-  `ResponderConfig(vertical=realestate)` + the RE nurture campaign (A/B/C/D segments + SMS/email cadence) +
-  12 dormant leads across the bands (3 A with WON deals ≥$300k, 4 B incl. 1 opted-out, 3 C incl. 1
-  opted-out, 2 D), each with a backdated `Activity` so segmentation buckets deterministically. The 60-sec
-  "watch this" documented in the class Javadoc + the detail plan. `compileJava` clean.
-- T1.4 — wrote + ran the T1 ITs. **NEW T1 (all GREEN):** `RealEstateNurtureFairHousingIT` (4 — the
-  headline: clean template verbatim; non-compliant template → safe fallback; non-compliant AI rewrite →
-  caught by lint → safe fallback; opt-out → zero send), `RealEstateNurtureSegmentationIT` (2 — A/B/C/D
-  bucketing incl. value-band A, opt-out + non-dormant skip; re-run idempotent),
-  `RealEstateNurtureReplyBookIT` (3 — supports() matrix; positive reply → BOOKED + booking-link SMS +
-  events; no-enrollment → ignored/zero-send), `RealEstateNurtureAnalyticsIT` (3 — per-segment funnel;
-  non-ADMIN 1800; tenant-missing-nurture-module rejected), `FairHousingCopyFilterTest` (7, unit). Total
-  19 T1 tests, 0 failures. **REGRESSION GREEN:** 5 E1 nurture ITs (21, 0 fail), `RealEstateConciergeIT`
-  (5, 0 fail), `OpenApiEndpointIT` (2, 0 fail). Naming: `*IT` (full-ci lane) + `*Test` (fast lane).
-- T1.5 — ran `*OpenApiEndpointIT verifyOpenApi`: **`docs/api/openapi.json` already matches — no diff**
-  (the RE-nurture controller is `@ConditionalOnProperty(realestate)` default-OFF, so its endpoints aren't
-  in the spec when `OpenApiEndpointIT` runs without the flag — the flagship-5b/AR precedent; the FE leg
-  uses hand-written `api/*.ts`). Added the **T1 entry to repo `CLAUDE.md`** (new "Wave-2 vertical AI
-  tools" subsection after E4: module gates, error band 4360-4369, Fair-Housing guarantee, what it
-  deploys, empty-diff statement). Branch pushed; **draft PR #112** open (will un-draft after this commit).
-  **T1 BE leg COMPLETE.**
+## Sub-phase ledger
+
+| Sub-phase | Status | Commit | Notes |
+|---|---|---|---|
+| T2.0 — detail plan + this ledger | DONE | _(commit 1)_ | plan `~/.claude/plans/health-revenuerevive.md` |
+| T2.1 — `HipaaCopyFilter` + `HipaaCopyFilterTest` | PENDING | | the headline screen; reuses `HipaaReplyLint`; no-Docker unit first |
+| T2.2 — service + reply handler + autoconfig + controller + `GlobalErrorHandler` 4370-4379 | PENDING | | wires the 4 beans incl. `setCopyFilter` side-effect; both-module gate |
+| T2.3 — `FrontDeskNurtureDemoSeeder` | PENDING | | `@Profile("demo-frontdesk")`; fictional clinic + logistics-only dormant-patient DB |
+| T2.4 — T2 ITs | PENDING | | PHI-safe headline + segmentation + reply-rebook + analytics |
+| T2.5 — `CLAUDE.md` + `openapi.json` | PENDING | | T2 entry; regenerate spec (expect no diff — default-OFF) |
+| Validation — new + regression ITs | PENDING | | E1-nurture (`nurture.*`) + a frontdesk IT + `OpenApiEndpointIT`; capture counts |
+
+## Validation status (frontier)
+- Not yet validated — implementation begins at T2.1.
+
+## Error codes minted
+- **4370** — PHI-free safe-fallback substitution (advisory, logged WARN; not a thrown HTTP error — mirrors T1's 4360).
+- **4371-4379** — RESERVED for health-nurture growth.
+- Reused (NOT re-allocated): 4301/4302/4303 (campaign not-found/inactive/invalid), 4310 (reply-no-enrollment, swallowed), 1130/1132 (module gate), 1800 (ADMIN).
+
+## Invariants
+- ZERO E1 edits (T1's SPI sufficed); E1 nurture cores + frontdesk cores empty-diff vs `main`.
+- `switchIfEmpty` only for genuine not-found; no `switchIfEmpty(create/send)` (the seeder's first-run create is a genuine not-found, allowed).
+- Reactive, no `.block()` on the Netty loop.
+- No live external — Twilio/Email `@MockitoBean`, Anthropic→WireMock, `NurtureRunner` default-OFF; no host/key/charge/send in the loop.
+- Per-tenant config never hardcoded (booking link from `IntegrationConnection`; safe templates `@Value`-resolved).
