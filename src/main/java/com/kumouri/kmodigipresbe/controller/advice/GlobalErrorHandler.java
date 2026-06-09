@@ -718,6 +718,35 @@ import java.util.UUID;
  *       <strong>FD-1..FD-4 + ChairFill + NMM byte-equivalent:</strong> FD-5a is a purely additive read
  *       controller + DTOs + two additive repo finders + a visibility-only constant promotion; it touches
  *       no scoring / outbound-comms / voicemail-pipeline / review-reply behavior.</li>
+ *   <li>{@code 4300-4319} — <em>Nurture / Cadence Engine (E1)</em>: the keystone shared reactivation
+ *       engine ({@code model/nurture}, {@code service/nurture}, {@code controller/nurture}). Segments a
+ *       tenant's dormant contacts into vertical-agnostic dormancy buckets (thresholds carried by the
+ *       campaign — never hardcoded), runs a default-OFF multi-touch SMS+email cadence with per-step
+ *       backoff (the {@code NurtureRunner} — {@code kmosf.modules.nurture-runner.enabled}
+ *       matchIfMissing=false, the {@code CoverageNudgeJob}/{@code GbpReviewPoller} default-OFF posture;
+ *       per-(enrollment, step) ledger-insert-FIRST over the unique {@code tenant_enrollment_step_idx} so
+ *       a restart/concurrent tick sends ZERO duplicate, NEVER {@code switchIfEmpty(send)}), and
+ *       exits-and-books on a positive reply (per-tenant Cal.com booking link from
+ *       {@code IntegrationConnection(twilio).config["bookingLink"]} over SMS — NO live Cal.com call).
+ *       New codes: {@code 4300} nurture not enabled for the tenant (404 — the in-range parity code; the
+ *       admin controller actually surfaces the shared {@code 1130}/{@code 1132} via
+ *       {@code requireEnabled}); {@code 4301} NurtureCampaign not found (404); {@code 4302} campaign
+ *       inactive — cannot segment/enroll (409); {@code 4303} invalid campaign definition — no segments,
+ *       no steps, non-contiguous stepIndex, or a step missing its channel's template (400); {@code 4310}
+ *       NurtureEnrollment not found / no active enrollment for the reply (404, genuine
+ *       {@code switchIfEmpty}); {@code 4311} enrollment already terminal — a second positive-reply is a
+ *       no-op (409, explicit boolean); {@code 4312} reply ref invalid — blank contact phone (400). The
+ *       band {@code 4313-4319} is RESERVED for nurture growth. Reused (NOT re-allocated): {@code 1130}/
+ *       {@code 1131}/{@code 1132} (the module gate via {@code requireEnabled}), {@code 1200}-{@code 1203}
+ *       (AI budget / Anthropic upstream / missing-key — surfaced best-effort by the message composer,
+ *       which degrades to the template rather than dropping the send), {@code 2530}-{@code 2532} (Twilio
+ *       SMS), {@code 1300} (Activity via the unchanged {@code ActivityCrudService}), {@code 1800}
+ *       (RoleGuard ADMIN), {@code 3100} ({@code @IdempotentRoute} missing key). Consent is the
+ *       {@code sms-opt-out} tag (a skip, not an error). The {@code NurtureCampaignController} is
+ *       {@code @ConditionalOnProperty}-gated (matchIfMissing=true), so it is absent from the generated
+ *       OpenAPI spec when the module is off; the default-OFF runner means no live send in CI / any
+ *       default run. <strong>Strictly additive — the shipped Sequence engine, InboundSmsService,
+ *       TwilioSmsService, EmailService, and AnthropicAiAssistService are empty-diff vs {@code main}.</strong></li>
  * </ul>
  */
 @Slf4j

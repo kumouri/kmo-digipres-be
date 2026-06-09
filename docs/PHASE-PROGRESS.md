@@ -21,7 +21,7 @@ scheduled runner has its OWN gate `kmosf.modules.nurture-runner` (`matchIfMissin
 | N3 | `NurtureMessageComposer` + `NurtureRunner` (default-OFF) | DONE | `NurtureRunnerIT` (6/6 green) | (N3 commit) |
 | N4 | `NurtureReplyService` (reply→exit→book) | DONE | `NurtureReplyBookIT` (5/5 green) | (N4 commit) |
 | N5 | `NurtureAnalyticsService` | DONE | `NurtureAnalyticsIT` (1/1 green) | (N5 commit) |
-| N6 | `NurtureCampaignController` + DTOs + `GlobalErrorHandler` 4300-4319 Javadoc + openapi regen | TODO | `NurtureCampaignControllerIT` + `OpenApiEndpointIT` | |
+| N6 | `NurtureCampaignController` + DTOs + `GlobalErrorHandler` 4300-4319 Javadoc + openapi regen | DONE | `NurtureCampaignControllerIT` (6/6) + `OpenApiEndpointIT` (nurture paths in spec) | (N6 commit) |
 
 ## Invariants (must hold at every sub-phase)
 - **Reactive:** no `.block()` on the Netty loop; the scheduled tick subscribes on the scheduler
@@ -39,3 +39,12 @@ scheduled runner has its OWN gate `kmosf.modules.nurture-runner` (`matchIfMissin
 
 ## Validation log
 - N0: detail plan + this fresh ledger committed; early push + draft PR for the hedge.
+- N1: compileJava green (model + repos).
+- N2: NurtureSegmentationIT 3/3.
+- N3: NurtureRunnerIT 6/6 (keystone).
+- N4: NurtureReplyBookIT 5/5.
+- N5: NurtureAnalyticsIT 1/1.
+- N6: NurtureCampaignControllerIT 6/6; OpenApiEndpointIT exports the 5 /nurture paths;
+  docs/api/openapi.json refreshed (cp1252, valid JSON, 228 paths). IT-URI lesson:
+  @AutoConfigureWebTestClient auto-applies spring.webflux.base-path=/api/v1, so IT URIs
+  must NOT prepend /api/v1 (a double prefix 404s as "No static resource").
