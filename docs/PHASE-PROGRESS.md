@@ -22,8 +22,8 @@ the composer at module init. The composer is the ONE E1 file with a (strictly ad
 
 | Sub | Scope | Status |
 |---|---|---|
-| T1.0 | Detail plan + this fresh ledger | DONE (this commit) |
-| T1.1 | Additive E1 `NurtureCopyFilter` SPI + composer wiring + `FairHousingCopyFilterTest`; **re-run 5 E1 nurture ITs (regression gate)** | TODO |
+| T1.0 | Detail plan + this fresh ledger | DONE |
+| T1.1 | Additive E1 `NurtureCopyFilter` SPI + composer wiring; **re-ran 5 E1 nurture ITs (regression gate)** | DONE (`FairHousingCopyFilterTest` moves to T1.2 with the filter) |
 | T1.2 | `module/realestate/nurture/`: `FairHousingCopyFilter`, `RealEstateNurtureReplyHandler` (E2 `IntentHandler`), `RealEstateNurtureService`+`RealEstateNurtureController`, `RealEstateNurtureAutoConfiguration` (two-module gate + composer-wiring side-effect bean), config props, 4360-4369 Javadoc | TODO |
 | T1.3 | Demo seeder (`@Profile("demo-realestate")` `RealEstateNurtureDemoSeeder`, "Gateway Realty") | TODO |
 | T1.4 | T1 ITs (segmentation / fair-housing / reply-book / analytics) + run new + regression ITs locally; capture counts | TODO |
@@ -48,3 +48,8 @@ the composer at module init. The composer is the ONE E1 file with a (strictly ad
 - T1.0 — detail plan + ledger written. Reuse map verified against sources (E1 nurture engine, RE module
   incl. `FairHousingLint:72`, the E2 `IntentHandler`/`InboundIntentRouter` seam, `InboundSmsService:262`).
   Decided: additive E1 composer SPI (rationale above). Beginning T1.1.
+- T1.1 — added `service/nurture/NurtureCopyFilter` SPI + the `@Nullable` field/setter/`applyFilter`
+  wrapper in `NurtureMessageComposer` (existing logic verbatim → `composeRaw`; diff +63/-2, strictly
+  additive). **Regression gate GREEN: all 5 E1 nurture ITs pass (21 tests, 0 failures)** —
+  NurtureAnalyticsIT 1, NurtureCampaignControllerIT 6, NurtureReplyBookIT 5, NurtureRunnerIT 6,
+  NurtureSegmentationIT 3. E1 byte-equivalent (null filter ⇒ identical output). `compileJava` clean.
