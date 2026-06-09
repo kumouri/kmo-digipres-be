@@ -13,28 +13,31 @@ validation state. Never trust a missing summary; reconstruct from `git log` + th
 
 ## Sub-phases
 
-- [x] **T4.0 — detail plan + ledger** (this commit). Plan written, ledger seeded. No code yet.
-- [ ] **T4.1 — data + config layer.** `SwitchboardConfig` (+repo), `SwitchboardDeflectionLog` (+repo),
-      `SwitchboardIntents` (canonical intent constants + default `IntentDefinition`s + the
-      PHI-forbidding health classifier prompt), `SwitchboardRedaction` (the fixed marker). PHI-free
-      deflection ledger (no phone/content).
-- [ ] **T4.2 — logistics handlers + tripwire.** `LogisticsIntentHandler` (7 intents, answered from
-      `SwitchboardConfig`), `ClinicalTripwireHandler` (CLINICAL_SYMPTOM → redaction-only Activity +
+- [x] **T4.0 — detail plan + ledger** (4ecbd85). Plan written, ledger seeded.
+- [x] **T4.1 — data + config layer** (f03f6ab). `SwitchboardConfig` (+repo), `SwitchboardDeflectionLog`
+      (+category enum +repo), `SwitchboardDeflectionStats`, `SwitchboardIntents` (intent constants +
+      default `IntentDefinition`s + the PHI-forbidding health classifier prompt), `SwitchboardRedaction`
+      (the fixed marker). PHI-free deflection ledger (no phone/content). Compiles.
+- [x] **T4.2 — logistics handlers + tripwire** (c4eabf9). `LogisticsIntentHandler` (7 intents, answered
+      from `SwitchboardConfig`), `ClinicalTripwireHandler` (CLINICAL_SYMPTOM → redaction-only Activity +
       staff notify + safe reply, body never persisted), `SwitchboardDeflectionService`. Reuses E2
-      `IntentHandler` discovery — no router edit.
-- [ ] **T4.3 — deflection analytics + controller + handoff recorder.**
+      `IntentHandler` discovery — no router edit. Reused cores empty-diff verified. Compiles.
+- [x] **T4.3 — deflection analytics + controller + handoff recorder** (3035f71).
       `SwitchboardDeflectionRecorder` (`RESPONDER_HANDED_OFF` subscriber, health-scoped),
-      `SwitchboardController` (config CRUD + deflection-stats), `SwitchboardDeflectionStats`.
-- [ ] **T4.4 — both-modules auto-config.** `SwitchboardAutoConfiguration`
-      (`@ConditionalOnProperty(frontdesk)` + `@ConditionalOnBean(InboundIntentRouter)`); registers the
-      `META-INF/spring/...AutoConfiguration.imports` entry. Default-OFF; blast-radius zero.
-- [ ] **T4.5 — demo seed.** `SwitchboardDemoSeeder` (`@Profile("demo-health-switchboard")`,
-      idempotent). The 60-second "watch this".
-- [ ] **T4.6 — tests.** `SwitchboardLogisticsIT`, `SwitchboardTripwireIT` (the PHI fence — serialize-
-      and-scan forbidden clinical tokens), `SwitchboardModuleGateIT`, `SwitchboardDeflectionStatsIT`.
-- [ ] **T4.7 — docs + error codes + openapi.** `GlobalErrorHandler` Javadoc 4390-4399 (`<li>` after
-      T3's 4380-4389), `DomainEventType` (no new event — reuses `RESPONDER_HANDED_OFF`), CLAUDE.md T4
-      entry, openapi regen (no-diff, default-OFF). PR opened READY.
+      `SwitchboardController` (config CRUD + deflection-stats). Compiles.
+- [x] **T4.4 — both-modules auto-config** (08703a5). `SwitchboardAutoConfiguration`
+      (`@ConditionalOnProperty(frontdesk)` + `@ConditionalOnBean(InboundIntentRouter)`); registered in
+      `AutoConfiguration.imports`. Default-OFF; blast-radius zero. Compiles.
+- [x] **T4.5 — demo seed** (then refined). `SwitchboardDemoSeeder`
+      (`@Profile("demo-health-switchboard")`, idempotent). The 60-second "watch this". Compiles.
+- [x] **T4.6 — tests** (682a6d4). `SwitchboardLogisticsIT` (4), `SwitchboardTripwireIT` (2 — the PHI
+      fence serialize-and-scan), `SwitchboardModuleGateIT` (3), `SwitchboardDeflectionStatsIT` (2).
+      11/11 GREEN. (Refactored `SwitchboardController` to depend on the always-present repos so it loads
+      in a frontdesk-on/responder-off context — the gate guard 1132s at runtime.)
+- [x] **T4.7 — docs + error codes + openapi.** `GlobalErrorHandler` Javadoc 4390-4399 (`<li>` after
+      T3's 4380-4389); `DomainEventType` unchanged (no new event — reuses `RESPONDER_HANDED_OFF`);
+      CLAUDE.md T4 entry; openapi NO-DIFF verified (default-OFF → not in spec; 238 paths identical).
+      PR opened READY.
 
 ## Validation log
 
