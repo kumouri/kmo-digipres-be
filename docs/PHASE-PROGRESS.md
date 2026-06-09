@@ -19,11 +19,11 @@
 
 | Sub-phase | Scope | Status | Commit |
 |---|---|---|---|
-| W0 | Detail plan + fresh ledger | DONE | (this commit) |
-| W1 | model (`WaitlistSlot`/`WaitlistEntry`/`WaitlistOffer`) + repos + `SlotMaterializer` SPI + `NoOpSlotMaterializer` | pending | |
-| W2 | `WaitlistRankingService` + `GapFillEngine` + `WaitlistOfferExpiryService` | pending | |
-| W3 | `WaitlistClaimEngine` (atomic findAndModify + materializer dispatch) | pending | |
-| W4 | `WaitlistAutoConfiguration` + controller + `DomainEventType` block + `GlobalErrorHandler` 4350-4359 + props | pending | |
+| W0 | Detail plan + fresh ledger | DONE | 0e8137f |
+| W1 | model (`WaitlistSlot`/`WaitlistEntry`/`WaitlistOffer`) + repos + `SlotMaterializer` SPI + `NoOpSlotMaterializer` | DONE | 7d09a18 |
+| W2 | `WaitlistRankingService` + `GapFillEngine` + `WaitlistOfferExpiryService` | DONE | fc54dc6 |
+| W3 | `WaitlistClaimEngine` (atomic findAndModify + materializer dispatch) | DONE | e3e2b82 |
+| W4 | `WaitlistAutoConfiguration` + controller + `DomainEventType` block + `GlobalErrorHandler` 4350-4359 + imports | DONE (compileJava green) | (this commit) |
 | W5 | ITs + run new + REGRESSION (`GapFillWaitlistIT`) + `OpenApiEndpointIT` | pending | |
 | W6 | regen + commit `docs/api/openapi.json`; final ledger + report | pending | |
 

@@ -809,6 +809,30 @@ import java.util.UUID;
  *       fields; {@code GbpReplyDraftService}, {@code GbpReviewReplyAdminService}, {@code GbpApiClient},
  *       {@code TwilioSmsService}, {@code EmailService}, {@code AnthropicAiAssistService},
  *       {@code SalonBookingService}, and {@code MilestoneService} are empty-diff vs {@code main}.</strong></li>
+ *   <li>{@code 4350-4359} — <em>Gap-Fill Waitlist engine (E4)</em>: the vertical-agnostic gap-fill
+ *       waitlist engine ({@code model/waitlist}, {@code service/waitlist}, {@code controller/waitlist},
+ *       {@code repository/waitlist}). On a freed slot a consumer calls
+ *       {@code GapFillEngine.gapFill(tenantId, slot)} → {@code WaitlistRankingService} ranks the OPEN,
+ *       opted-in, slot-matching {@code WaitlistEntry} pool by inverted show-risk (most-likely-to-show
+ *       first; rules-based + FIFO tiebreak, over entry-carried stats — NO salon Booking coupling) → the
+ *       top-N get a time-boxed offer SMS + a {@code WaitlistOffer} ledger row. The first inbound YES
+ *       atomically claims the slot via {@code WaitlistClaimEngine} (a {@code findAndModify} on
+ *       {@code waitlist_slot_claims} with the {@code claimedByContactId:null} guard + {@code upsert} —
+ *       the CF-3 D2 / {@code WorkOrderNumberGenerator} double-YES-correct gate; winner → the consumer's
+ *       {@code SlotMaterializer} creates the real domain record, loser → an apology); offer-expiry is the
+ *       {@code WaitlistOfferExpiryService} ledger-hygiene sweep (no {@code @Scheduled} live job by default
+ *       — the engine is consumer-triggered + dormant). New codes: {@code 4350} waitlist entry not found
+ *       for the tenant (404); {@code 4351} waitlist entry invalid (blank {@code contactId} on create, 400);
+ *       {@code 4352} gap-fill slot request invalid (missing {@code slotKey} / {@code slotStart}, 400). The
+ *       band {@code 4353-4359} is RESERVED for waitlist-engine growth. Reused (NOT re-allocated):
+ *       {@code 1130}/{@code 1132} (module gate — the {@code waitlist} module on the admin controller, the
+ *       {@code NurtureCampaignController} posture); {@code 2530}-{@code 2532} (Twilio SMS — the offer /
+ *       confirmation / apology send paths); {@code 1800} (RoleGuard ADMIN on the admin controller). The
+ *       engine has <strong>no AI dependency</strong> (deterministic template copy) so it adds ZERO
+ *       Anthropic calls; {@code TwilioSmsService} is mocked in ITs (no live send). <strong>ChairFill is
+ *       byte-equivalent</strong> — the engine is a parallel generic package; the chairfill
+ *       {@code GapFillWaitlistIT} regression gate stays green and {@code InboundSmsService} /
+ *       {@code TwilioSmsService} / {@code NoShowRiskScoringService} are empty-diff vs {@code main}.</li>
  * </ul>
  */
 @Slf4j

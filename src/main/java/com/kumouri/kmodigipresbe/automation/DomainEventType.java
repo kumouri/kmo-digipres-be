@@ -465,6 +465,20 @@ public final class DomainEventType {
     public static final String REVIEW_REQUEST_SKIPPED      = "review.requestSkipped";
     public static final String GBP_REVIEW_NEGATIVE_ALERTED = "gbp.reviewNegativeAlerted";
 
+    // E4 (Gap-Fill Waitlist engine) — the vertical-agnostic gap-fill waitlist engine. Both are advisory
+    // (RuleEngine / webhook fan-out) — they do NOT drive any core mutation. Distinct from the chairfill
+    // CF-3 WAITLIST_OFFER_SENT / WAITLIST_SLOT_CLAIMED constants above (which stay byte-equivalent): the
+    // generic engine uses the WAITLIST_ENGINE_ prefix so the two never collide. The engine is
+    // consumer-triggered + module-gated; a tenant without the `waitlist` module emits nothing.
+    // WAITLIST_ENGINE_OFFER_SENT: emitted by GapFillEngine once per WaitlistOffer dispatched (a ranked
+    //   waitlisted contact texted a time-boxed offer for the freed slot). Payload:
+    //   {slotKey, offerId, contactId, rank, expiresAt}.
+    // WAITLIST_ENGINE_SLOT_CLAIMED: emitted by WaitlistClaimEngine when the first YES atomically claims the
+    //   freed slot and the consumer's SlotMaterializer creates the real record (or the no-op fallback).
+    //   Payload: {slotKey, offerId, contactId, refType, refId}.
+    public static final String WAITLIST_ENGINE_OFFER_SENT   = "waitlistEngine.offerSent";
+    public static final String WAITLIST_ENGINE_SLOT_CLAIMED = "waitlistEngine.slotClaimed";
+
     private DomainEventType() {
     }
 }
