@@ -9,6 +9,7 @@ import com.kumouri.kmodigipresbe.module.chairfill.automation.RiskTieredPreventio
 import com.kumouri.kmodigipresbe.module.chairfill.gapfill.WaitlistClaimService;
 import com.kumouri.kmodigipresbe.module.realestate.concierge.ConciergeInboundRouter;
 import com.kumouri.kmodigipresbe.repository.ContactRepository;
+import com.kumouri.kmodigipresbe.service.responder.InboundIntentRouter;
 import com.kumouri.kmodigipresbe.tenancy.TenantContext;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
 import lombok.extern.slf4j.Slf4j;
@@ -138,13 +139,36 @@ public class InboundSmsService {
         this.conciergeRouter = conciergeRouter;
     }
 
+    /**
+     * E2 — the generic inbound intent router (the reusable responder engine). Wired (via
+     * {@link #setIntentRouter}) only when the {@code responder} module is loaded; null otherwise → the
+     * {@code IGNORED} fallthrough below is <strong>byte-identical</strong> to before E2. The bean is
+     * hand-constructed (not component-scanned), so this is a setter the responder auto-config invokes,
+     * not field-{@code @Autowired} — exactly the {@link #conciergeRouter} seam. It is consulted ONLY on
+     * the path that previously returned {@code IGNORED} (after STOP / YES / realestate had their chance),
+     * so the shipped CF-3 / RE-1 inbound behavior + ITs are unaffected.
+     */
+    @Nullable
+    private InboundIntentRouter intentRouter;
+
+    /**
+     * Wires the E2 generic responder router. Invoked by {@code ResponderAutoConfiguration} when the
+     * responder module is enabled; never called otherwise (the seam stays inert). Idempotent / last-wins.
+     */
+    public void setIntentRouter(@Nullable InboundIntentRouter intentRouter) {
+        this.intentRouter = intentRouter;
+    }
+
     /** What an inbound SMS resolved to — for the controller to log. */
     public enum InboundOutcome {
         CLAIMED_WON, CLAIMED_LOST, NO_OPEN_OFFER, OPTED_OUT, IGNORED,
         // RE-1 realestate-mode outcomes.
         CONCIERGE_ANSWERED, CONCIERGE_HANDED_OFF, CONCIERGE_NO_LISTING,
         // RE-3 showing-booking outcomes (slots offered / a showing booked).
-        CONCIERGE_BOOKING_OFFERED, CONCIERGE_BOOKED
+        CONCIERGE_BOOKING_OFFERED, CONCIERGE_BOOKED,
+        // E2 generic-responder outcome — the InboundIntentRouter handled the message that would
+        // otherwise have been IGNORED. An unhandled message still returns IGNORED (no behavior change).
+        RESPONDER_HANDLED
     }
 
     /**
@@ -229,6 +253,17 @@ public class InboundSmsService {
                         case LOST -> InboundOutcome.CLAIMED_LOST;
                         case NO_OPEN_OFFER -> InboundOutcome.NO_OPEN_OFFER;
                     });
+        }
+        // E2 generic-responder fallthrough (the ONE additive seam). When no existing branch matched
+        // and the responder router is wired, delegate. The router returns HANDLED if it handled the
+        // message (→ RESPONDER_HANDLED) or IGNORED otherwise (→ the byte-identical IGNORED below). A
+        // tenant with no responder config makes the router return IGNORED, so default behavior is
+        // unchanged. Null router (responder module off) → the original IGNORED path, byte-for-byte.
+        if (intentRouter != null) {
+            return intentRouter.handle(tenantId, from, to, body)
+                    .map(o -> o == InboundIntentRouter.Outcome.HANDLED
+                            ? InboundOutcome.RESPONDER_HANDLED
+                            : InboundOutcome.IGNORED);
         }
         log.debug("CF-3 inbound SMS from {} for tenant {} not actionable: '{}'", from, tenantId, body);
         return Mono.just(InboundOutcome.IGNORED);
