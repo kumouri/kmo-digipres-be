@@ -1074,6 +1074,38 @@ import java.util.UUID;
  *       + Twilio is mocked in ITs (no live send). Going live needs A2P 10DLC for the caller SMS (a separate
  *       human action — never the loop).</li>
  * </ul>
+ *
+ * <ul>
+ *   <li>{@code 4410-4419} — <em>Salon "ReviewBoost" (T6)</em>: deploys the shipped E3 review engine
+ *       (review requests + insights, PR #104) to the salon vertical as a per-stylist review dashboard
+ *       ({@code module/chairfill/reviewboost}). <strong>Most of ReviewBoost already ships</strong> — the
+ *       per-stylist attribution (salon {@code BOOKING_COMPLETED} carries {@code staffMemberId} →
+ *       {@code ReviewRequestService} stamps the request {@code ReviewSubjectType.STAFF +
+ *       staffMemberId}), the frictionless no-incentive review-request SMS ({@code ReviewRequestSenderJob},
+ *       default-OFF), daily GBP sentiment triage + the negative manager alert ({@code ReviewSentimentService}
+ *       + {@code ReviewNegativeAlertService}, both default-OFF), and the 1-click AI reply drafts + the
+ *       approval queue ({@code GbpReplyDraftService} + the CF-4 {@code SalonReviewReplyService} +
+ *       {@code GbpReviewReplyAdminController}). T6's genuine net-new is the per-stylist insights
+ *       <em>list</em> read surface: {@code GET /chairfill/reviewboost/insights} returns a
+ *       {@code SalonReviewBoardDTO} (tenant-wide review-content + funnel header + one
+ *       {@code StylistReviewStatsDTO} per active stylist) and {@code GET /chairfill/reviewboost/config}
+ *       returns a {@code ReviewBoostConfigDTO} wiring read-back — both assembled purely by reusing the
+ *       unchanged {@code ReviewInsightsService} (tenant rollup + per-{@code STAFF}-subject rollup) over the
+ *       active {@code StaffMember}s from {@code StaffMemberRepository}. <strong>No code is minted in this
+ *       band</strong> — the read surface leans on the reused {@code 1130}/{@code 1132} (module gate, both
+ *       {@code chairfill} AND {@code salon-spa} per-tenant via {@code TenantModuleRegistry.requireEnabled})
+ *       and {@code 1800} (RoleGuard ADMIN); {@code 4410-4419} is RESERVED for ReviewBoost growth. Module
+ *       gate: {@code @ConditionalOnProperty(kmosf.modules.chairfill)} + {@code @ConditionalOnBean
+ *       (SalonBookingService)} (the ChairFill posture — salon-spa must be loaded). <strong>The reused cores
+ *       ({@code ReviewInsightsService}, {@code ReviewRequestService}, {@code ReviewSentimentService},
+ *       {@code ReviewNegativeAlertService}, {@code ReviewRequestSenderJob}, {@code GbpReplyDraftService},
+ *       {@code SalonReviewReplyService}, {@code GbpReviewReplyAdminController}, {@code SalonBookingService},
+ *       {@code Booking}, {@code StaffMember}, {@code ReviewInsights}, {@code ReviewRequest}) stay empty-diff
+ *       vs {@code main}</strong>; the T6 package is strictly additive. T6 sends nothing (a read surface +
+ *       demo seed); the actual sends remain E3's default-OFF jobs/services. Going live needs A2P 10DLC for
+ *       the no-incentive request SMS + live GBP OAuth for posting reply drafts (separate human actions —
+ *       never the loop).</li>
+ * </ul>
  */
 @Slf4j
 @Component
