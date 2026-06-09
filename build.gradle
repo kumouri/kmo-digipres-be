@@ -153,22 +153,53 @@ tasks.named('test') {
     // variants keep many reactive Spring contexts in the TestContext cache.
     maxHeapSize = '1600m'
 
-    // F.12 — deterministic class-shard filter for CI matrix runs.
-    // Each CI job passes -Dtest.shard.total=4 -Dtest.shard.index=<1..4> so that each
-    // runner runs only its 1/4 of the test classes against its own isolated Docker /
-    // Testcontainers Mongo.  Local runs (no system properties set) are unaffected:
-    // shardTotal defaults to 1 => the exclude closure is never evaluated.
-    // maxParallelForks is deliberately NOT set here — the single-fork invariant is
-    // preserved (see comment above); sharding is across separate CI jobs, not JVM forks.
+    // F.12 — deterministic, RUNTIME-BALANCED class-shard filter for CI matrix runs.
+    // Each CI job passes -Dtest.shard.total=6 -Dtest.shard.index=<1..6> so each runner runs
+    // only its slice of the test classes against its own isolated Testcontainers Mongo. Local
+    // runs (no system properties) default shardTotal=1 => the exclude closure never evaluates.
+    // maxParallelForks is deliberately NOT set — the single-fork invariant holds; sharding is
+    // across separate CI jobs, not JVM forks.
+    //
+    // Balancing: top-level test classes are bin-packed by measured wall-time
+    // (gradle/test-shard-timings.properties) via greedy longest-processing-time-first, so the
+    // heavy context-booting ITs spread evenly instead of clustering on one shard — the old
+    // name-hash bucketed by COUNT, which let one shard accumulate the slow module ITs (shard 4
+    // ran ~2.5x the others and reaped its Mongo container). Nested classes (Foo$Bar) inherit
+    // Foo's shard, fixing the prior quirk where '$' classes ran in EVERY shard. A class with no
+    // recorded timing falls back to a name-hash bucket so brand-new tests still run in exactly
+    // one shard until the timings file is refreshed (regenerate it from a green full-ci run's
+    // test-results XMLs — sum each suite's `time`, folding nested suites into their top-level).
     def shardTotal = (System.getProperty('test.shard.total') ?: '1') as int
     def shardIndex = (System.getProperty('test.shard.index') ?: '1') as int   // 1-based
     if (shardTotal > 1) {
+        def timed = [:]   // dotted FQCN (no .class suffix) -> measured seconds
+        def timingsFile = file('gradle/test-shard-timings.properties')
+        if (timingsFile.exists()) {
+            def props = new Properties()
+            timingsFile.withInputStream { props.load(it) }
+            props.each { k, v -> try { timed[k.toString()] = Double.parseDouble(v.toString()) } catch (ignored) {} }
+        }
+        // LPT bin-packing: assign the heaviest class first into whichever bin is lightest.
+        def binSeconds = new double[shardTotal]
+        def assignment = [:]   // FQCN -> 1-based shard
+        timed.collect { [cls: it.key, t: it.value] }
+             .sort { a, b -> (b.t <=> a.t) ?: (a.cls <=> b.cls) }   // time desc, then name (stable)
+             .each { e ->
+                 int lightest = 0
+                 for (int i = 1; i < shardTotal; i++) { if (binSeconds[i] < binSeconds[lightest]) lightest = i }
+                 assignment[e.cls] = lightest + 1
+                 binSeconds[lightest] += e.t
+             }
         exclude { org.gradle.api.file.FileTreeElement fte ->
             if (fte.isDirectory()) return false
             def path = fte.relativePath.pathString
-            if (!path.endsWith('.class') || path.contains('$')) return false   // only top-level test classes decide bucketing
-            int bucket = Math.floorMod(path.replace('/', '.').hashCode(), shardTotal) + 1
-            return bucket != shardIndex   // exclude classes that are NOT in this shard
+            if (!path.endsWith('.class')) return false
+            def fqcn = path.substring(0, path.length() - 6).replace('/', '.')   // drop '.class'
+            int dollar = fqcn.indexOf('$')
+            if (dollar >= 0) fqcn = fqcn.substring(0, dollar)                   // nested Foo$Bar -> Foo
+            Integer shard = assignment[fqcn]
+            if (shard == null) shard = Math.floorMod(fqcn.hashCode(), shardTotal) + 1   // unlisted/new class
+            return shard != shardIndex
         }
     }
 }

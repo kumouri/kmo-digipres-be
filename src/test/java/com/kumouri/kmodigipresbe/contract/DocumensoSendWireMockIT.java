@@ -33,9 +33,13 @@ import java.util.Set;
 import java.util.UUID;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
+import static com.github.tomakehurst.wiremock.client.WireMock.put;
+import static com.github.tomakehurst.wiremock.client.WireMock.putRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -49,12 +53,17 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code DocumensoWebhookSignedIT} share ONE Spring ApplicationContext cache key
  * (F.10 de-splinter — the #58-proven approach).
  *
- * <p>Asserts:
+ * <p>Asserts the REAL Documenso v1 multi-step send flow (corrected against the
+ * saved openapi-v1 spec): create document → PUT PDF to the presigned uploadUrl →
+ * add SIGNER recipient → add SIGNATURE field → send. Specifically:
  * <ul>
- *   <li>POST /contracts/{id}/send + Idempotency-Key → SENT, documensoDocumentId set,
- *       renderedPdfStorageRef set; exactly one WireMock send POST</li>
- *   <li>No apiToken → 3720 / 412</li>
- *   <li>Re-send when already SENT → idempotent (no second WireMock POST)</li>
+ *   <li>POST /contracts/{id}/send + Idempotency-Key → SENT,
+ *       {@code documensoDocumentId} = the integer document id's string form,
+ *       {@code renderedPdfStorageRef} set; each of the 5 Documenso calls hit once;
+ *       every Documenso API call carried the RAW api token as the {@code Authorization}
+ *       header value (NOT {@code Bearer ...})</li>
+ *   <li>No apiToken → 3720 / 412, zero Documenso traffic</li>
+ *   <li>Re-send when already SENT → idempotent (no second create POST)</li>
  * </ul>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -65,6 +74,12 @@ import static org.assertj.core.api.Assertions.assertThat;
         "kmosf.recurring-invoice.spawn-job.enabled=false"
 })
 class DocumensoSendWireMockIT {
+
+    // Raw token (api_-shaped sandbox fake). Documenso v1 uses it as the
+    // Authorization header VALUE itself — NOT "Bearer <token>".
+    private static final String RAW_API_TOKEN = "api_test_phaseF_fake_token";
+    // The integer Documenso document id the create stub returns.
+    private static final long DOC_ID = 101L;
 
     static WireMockServer wireMock;
 
@@ -121,13 +136,61 @@ class DocumensoSendWireMockIT {
         Map<String, String> secrets = new HashMap<>();
         if (withApiToken) {
             // Sandbox-shaped fake token — NOT a live credential (§7).
-            secrets.put("apiToken", "dt_test_phaseF_fake_token");
+            secrets.put("apiToken", RAW_API_TOKEN);
         }
         connections.save(IntegrationConnection.builder()
                 .tenantId(tenantId)
                 .provider("documenso")
                 .secrets(secrets)
                 .build()).block();
+    }
+
+    /**
+     * Stubs the full real v1 multi-step send flow against WireMock:
+     * <ol>
+     *   <li>{@code POST /api/v1/documents} → {@code {documentId, uploadUrl, recipients:[]}};
+     *       the {@code uploadUrl} points back at this WireMock so the PUT (step 2)
+     *       is observable.</li>
+     *   <li>{@code PUT /upload/...} → 200 (the presigned upload).</li>
+     *   <li>{@code POST /api/v1/documents/{id}/recipients} → {@code {id: <recipientId>}}.</li>
+     *   <li>{@code POST /api/v1/documents/{id}/fields} → {@code {fields:[...], documentId}}.</li>
+     *   <li>{@code POST /api/v1/documents/{id}/send} → {@code {message, id, ...}}.</li>
+     * </ol>
+     */
+    private void stubSendFlow() {
+        String uploadPath = "/upload/doc-" + DOC_ID;
+        // 1. create
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/documents"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"documentId\":" + DOC_ID + ","
+                                + "\"uploadUrl\":\"" + wireMock.baseUrl() + uploadPath + "\","
+                                + "\"recipients\":[]}")));
+        // 2. presigned upload PUT
+        wireMock.stubFor(put(urlPathEqualTo(uploadPath))
+                .willReturn(aResponse().withStatus(200)));
+        // 3. add recipient → recipient id is at field "id"
+        wireMock.stubFor(post(urlPathMatching("/api/v1/documents/" + DOC_ID + "/recipients"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"id\":555,\"email\":\"signer@nmm.test\",\"name\":\"Rob\","
+                                + "\"role\":\"SIGNER\",\"token\":\"tok\",\"signedAt\":null,"
+                                + "\"readStatus\":\"NOT_OPENED\",\"signingStatus\":\"NOT_SIGNED\","
+                                + "\"sendStatus\":\"NOT_SENT\",\"signingUrl\":\"http://x\"}")));
+        // 4. add signature field
+        wireMock.stubFor(post(urlPathMatching("/api/v1/documents/" + DOC_ID + "/fields"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"fields\":[{\"id\":777}],\"documentId\":" + DOC_ID + "}")));
+        // 5. send
+        wireMock.stubFor(post(urlPathMatching("/api/v1/documents/" + DOC_ID + "/send"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"message\":\"ok\",\"id\":" + DOC_ID + ",\"userId\":1,"
+                                + "\"title\":\"t\",\"status\":\"PENDING\","
+                                + "\"createdAt\":\"2026-01-01T00:00:00.000Z\","
+                                + "\"updatedAt\":\"2026-01-01T00:00:00.000Z\","
+                                + "\"completedAt\":null,\"recipients\":[]}")));
     }
 
     private UUID seedDraftContract() {
@@ -149,15 +212,11 @@ class DocumensoSendWireMockIT {
     // -------------------------------------------------------------------------
 
     @Test
-    void send_successPath_sentStatus_docIdSet_oneWireMockCall() {
+    void send_successPath_sentStatus_docIdSet_multiStepFlow_rawTokenAuth() {
         seedDocumensoConn(true);
         UUID contractId = seedDraftContract();
 
-        wireMock.stubFor(post(urlPathEqualTo("/api/v1/documents"))
-                .willReturn(aResponse()
-                        .withStatus(200)
-                        .withHeader("Content-Type", "application/json")
-                        .withBody("{\"documentId\":\"doc_test_1\",\"status\":\"PENDING\"}")));
+        stubSendFlow();
 
         web.post().uri("/contracts/" + contractId + "/send")
                 .header("Authorization", adminToken)
@@ -166,13 +225,28 @@ class DocumensoSendWireMockIT {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.status").isEqualTo("SENT")
-                .jsonPath("$.documensoDocumentId").isEqualTo("doc_test_1")
+                // documensoDocumentId is the integer document id rendered as a string.
+                .jsonPath("$.documensoDocumentId").isEqualTo(Long.toString(DOC_ID))
                 .jsonPath("$.renderedPdfStorageRef").isNotEmpty();
 
-        // Exactly one WireMock send POST — no request targeted a live Documenso host
-        // (the stub being hit at all proves the WireMock base-URL was used).
+        // The full multi-step flow ran exactly once each — and none targeted a live
+        // Documenso host (the stubs being hit proves the WireMock base-URL was used).
         wireMock.verify(1, postRequestedFor(urlPathEqualTo("/api/v1/documents")));
-        assertThat(wireMock.getAllServeEvents()).hasSize(1);
+        wireMock.verify(1, putRequestedFor(urlPathEqualTo("/upload/doc-" + DOC_ID)));
+        wireMock.verify(1, postRequestedFor(urlPathMatching("/api/v1/documents/" + DOC_ID + "/recipients")));
+        wireMock.verify(1, postRequestedFor(urlPathMatching("/api/v1/documents/" + DOC_ID + "/fields")));
+        wireMock.verify(1, postRequestedFor(urlPathMatching("/api/v1/documents/" + DOC_ID + "/send")));
+
+        // Auth: the RAW token is the Authorization header value (NOT "Bearer ...").
+        // The presigned PUT is pre-authorized and intentionally carries no auth header.
+        wireMock.verify(postRequestedFor(urlPathEqualTo("/api/v1/documents"))
+                .withHeader("Authorization", equalTo(RAW_API_TOKEN)));
+        wireMock.verify(postRequestedFor(urlPathMatching("/api/v1/documents/" + DOC_ID + "/recipients"))
+                .withHeader("Authorization", equalTo(RAW_API_TOKEN)));
+        wireMock.verify(postRequestedFor(urlPathMatching("/api/v1/documents/" + DOC_ID + "/fields"))
+                .withHeader("Authorization", equalTo(RAW_API_TOKEN)));
+        wireMock.verify(postRequestedFor(urlPathMatching("/api/v1/documents/" + DOC_ID + "/send"))
+                .withHeader("Authorization", equalTo(RAW_API_TOKEN)));
     }
 
     // -------------------------------------------------------------------------
@@ -204,17 +278,15 @@ class DocumensoSendWireMockIT {
         seedDocumensoConn(true);
         UUID contractId = seedDraftContract();
 
-        wireMock.stubFor(post(urlPathEqualTo("/api/v1/documents"))
-                .willReturn(aResponse()
-                        .withStatus(200)
-                        .withHeader("Content-Type", "application/json")
-                        .withBody("{\"documentId\":\"doc_test_idempotent\"}")));
+        stubSendFlow();
 
-        // First send
+        // First send — runs the full flow
         web.post().uri("/contracts/" + contractId + "/send")
                 .header("Authorization", adminToken)
                 .header("Idempotency-Key", UUID.randomUUID().toString())
-                .exchange().expectStatus().isOk();
+                .exchange().expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.documensoDocumentId").isEqualTo(Long.toString(DOC_ID));
 
         // Reset WireMock counters
         wireMock.resetRequests();
@@ -229,9 +301,10 @@ class DocumensoSendWireMockIT {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.status").isEqualTo("SENT")
-                .jsonPath("$.documensoDocumentId").isEqualTo("doc_test_idempotent");
+                .jsonPath("$.documensoDocumentId").isEqualTo(Long.toString(DOC_ID));
 
-        // THE KEY ASSERTION: no second WireMock POST (explicit-boolean idempotency)
+        // THE KEY ASSERTION: no second send flow at all — not even a create POST
+        // (explicit-boolean documensoDocumentId idempotency).
         assertThat(wireMock.getAllServeEvents()).isEmpty();
         wireMock.verify(0, postRequestedFor(urlPathEqualTo("/api/v1/documents")));
     }

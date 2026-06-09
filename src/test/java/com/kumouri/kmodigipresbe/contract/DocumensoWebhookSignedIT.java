@@ -35,11 +35,7 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.Disposable;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
-import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -48,6 +44,7 @@ import java.util.concurrent.TimeUnit;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -55,12 +52,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * F.7 — DocumensoWebhookSignedIT: the AC-F1/AC-F2/AC-F3 headline test.
  *
- * <p>Mirrors {@code StripeWebhookIdempotencyIT} exactly (the mandated shape):
+ * <p>Mirrors {@code StripeWebhookIdempotencyIT} (the mandated shape):
  * {@code @SpringBootTest(RANDOM_PORT)} + {@code @AutoConfigureWebTestClient} +
  * {@code @Import(TestcontainersConfiguration.class, ContractItStorageTestConfig.class)} +
- * {@code @TestPropertySource} job disables; local HMAC signing helper;
+ * {@code @TestPropertySource} job disables;
  * {@code mongo.remove/findAll/findById} bypass tenant scope;
  * {@code eventPublisher.stream().subscribe(observed)} + {@code Awaitility}.
+ *
+ * <p><b>Corrected against the real Documenso product:</b> the webhook is
+ * authenticated by the plain {@code X-Documenso-Secret} header (the verbatim
+ * webhook secret, constant-time-compared) — NOT an HMAC over the body. The event
+ * body uses {@code "event":"DOCUMENT_COMPLETED"} with the document id at
+ * {@code "payload":{"id":<integer>}}. The {@code GET /documents/{id}/download}
+ * stub returns JSON {@code {downloadUrl}} (a presigned URL — per the spec), and a
+ * second stub serves the PDF bytes at that URL.
  *
  * <p>{@link com.kumouri.kmodigipresbe.service.storage.FileStorageService} is provided
  * by {@link ContractItStorageTestConfig} — an in-memory stub declared as a real
@@ -86,10 +91,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code CONTRACT_SIGNED} observed. Re-deliver the same event → 200 no-op: still one
  * ledger row, still one Project, Deal still WON, {@code signedAt} unchanged.
  *
- * <h2>AC-F3 (HMAC failure → 401 / errorCode 3710, zero side effects)</h2>
- * Invalid {@code X-Documenso-Signature} → 401 + {@code errorCode == 3710} + zero ledger
- * rows + {@code signedAt == null} + zero Projects. Missing signature → same. Unknown-tenant
- * path → 3711.
+ * <h2>AC-F3 (secret mismatch → 401 / errorCode 3710, zero side effects)</h2>
+ * Wrong {@code X-Documenso-Secret} → 401 + {@code errorCode == 3710} + zero ledger
+ * rows + {@code signedAt == null} + zero Projects. Missing secret → same.
+ * Unknown-tenant path → 3711.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient
@@ -100,10 +105,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 })
 class DocumensoWebhookSignedIT {
 
-    private static final String TEST_SIGNING_SECRET = "whsec_test_phaseF_documenso_supersecret";
-    private static final String DOCUMENSO_DOCUMENT_ID = "doc_test_1";
+    // The verbatim Documenso webhook secret (sent in X-Documenso-Secret).
+    private static final String TEST_WEBHOOK_SECRET = "whsec_test_phaseF_documenso_supersecret";
+    // The Documenso document id is an INTEGER end-to-end. The Contract stores its
+    // canonical string form; the webhook payload.id carries the integer.
+    private static final long DOC_ID_INT = 101L;
+    private static final String DOCUMENSO_DOCUMENT_ID = Long.toString(DOC_ID_INT);
+    // Path the download JSON envelope points its presigned downloadUrl at.
+    private static final String DOWNLOAD_BYTES_PATH = "/signed-bytes/doc-" + DOC_ID_INT;
 
-    // WireMock stubs DocumensoClient.downloadSignedPdf / downloadSignedPdfFromUrl.
+    // WireMock stubs the two-hop signed-PDF download (JSON envelope + bytes).
     static WireMockServer wireMock;
 
     @BeforeAll
@@ -157,8 +168,8 @@ class DocumensoWebhookSignedIT {
                 .tenantId(tenantId)
                 .provider("documenso")
                 .secrets(new HashMap<>(Map.of(
-                        "webhookSigningSecret", TEST_SIGNING_SECRET,
-                        "apiToken", "dt_test_phaseF_fake_token")))
+                        "webhookSigningSecret", TEST_WEBHOOK_SECRET,
+                        "apiToken", "api_test_phaseF_fake_token")))
                 .build()).block();
 
         // Seed a Deal in a non-WON stage (PROPOSAL)
@@ -179,8 +190,17 @@ class DocumensoWebhookSignedIT {
                 .promotedDealToWon(false)
                 .build()).block();
 
-        // WireMock: stub the DocumensoClient.downloadSignedPdf GET endpoint to return fake PDF bytes
+        // WireMock: two-hop signed-PDF download (corrected against the spec).
+        // Hop 1: GET /api/v1/documents/{id}/download returns JSON {downloadUrl}
+        // (a presigned URL), NOT raw bytes.
         wireMock.stubFor(get(urlPathMatching("/api/v1/documents/.*/download"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"downloadUrl\":\"" + wireMock.baseUrl()
+                                + DOWNLOAD_BYTES_PATH + "\"}")));
+        // Hop 2: GET that presigned URL returns the fake PDF bytes.
+        wireMock.stubFor(get(urlPathEqualTo(DOWNLOAD_BYTES_PATH))
                 .willReturn(aResponse()
                         .withStatus(200)
                         .withHeader("Content-Type", "application/pdf")
@@ -196,40 +216,31 @@ class DocumensoWebhookSignedIT {
     }
 
     // -------------------------------------------------------------------------
-    // Local HMAC signing helper — mirrors DocumensoSignatureVerifier exactly.
-    // HMAC-SHA256 over the raw body, hex-encoded. The ONLY place the digest scheme
-    // is implemented in tests; correcting against a real Documenso deployment
-    // means changing this method and DocumensoSignatureVerifier.computeHmacHex.
+    // Real Documenso webhook body: event type DOCUMENT_COMPLETED, document id at
+    // payload.id (an INTEGER). No HMAC — the webhook is authenticated by the plain
+    // X-Documenso-Secret header (constant-time-compared to the stored secret).
     // -------------------------------------------------------------------------
 
-    private String sign(String body) {
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(
-                    TEST_SIGNING_SECRET.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            return HexFormat.of().formatHex(
-                    mac.doFinal(body.getBytes(StandardCharsets.UTF_8)));
-        } catch (Exception ex) {
-            throw new RuntimeException("HMAC computation failed", ex);
-        }
-    }
-
-    private String signedWebhookBody(String eventId) {
+    private String completedWebhookBody(String eventId) {
         return "{\"id\":\"" + eventId + "\","
-                + "\"event\":\"document.signed\","
+                + "\"event\":\"DOCUMENT_COMPLETED\","
                 + "\"payload\":{"
-                + "\"documentId\":\"" + DOCUMENSO_DOCUMENT_ID + "\""
+                + "\"id\":" + DOC_ID_INT   // INTEGER, no quotes
                 + "}}";
     }
 
-    private void postWebhook(String body, String signature, int expectedStatus) {
+    /**
+     * POSTs the webhook with the given {@code X-Documenso-Secret} header value (null
+     * = omit the header entirely).
+     */
+    private void postWebhook(String body, String secret, int expectedStatus) {
         WebTestClient.RequestHeadersSpec<?> req = web.post()
                 .uri("/public/integrations/documenso/" + tenantId + "/webhook")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(body);
-        if (signature != null) {
+        if (secret != null) {
             req = ((WebTestClient.RequestBodySpec) req)
-                    .header("X-Documenso-Signature", signature);
+                    .header("X-Documenso-Secret", secret);
         }
         req.exchange().expectStatus().isEqualTo(expectedStatus);
     }
@@ -241,11 +252,10 @@ class DocumensoWebhookSignedIT {
     @Test
     void signedWebhook_acF1_signedAtStorageRef_acF2_dealWon_exactlyOneProject() {
         String eventId = "evt_phaseF_signed_" + UUID.randomUUID();
-        String body = signedWebhookBody(eventId);
-        String sig = sign(body);
+        String body = completedWebhookBody(eventId);
 
-        // POST valid signed webhook → 200
-        postWebhook(body, sig, 200);
+        // POST valid DOCUMENT_COMPLETED webhook with the correct secret → 200
+        postWebhook(body, TEST_WEBHOOK_SECRET, 200);
 
         // AC-F1: Awaitility — Contract.signedAt non-null, signedPdfStorageRef non-null, SIGNED
         Awaitility.await().atMost(10, TimeUnit.SECONDS).untilAsserted(() -> {
@@ -305,11 +315,10 @@ class DocumensoWebhookSignedIT {
     @Test
     void redeliverSameEventId_exactlyOnce_noDoubleEffect() {
         String eventId = "evt_phaseF_redelivery_" + UUID.randomUUID();
-        String body = signedWebhookBody(eventId);
-        String sig = sign(body);
+        String body = completedWebhookBody(eventId);
 
         // First delivery — sets signedAt, creates Project
-        postWebhook(body, sig, 200);
+        postWebhook(body, TEST_WEBHOOK_SECRET, 200);
 
         Awaitility.await().atMost(10, TimeUnit.SECONDS).untilAsserted(() -> {
             Contract c = mongo.findById(contractId, Contract.class).block();
@@ -321,7 +330,7 @@ class DocumensoWebhookSignedIT {
                 .block().getSignedAt();
 
         // Re-deliver the SAME event id → 200 no-op (explicit-boolean idempotency)
-        postWebhook(body, sign(body), 200);
+        postWebhook(body, TEST_WEBHOOK_SECRET, 200);
 
         // Allow brief processing window
         try { Thread.sleep(500); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
@@ -351,19 +360,19 @@ class DocumensoWebhookSignedIT {
     }
 
     // -------------------------------------------------------------------------
-    // AC-F3: invalid HMAC signature → 401 / errorCode 3710, zero side effects
+    // AC-F3: wrong X-Documenso-Secret → 401 / errorCode 3710, zero side effects
     // -------------------------------------------------------------------------
 
     @Test
-    void invalidSignature_401_3710_zeroSideEffects() {
-        String body = signedWebhookBody("evt_phaseF_badsig_" + UUID.randomUUID());
+    void wrongSecret_401_3710_zeroSideEffects() {
+        String body = completedWebhookBody("evt_phaseF_badsecret_" + UUID.randomUUID());
 
-        postWebhook(body, "deadbeef", 401);
+        postWebhook(body, "the_wrong_secret", 401);
 
         // Verify via the problem+json response (expectStatus already verified 401 above)
         web.post()
                 .uri("/public/integrations/documenso/" + tenantId + "/webhook")
-                .header("X-Documenso-Signature", "deadbeef_bad")
+                .header("X-Documenso-Secret", "the_wrong_secret")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(body)
                 .exchange()
@@ -372,21 +381,21 @@ class DocumensoWebhookSignedIT {
 
         // AC-F3: zero side effects
         assertThat(mongo.findAll(DocumensoWebhookEvent.class).collectList().block())
-                .as("AC-F3: invalid signature must not produce a ledger row")
+                .as("AC-F3: wrong secret must not produce a ledger row")
                 .isEmpty();
         assertThat(mongo.findById(contractId, Contract.class).block().getSignedAt())
-                .as("AC-F3: invalid signature must not set signedAt")
+                .as("AC-F3: wrong secret must not set signedAt")
                 .isNull();
         assertThat(mongo.findAll(Project.class).collectList().block())
-                .as("AC-F3: invalid signature must not spawn a Project")
+                .as("AC-F3: wrong secret must not spawn a Project")
                 .isEmpty();
     }
 
     @Test
-    void missingSignature_401_3710_zeroSideEffects() {
-        String body = signedWebhookBody("evt_phaseF_nosig_" + UUID.randomUUID());
+    void missingSecret_401_3710_zeroSideEffects() {
+        String body = completedWebhookBody("evt_phaseF_nosecret_" + UUID.randomUUID());
 
-        // No X-Documenso-Signature header at all
+        // No X-Documenso-Secret header at all
         web.post()
                 .uri("/public/integrations/documenso/" + tenantId + "/webhook")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -406,11 +415,11 @@ class DocumensoWebhookSignedIT {
 
     @Test
     void unknownTenant_invalidUuid_3711() {
-        String body = signedWebhookBody("evt_phaseF_unknowntenant");
+        String body = completedWebhookBody("evt_phaseF_unknowntenant");
 
         web.post()
                 .uri("/public/integrations/documenso/not-a-uuid/webhook")
-                .header("X-Documenso-Signature", "irrelevant")
+                .header("X-Documenso-Secret", "irrelevant")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(body)
                 .exchange()

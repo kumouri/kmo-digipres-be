@@ -131,7 +131,7 @@ public class DocumensoWebhookService {
      * passes it here). The webhook payload's claimed tenant, if any, is NEVER
      * trusted — only the path-derived {@code IntegrationConnection} is authoritative.
      */
-    public Mono<Void> handle(UUID tenantId, String signatureHeader, String rawBody) {
+    public Mono<Void> handle(UUID tenantId, String secretHeader, String rawBody) {
         return connections.findByTenantIdAndProvider(tenantId, PROVIDER)
                 .switchIfEmpty(Mono.error(() -> new DigiPresBeException(
                         "Documenso is not connected for this tenant", 3712, 404)))
@@ -144,11 +144,14 @@ public class DocumensoWebhookService {
                                 "Tenant's Documenso webhookSigningSecret is not configured",
                                 3713, 412));
                     }
-                    // HMAC verify — the ONLY place the signature is checked (F-D7).
-                    // Failure → stable errorCode 3710, AC-F3.
-                    if (!DocumensoSignatureVerifier.verify(signatureHeader, rawBody, secret)) {
+                    // Webhook-secret verify — the ONLY place the secret is checked
+                    // (F-D7). Real Documenso sends the secret verbatim in the
+                    // X-Documenso-Secret header; the verifier does a constant-time
+                    // equality vs the stored webhookSigningSecret. Failure → stable
+                    // errorCode 3710, AC-F3.
+                    if (!DocumensoSignatureVerifier.verify(secretHeader, rawBody, secret)) {
                         return Mono.error(new DigiPresBeException(
-                                "Documenso webhook signature invalid", 3710, 401));
+                                "Documenso webhook secret invalid", 3710, 401));
                     }
                     return process(tenantId, rawBody);
                 });

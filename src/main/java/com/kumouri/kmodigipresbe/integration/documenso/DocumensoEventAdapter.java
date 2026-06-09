@@ -6,39 +6,43 @@ import com.fasterxml.jackson.databind.JsonNode;
  * Pure/stateless adapter that maps a raw Documenso webhook payload ({@link JsonNode})
  * to an internal {@link DocumensoEvent} (Phase F — F-D7).
  *
- * <h2>ASSUMPTION (F-D7 — documented known unknown)</h2>
- * The exact Documenso webhook payload format is a <strong>known unknown</strong>
- * deliberately not specified in the ultraplan. This class is the
- * <strong>single place where every payload-shape assumption lives</strong>.
- * Correcting against a real Documenso deployment requires changing only this class
- * (and the WireMock stub in the IT — the single coded-to contract).
+ * <h2>Real Documenso payload shape (corrected against the live product)</h2>
+ * This class is the <strong>single place where every payload-shape assumption
+ * lives</strong>. Correcting against a real Documenso deployment requires changing
+ * only this class (and the WireMock stub in the IT — the single coded-to contract).
  *
- * <p>Assumed wire format:
+ * <p>Real Documenso wire format:
  * <pre>
  * {
- *   "id"      | "eventId"  : "&lt;event id string&gt;",
- *   "event"   | "type"     : "document.completed" | "document.signed" | &lt;other&gt;,
+ *   "id" | "eventId"   : "&lt;event id&gt;",
+ *   "event" | "type"   : "DOCUMENT_COMPLETED" | &lt;other uppercase enum&gt;,
  *   "payload" : {
- *     "documentId"  : "&lt;documenso document id&gt;",
- *     "downloadUrl" : "&lt;signed PDF URL&gt;"   // optional
+ *     "id"          : &lt;documenso document id — INTEGER&gt;,
+ *     "downloadUrl" : "&lt;signed PDF URL&gt;"   // optional, rarely present
  *   }
  * }
  * </pre>
- * Field-name tolerance:
+ * Field tolerance (real first, legacy placeholder forms still accepted):
  * <ul>
- *   <li>Event id: {@code id} preferred; falls back to {@code eventId}</li>
- *   <li>Event type: {@code event} preferred; falls back to {@code type}</li>
- *   <li>Signed type values: both {@code document.completed} and
- *       {@code document.signed} map to {@link Type#DOCUMENT_SIGNED}; all other
- *       values map to {@link Type#OTHER} (ledgered + 200 no-op)</li>
+ *   <li>Event id: {@code id} preferred; falls back to {@code eventId}.</li>
+ *   <li>Event type: {@code event} preferred; falls back to {@code type}. The real
+ *       completed value is the uppercase enum {@code DOCUMENT_COMPLETED}; the old
+ *       lowercase dotted {@code document.completed}/{@code document.signed} are still
+ *       accepted. All map to {@link Type#DOCUMENT_SIGNED}; everything else →
+ *       {@link Type#OTHER} (ledgered + 200 no-op).</li>
+ *   <li>Document id: the real location is {@code payload.id} (an <strong>integer</strong>);
+ *       the old {@code payload.documentId} is still accepted as a fallback. The id is
+ *       carried as its canonical string form ({@code JsonNode.asText} on the integer
+ *       node) — the same string stored in {@code Contract.documensoDocumentId} at
+ *       send-time, so create/webhook/DB all agree on the integer's string form.</li>
  *   <li>{@code downloadUrl} is optional — if absent,
- *       {@link DocumensoClient#downloadSignedPdf} is used as the fallback</li>
+ *       {@link DocumensoClient#downloadSignedPdf} is used as the fallback.</li>
  * </ul>
  *
  * <p>No other class in this codebase may parse or assume anything about the
  * Documenso webhook payload shape. The {@link DocumensoSignatureVerifier} owns the
- * digest scheme; this class owns the payload shape; the controller's
- * {@code @RequestHeader} annotation owns the header name.
+ * webhook-secret verification scheme; this class owns the payload shape; the
+ * controller's {@code @RequestHeader} annotation owns the header name.
  */
 public final class DocumensoEventAdapter {
 
@@ -65,9 +69,17 @@ public final class DocumensoEventAdapter {
         }
         Type type = mapType(rawType);
 
-        // Payload sub-object
+        // Payload sub-object. Real Documenso puts the document id at payload.id
+        // (an INTEGER); the old placeholder used payload.documentId. Read id first,
+        // fall back to documentId. JsonNode.asText renders the integer node as its
+        // canonical string form (e.g. 42 -> "42") — the same string stored in
+        // Contract.documensoDocumentId at send-time, so the webhook correlation key
+        // matches.
         JsonNode payload = root.path("payload");
-        String documensoDocumentId = payload.path("documentId").asText(null);
+        String documensoDocumentId = nonBlankText(payload.path("id"));
+        if (documensoDocumentId == null) {
+            documensoDocumentId = nonBlankText(payload.path("documentId"));
+        }
         String downloadUrl = payload.path("downloadUrl").asText(null);
         if (downloadUrl != null && downloadUrl.isBlank()) {
             downloadUrl = null;
@@ -76,10 +88,23 @@ public final class DocumensoEventAdapter {
         return new DocumensoEvent(eventId, type, documensoDocumentId, downloadUrl);
     }
 
+    /**
+     * Returns the node's text value (numeric nodes render as their canonical string
+     * form), or {@code null} if the node is missing/null/blank.
+     */
+    private static String nonBlankText(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) return null;
+        String t = node.asText(null);
+        return (t == null || t.isBlank()) ? null : t;
+    }
+
     private static Type mapType(String raw) {
         if (raw == null) return Type.OTHER;
-        return switch (raw.trim().toLowerCase()) {
-            case "document.completed", "document.signed" -> Type.DOCUMENT_SIGNED;
+        return switch (raw.trim().toUpperCase()) {
+            // Real Documenso completed-event enum:
+            case "DOCUMENT_COMPLETED",
+                 // Legacy placeholder dotted forms (still accepted):
+                 "DOCUMENT.COMPLETED", "DOCUMENT.SIGNED" -> Type.DOCUMENT_SIGNED;
             default -> Type.OTHER;
         };
     }
