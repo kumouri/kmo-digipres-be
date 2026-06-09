@@ -3,6 +3,8 @@ package com.kumouri.kmodigipresbe.module.nurture;
 import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
 import com.kumouri.kmodigipresbe.extension.ModuleAutoConfigurationSupport;
 import com.kumouri.kmodigipresbe.extension.ModuleDefinition;
+import com.kumouri.kmodigipresbe.integration.IntegrationConnectionRepository;
+import com.kumouri.kmodigipresbe.integration.twilio.TwilioSmsService;
 import com.kumouri.kmodigipresbe.repository.ActivityRepository;
 import com.kumouri.kmodigipresbe.repository.ContactRepository;
 import com.kumouri.kmodigipresbe.repository.DealRepository;
@@ -10,8 +12,10 @@ import com.kumouri.kmodigipresbe.repository.nurture.NurtureCampaignRepository;
 import com.kumouri.kmodigipresbe.repository.nurture.NurtureEnrollmentRepository;
 import com.kumouri.kmodigipresbe.service.ai.AiAssistService;
 import com.kumouri.kmodigipresbe.service.nurture.NurtureMessageComposer;
+import com.kumouri.kmodigipresbe.service.nurture.NurtureReplyService;
 import com.kumouri.kmodigipresbe.service.nurture.NurtureSegmentationService;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -65,5 +69,19 @@ public class NurtureAutoConfiguration {
     @Bean
     public NurtureMessageComposer nurtureMessageComposer(AiAssistService aiAssistService) {
         return new NurtureMessageComposer(aiAssistService);
+    }
+
+    @Bean
+    public NurtureReplyService nurtureReplyService(
+            NurtureEnrollmentRepository enrollments,
+            ContactRepository contacts,
+            IntegrationConnectionRepository connections,
+            TwilioSmsService twilioSmsService,
+            DomainEventPublisher events,
+            ObjectProvider<Clock> clockProvider,
+            @Value("${kmosf.modules.nurture.booking-message:"
+                    + "Great — let's find a time. Book here: {link}}") String bookingMessageTemplate) {
+        return new NurtureReplyService(enrollments, contacts, connections, twilioSmsService,
+                events, clockProvider, bookingMessageTemplate);
     }
 }
