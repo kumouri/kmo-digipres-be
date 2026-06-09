@@ -5,15 +5,19 @@ name: full-ci
 #                         the only place docs/api/openapi.json is refreshed.
 #   * workflow_dispatch — run the full suite on demand (e.g. before merging a risky branch).
 #   * workflow_call     — reused by money-ci.yml for PRs touching money-critical paths.
-# 4 shards (restored 2026-06-09): the suite grew to ~200 *IT/*Test classes, each
+# Sharded across 6 jobs (2026-06-09). The suite grew to ~200 *IT/*Test classes, each
 # spinning up cached @SpringBootTest contexts in a SINGLE-fork JVM (maxParallelForks=1
-# is required so the static singleton Testcontainers are shared — see build.gradle).
-# At 2 shards (~100 classes/JVM) the runner's memory pressure caused the Mongo
-# Testcontainer to be reaped a few minutes in, after which every remaining test hit a
-# 30s MongoTimeout and the job was force-cancelled at timeout-minutes. 4 shards halves
-# per-shard context/heap pressure and matches build.gradle's documented
-# `test.shard.total=4` design. (Was briefly cut to 2 on 2026-06-03 for Actions minutes;
-# correctness wins.)
+# is REQUIRED so the static singleton Testcontainers are shared — see build.gradle).
+# When a shard packs too many distinct-context module ITs, JVM memory/GC pressure builds
+# until Testcontainers' Ryuk loses its heartbeat and reaps the Mongo container a few
+# minutes in; every remaining test then hits a 30s MongoTimeout and the job is
+# force-cancelled at timeout-minutes. Two mitigations are in play:
+#   * TESTCONTAINERS_RYUK_DISABLED (env below) — a GC pause can no longer reap Mongo
+#     mid-run; leak cleanup is unnecessary on ephemeral CI runners (the VM is destroyed).
+#   * 6 shards — cuts each JVM's context/heap peak (2 shards reaped on every run from
+#     2026-06-08; 4 shards still reaped the single heaviest shard 4 at the 30-min mark).
+# A runtime-aware rebalance (vs the current hash-by-classname, which balances count not
+# runtime) is the proper follow-up to even out shard wall-times.
 on:
   push:
     branches: [main]
@@ -24,15 +28,21 @@ concurrency:
   group: full-ci-${{ github.ref }}
   cancel-in-progress: false
 
+# Ephemeral CI runners are torn down after each job, so Testcontainers' Ryuk resource
+# reaper is redundant here — and under heavy GC it can drop its heartbeat and kill the
+# shared Mongo container mid-run. Disable it so a slow shard cannot reap its own database.
+env:
+  TESTCONTAINERS_RYUK_DISABLED: "true"
+
 jobs:
   test:
-    name: gradle test (shard ${{ matrix.shard }}/4)
+    name: gradle test (shard ${{ matrix.shard }}/6)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v4
 
@@ -46,11 +56,12 @@ jobs:
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v4
 
-      - name: ./gradlew test (shard ${{ matrix.shard }}/4)
-        run: ./gradlew test -Dtest.shard.index=${{ matrix.shard }} -Dtest.shard.total=4 --no-daemon --stacktrace
+      - name: ./gradlew test (shard ${{ matrix.shard }}/6)
+        run: ./gradlew test -Dtest.shard.index=${{ matrix.shard }} -Dtest.shard.total=6 --no-daemon --stacktrace
         # Each shard runs in a fresh runner with its own Docker engine => its own
         # singleton Testcontainers Mongo/Kafka. maxParallelForks=1 is preserved within
-        # each shard; isolation is across jobs, not JVM forks. Ryuk reaps any leak.
+        # each shard; isolation is across jobs, not JVM forks. Ryuk is disabled (env
+        # above); the ephemeral runner teardown reaps containers instead.
 
       - name: Upload test reports (shard ${{ matrix.shard }})
         # always() so a *cancelled* job still uploads reports (cancellation skips

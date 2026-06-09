@@ -154,8 +154,8 @@ tasks.named('test') {
     maxHeapSize = '1600m'
 
     // F.12 — deterministic class-shard filter for CI matrix runs.
-    // Each CI job passes -Dtest.shard.total=4 -Dtest.shard.index=<1..4> so that each
-    // runner runs only its 1/4 of the test classes against its own isolated Docker /
+    // Each CI job passes -Dtest.shard.total=6 -Dtest.shard.index=<1..6> so that each
+    // runner runs only its 1/6 of the test classes against its own isolated Docker /
     // Testcontainers Mongo.  Local runs (no system properties set) are unaffected:
     // shardTotal defaults to 1 => the exclude closure is never evaluated.
     // maxParallelForks is deliberately NOT set here — the single-fork invariant is
