@@ -20,7 +20,7 @@ scheduled runner has its OWN gate `kmosf.modules.nurture-runner` (`matchIfMissin
 | N2 | `NurtureSegmentationService` + `NurtureAutoConfiguration` (ModuleDefinition) + `AutoConfiguration.imports` entry + `DomainEventType` Nurture block | DONE | `NurtureSegmentationIT` (3/3 green) | (N2 commit) |
 | N3 | `NurtureMessageComposer` + `NurtureRunner` (default-OFF) | DONE | `NurtureRunnerIT` (6/6 green) | (N3 commit) |
 | N4 | `NurtureReplyService` (reply→exit→book) | DONE | `NurtureReplyBookIT` (5/5 green) | (N4 commit) |
-| N5 | `NurtureAnalyticsService` | TODO | `NurtureAnalyticsIT` | |
+| N5 | `NurtureAnalyticsService` | DONE | `NurtureAnalyticsIT` (1/1 green) | (N5 commit) |
 | N6 | `NurtureCampaignController` + DTOs + `GlobalErrorHandler` 4300-4319 Javadoc + openapi regen | TODO | `NurtureCampaignControllerIT` + `OpenApiEndpointIT` | |
 
 ## Invariants (must hold at every sub-phase)

@@ -10,7 +10,9 @@ import com.kumouri.kmodigipresbe.repository.ContactRepository;
 import com.kumouri.kmodigipresbe.repository.DealRepository;
 import com.kumouri.kmodigipresbe.repository.nurture.NurtureCampaignRepository;
 import com.kumouri.kmodigipresbe.repository.nurture.NurtureEnrollmentRepository;
+import com.kumouri.kmodigipresbe.repository.nurture.NurtureSendLogRepository;
 import com.kumouri.kmodigipresbe.service.ai.AiAssistService;
+import com.kumouri.kmodigipresbe.service.nurture.NurtureAnalyticsService;
 import com.kumouri.kmodigipresbe.service.nurture.NurtureMessageComposer;
 import com.kumouri.kmodigipresbe.service.nurture.NurtureReplyService;
 import com.kumouri.kmodigipresbe.service.nurture.NurtureSegmentationService;
@@ -83,5 +85,13 @@ public class NurtureAutoConfiguration {
                     + "Great — let's find a time. Book here: {link}}") String bookingMessageTemplate) {
         return new NurtureReplyService(enrollments, contacts, connections, twilioSmsService,
                 events, clockProvider, bookingMessageTemplate);
+    }
+
+    @Bean
+    public NurtureAnalyticsService nurtureAnalyticsService(
+            NurtureCampaignRepository campaigns,
+            NurtureEnrollmentRepository enrollments,
+            NurtureSendLogRepository sendLogs) {
+        return new NurtureAnalyticsService(campaigns, enrollments, sendLogs);
     }
 }
