@@ -24,7 +24,7 @@ the composer at module init. The composer is the ONE E1 file with a (strictly ad
 |---|---|---|
 | T1.0 | Detail plan + this fresh ledger | DONE |
 | T1.1 | Additive E1 `NurtureCopyFilter` SPI + composer wiring; **re-ran 5 E1 nurture ITs (regression gate)** | DONE (`FairHousingCopyFilterTest` moves to T1.2 with the filter) |
-| T1.2 | `module/realestate/nurture/`: `FairHousingCopyFilter`, `RealEstateNurtureReplyHandler` (E2 `IntentHandler`), `RealEstateNurtureService`+`RealEstateNurtureController`, `RealEstateNurtureAutoConfiguration` (two-module gate + composer-wiring side-effect bean), config props, 4360-4369 Javadoc | TODO |
+| T1.2 | `module/realestate/nurture/`: `FairHousingCopyFilter`(+`Test`), `RealEstateNurtureReplyHandler` (E2 `IntentHandler`), `RealEstateNurtureService`+`RealEstateNurtureController`, `RealEstateNurtureAutoConfiguration` (two-module gate + composer-wiring side-effect bean), 4360-4369 Javadoc | DONE |
 | T1.3 | Demo seeder (`@Profile("demo-realestate")` `RealEstateNurtureDemoSeeder`, "Gateway Realty") | TODO |
 | T1.4 | T1 ITs (segmentation / fair-housing / reply-book / analytics) + run new + regression ITs locally; capture counts | TODO |
 | T1.5 | Regen+commit `docs/api/openapi.json`; update repo `CLAUDE.md` T1 entry; push + PR | TODO |
@@ -53,3 +53,13 @@ the composer at module init. The composer is the ONE E1 file with a (strictly ad
   additive). **Regression gate GREEN: all 5 E1 nurture ITs pass (21 tests, 0 failures)** —
   NurtureAnalyticsIT 1, NurtureCampaignControllerIT 6, NurtureReplyBookIT 5, NurtureRunnerIT 6,
   NurtureSegmentationIT 3. E1 byte-equivalent (null filter ⇒ identical output). `compileJava` clean.
+- T1.2 — built `module/realestate/nurture/`: `FairHousingCopyFilter` (reuses `FairHousingLint`; flagged
+  copy → per-channel vetted safe template; advisory code 4360); `RealEstateNurtureReplyHandler` (E2
+  `IntentHandler`, vertical=realestate, positive intents → `NurtureReplyService.handlePositiveReplyByPhone`,
+  4310 swallowed); `RealEstateNurtureService` + `controller/RealEstateNurtureController` (RE-scoped
+  segment-and-enroll + analytics, ADMIN + both-module `requireEnabled`);
+  `RealEstateNurtureAutoConfiguration` (gate = realestate `@ConditionalOnProperty` AND
+  `@ConditionalOnBean(NurtureMessageComposer)`; wires the filter onto the composer via the
+  `RealEstateNurtureSmsWiring` side-effect bean — the `ConciergeInboundSmsWiring` precedent). Registered
+  in `AutoConfiguration.imports`. Error band 4360-4369 `<li>` added after E4's 4350-4359 in
+  `GlobalErrorHandler`. `compileJava` clean; **`FairHousingCopyFilterTest` GREEN (7 tests, 0 failures)**.

@@ -864,6 +864,36 @@ import java.util.UUID;
  *       byte-equivalent</strong> — the engine is a parallel generic package; the chairfill
  *       {@code GapFillWaitlistIT} regression gate stays green and {@code InboundSmsService} /
  *       {@code TwilioSmsService} / {@code NoShowRiskScoringService} are empty-diff vs {@code main}.</li>
+ *   <li>{@code 4360-4369} — <em>RE "Database Goldmine" (T1)</em>: deploys the shipped E1 Nurture/Cadence
+ *       engine to real estate ({@code module/realestate/nurture}). Dormant real-estate leads are
+ *       auto-segmented A/B/C/D (the vertical-agnostic {@code NurtureSegmentationService}, thresholds on the
+ *       RE campaign — no engine hardcoding) and run through tiered SMS/email cadences with backoff (the
+ *       default-OFF {@code NurtureRunner}); a positive reply exits the enrollment and offers a showing via
+ *       the booking-link SMS path ({@code NurtureReplyService}, no live Cal.com), wired through the E2
+ *       responder seam by an additive {@code RealEstateNurtureReplyHandler} ({@code IntentHandler}); a
+ *       per-segment ROI funnel is exposed by {@code RealEstateNurtureController} (reusing
+ *       {@code NurtureAnalyticsService}). <strong>The headline correctness property is the Fair-Housing
+ *       guardrail:</strong> every outbound nurture message — AI-personalized AND template — is screened by
+ *       {@code FairHousingCopyFilter} (the additive {@code NurtureCopyFilter} SPI on the shared
+ *       {@code NurtureMessageComposer}) which reuses the shipped {@code FairHousingLint}; flagged copy is
+ *       <strong>replaced with a vetted safe template</strong> (never sent non-compliant, never dropped) and
+ *       logged with code {@code 4360} (an advisory marker — the substitution is silent+safe, not a thrown
+ *       HTTP error). {@code 4361-4369} RESERVED for RE-nurture growth. Module gate requires <strong>both</strong>
+ *       {@code kmosf.modules.realestate} AND {@code kmosf.modules.nurture}
+ *       ({@code RealEstateNurtureAutoConfiguration} composes the realestate {@code @ConditionalOnProperty}
+ *       with {@code @ConditionalOnBean(NurtureMessageComposer)} + per-tenant
+ *       {@code TenantModuleRegistry.requireEnabled} for both keys). Reused (NOT re-allocated):
+ *       {@code 4301}/{@code 4302}/{@code 4303} (nurture campaign not-found / inactive / invalid),
+ *       {@code 4310} (reply-no-active-enrollment — swallowed by the handler), {@code 1130}/{@code 1132}
+ *       (module gate), {@code 1800} (RoleGuard ADMIN). <strong>The E1 nurture cores
+ *       ({@code NurtureRunner}/{@code NurtureSegmentationService}/{@code NurtureReplyService}/
+ *       {@code NurtureAnalyticsService}, all {@code model/nurture}, {@code controller/nurture},
+ *       {@code NurtureAutoConfiguration}) AND the realestate cores ({@code FairHousingLint},
+ *       {@code ShowingBookingService}, {@code ConciergeInboundRouter}, {@code RealEstateAutoConfiguration})
+ *       stay empty-diff vs {@code main}</strong>; the lone additive E1 change is the
+ *       {@code NurtureMessageComposer} {@code NurtureCopyFilter} hook (null ⇒ byte-identical; the 5 E1
+ *       nurture ITs are the regression gate). The {@code NurtureRunner} stays default-OFF; Twilio/Email are
+ *       mocked + Anthropic is WireMock in ITs (no live send).</li>
  * </ul>
  */
 @Slf4j
