@@ -53,11 +53,16 @@ FrontDeskNurtureReplyHandler, FrontDeskNurtureDemoSeeder}` + `controller/frontde
 | T2.2 — service + reply handler + autoconfig + controller + `GlobalErrorHandler` 4370-4379 | DONE | _(this commit)_ | wires the 4 beans incl. `setCopyFilter` side-effect; both-module gate; autoconfig registered in `AutoConfiguration.imports`; compiles clean |
 | T2.3 — `FrontDeskNurtureDemoSeeder` | DONE | _(this commit)_ | `@Profile("demo-frontdesk")`; "Bright Smiles Dental" + 12 lapsed patients (logistics-only: backdated `Activity` + PHI-free `Appointment`; 2 opted-out; A-tier WON deals) + health campaign; compiles clean |
 | T2.4 — T2 ITs | DONE | _(this commit)_ | PHI-safe headline (4/4) + logistics-only segmentation (3/3, incl. no-clinical-field reflection assert) + reply-rebook (3/3) + analytics (3/3) — all green on Testcontainers; + the T2.1 unit (7/7) = 20 T2 tests, 0 failures |
-| T2.5 — `CLAUDE.md` + `openapi.json` | PENDING | | T2 entry; regenerate spec (expect no diff — default-OFF) |
-| Validation — new + regression ITs | PENDING | | E1-nurture (`nurture.*`) + a frontdesk IT + `OpenApiEndpointIT`; capture counts |
+| T2.5 — `CLAUDE.md` + `openapi.json` | DONE | _(this commit)_ | T2 entry added after T1; `verifyOpenApi` → "already matches" (NO diff — default-OFF, the T1/AR precedent) |
+| Validation — new + regression ITs | DONE | _(run locally)_ | see Validation status |
 
-## Validation status (frontier)
-- Not yet validated — implementation begins at T2.1.
+## Validation status (frontier) — ALL GREEN (local, Testcontainers Mongo, Docker 29.4.3)
+- **New T2 tests:** `FrontDeskNurturePhiSafeIT` 4/4 (the headline; incl. PHI-ish template AND PHI-ish AI-rewrite → safe fallback), `FrontDeskNurtureSegmentationIT` 3/3 (logistics-only + no-clinical-field reflection assert), `FrontDeskNurtureReplyRebookIT` 3/3, `FrontDeskNurtureAnalyticsIT` 3/3, `HipaaCopyFilterTest` 7/7 (unit) — **20 tests, 0 failures**.
+- **E1-nurture REGRESSION** (`com.kumouri.kmodigipresbe.nurture.*`): `NurtureAnalyticsIT` 1, `NurtureCampaignControllerIT` 6, `NurtureReplyBookIT` 5, `NurtureRunnerIT` 6, `NurtureSegmentationIT` 3 — **21 tests, 0 failures** (proves the `NurtureCopyFilter` SPI is null by default = byte-identical E1).
+- **frontdesk REGRESSION:** `FrontDeskNoShowScoringServiceIT` 10 (incl. the PHI-fence reflection assert), `FrontDeskReviewReplyIT` 7 (exercises `HipaaReplyLint` — the reused core) — **17 tests, 0 failures**.
+- **`OpenApiEndpointIT`** 2/2.
+- **Reactive-invariant grep:** no `switchIfEmpty(create/send/spawn)` in `module/frontdesk/nurture/*`; the only `switchIfEmpty` is the demo seeder's genuine first-run not-found create (`seedFresh`). No `.block()` in the `module/frontdesk/nurture/*` production code (only in the demo seeder's `CommandLineRunner`/ITs, off the Netty loop).
+- **ZERO E1 edits confirmed** — `git diff main --stat` touches no `service/nurture/*`, `model/nurture/*`, `controller/nurture/*`, `module/nurture/*`, or any frontdesk core; only ADDS under `module/frontdesk/nurture/` + `controller/frontdesk/FrontDeskNurtureController` + the `GlobalErrorHandler` Javadoc `<li>` + `CLAUDE.md` + the `AutoConfiguration.imports` line.
 
 ## Error codes minted
 - **4370** — PHI-free safe-fallback substitution (advisory, logged WARN; not a thrown HTTP error — mirrors T1's 4360).
