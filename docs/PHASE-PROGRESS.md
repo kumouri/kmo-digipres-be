@@ -20,12 +20,14 @@
 
 | Sub-phase | Scope | Commit | Status |
 |---|---|---|---|
-| SOW-0 | Fresh ledger + detail-plan pointer + branch + draft PR (hedge) | — | IN PROGRESS |
+| SOW-0 | Fresh ledger + detail-plan pointer + branch + draft PR (hedge) | `f0210bd` | DONE |
 | SOW-1 | `SowDraft` model + repo + `ProposalsAutoConfiguration` (gate OFF) + config props + `DomainEventType` `PROPOSAL_DRAFTED` + `GlobalErrorHandler` 4620-4639 Javadoc | `4c6a583` | **DONE** |
 | SOW-2 | `ProposalDraftService` (notes → Sonnet → priced line items + prose → DRAFT `Quote`/SOW; budget-gated; defensive) + `ProposalDraftController` (`POST /proposals/draft` + `GET /proposals/{id}`) + `ProposalDraftIT` | `101c297` | **DONE** |
 | SOW-3 | `SowPdfService` (line items + totals + prose) + `GET /proposals/{id}/pdf` + send-to-sign reuse (`ContractService.spawnFromQuote`) + `SowPdfIT` | `b5d3de3` | **DONE** |
-| SOW-4 | ITs green + `verifyOpenApi` (expected no-op — default-OFF) + ledger | — | PENDING |
-| SOW-FE | proposal editor UI (paste notes → draft → edit line items/prose → send) — separate, only AFTER BE merges | — | DEFERRED |
+| SOW-4 | **Orchestrator full-module validation** (clean `--rerun-tasks`): `ProposalDraftIT` 5 + `SowPdfIT` 3 **+ boot guard `OpenApiEndpointIT` 2**, all 0-fail/0-error. `verifyOpenApi` = **convention-correct NO-OP** (`openapi.json` untouched — default-OFF `/proposals` routes aren't in the default-context spec, the AR lesson). | `<this commit>` | **DONE** |
+| SOW-FE | proposal editor UI (paste notes → draft → edit line items/prose → download SOW PDF → send-to-sign) — separate FE worktree, chairfill/AR-FE mirror, hand-written `api/proposals.ts` | — | PENDING (building) |
+
+## BE module status: COMPLETE (SOW-0…SOW-4). Remaining = SOW-FE (proposal editor UI) + the coordinated additive-rebase merge onto a settled `main` (hold-merge until BE+FE done + green — **never merge red**). Owner directive: build through FE complete, then coordinated merge.
 
 ## Validation log (local Docker/Testcontainers; orchestrator-run, `--rerun-tasks`)
 - **SOW-3 (2026-06-09, branch base `22a736a`):** `./gradlew compileJava compileTestJava` → **BUILD SUCCESSFUL** (only pre-existing Gradle-9 deprecation warnings; no new javac warnings). `./gradlew test --tests "*ProposalDraftIT" --tests "*SowPdfIT" --rerun-tasks` → **BUILD SUCCESSFUL**: `SowPdfIT` **tests=3 failures=0 errors=0 skipped=0** (PDF render → non-empty `application/pdf`, `%PDF-` magic, >1 KB, extracted text contains a line-item value `4000` + total `9500.00` + every prose-section marker Scope/Deliverables/Assumptions/Timeline + their content; send-to-sign reuse → a SOW DRAFT Quote flipped to ACCEPTED flows through the UNCHANGED `ContractService.spawnFromQuote` to a SOW `Contract` carrying the `quoteId`, `variables` snapshot has `lineItems`, **zero** `DocumensoClient` interactions; module-off tenant → `4620`/404 on `/pdf`); `ProposalDraftIT` **tests=5 failures=0 errors=0 skipped=0** (re-verified — the additive controller endpoint did not regress SOW-2). Full suite NOT run (CI-minute discipline). **Reused-core empty-diff vs fork point `22a736a` re-confirmed** (`QuotePdfService`, `QuoteService`, `ContractService`, `ContractPdfService`, `Quote`, `LineItem`, `AnthropicAiAssistService`, `DocumensoClient` — 0 lines each, committed AND working-tree). `switchIfEmpty(` in SOW-3 code = only genuine not-found (2200 Quote ×2) + the optional-prose `Mono.defer(render(quote,null))` fallback (renders quote-only, **does not create**) — **no `switchIfEmpty(create)`**.
