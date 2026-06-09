@@ -23,11 +23,12 @@
 | SOW-0 | Fresh ledger + detail-plan pointer + branch + draft PR (hedge) | — | IN PROGRESS |
 | SOW-1 | `SowDraft` model + repo + `ProposalsAutoConfiguration` (gate OFF) + config props + `DomainEventType` `PROPOSAL_DRAFTED` + `GlobalErrorHandler` 4620-4639 Javadoc | `4c6a583` | **DONE** |
 | SOW-2 | `ProposalDraftService` (notes → Sonnet → priced line items + prose → DRAFT `Quote`/SOW; budget-gated; defensive) + `ProposalDraftController` (`POST /proposals/draft` + `GET /proposals/{id}`) + `ProposalDraftIT` | `101c297` | **DONE** |
-| SOW-3 | send-to-sign reuse (`ContractService.spawnFromQuote` from a SOW Quote) + SOW PDF (`QuotePdfService`) + thin IT | — | PENDING |
+| SOW-3 | `SowPdfService` (line items + totals + prose) + `GET /proposals/{id}/pdf` + send-to-sign reuse (`ContractService.spawnFromQuote`) + `SowPdfIT` | `153405e` | **DONE** |
 | SOW-4 | ITs green + `verifyOpenApi` (expected no-op — default-OFF) + ledger | — | PENDING |
 | SOW-FE | proposal editor UI (paste notes → draft → edit line items/prose → send) — separate, only AFTER BE merges | — | DEFERRED |
 
 ## Validation log (local Docker/Testcontainers; orchestrator-run, `--rerun-tasks`)
+- **SOW-3 (2026-06-09, branch base `22a736a`):** `./gradlew compileJava compileTestJava` → **BUILD SUCCESSFUL** (only pre-existing Gradle-9 deprecation warnings; no new javac warnings). `./gradlew test --tests "*ProposalDraftIT" --tests "*SowPdfIT" --rerun-tasks` → **BUILD SUCCESSFUL**: `SowPdfIT` **tests=3 failures=0 errors=0 skipped=0** (PDF render → non-empty `application/pdf`, `%PDF-` magic, >1 KB, extracted text contains a line-item value `4000` + total `9500.00` + every prose-section marker Scope/Deliverables/Assumptions/Timeline + their content; send-to-sign reuse → a SOW DRAFT Quote flipped to ACCEPTED flows through the UNCHANGED `ContractService.spawnFromQuote` to a SOW `Contract` carrying the `quoteId`, `variables` snapshot has `lineItems`, **zero** `DocumensoClient` interactions; module-off tenant → `4620`/404 on `/pdf`); `ProposalDraftIT` **tests=5 failures=0 errors=0 skipped=0** (re-verified — the additive controller endpoint did not regress SOW-2). Full suite NOT run (CI-minute discipline). **Reused-core empty-diff vs fork point `22a736a` re-confirmed** (`QuotePdfService`, `QuoteService`, `ContractService`, `ContractPdfService`, `Quote`, `LineItem`, `AnthropicAiAssistService`, `DocumensoClient` — 0 lines each, committed AND working-tree). `switchIfEmpty(` in SOW-3 code = only genuine not-found (2200 Quote ×2) + the optional-prose `Mono.defer(render(quote,null))` fallback (renders quote-only, **does not create**) — **no `switchIfEmpty(create)`**.
 - **SOW-1 + SOW-2 (2026-06-09, branch base `22a736a`):** `./gradlew compileJava compileTestJava` → **BUILD SUCCESSFUL** (only pre-existing deprecation/unchecked warnings). `./gradlew test --tests "*ProposalDraftIT" --rerun-tasks` → **BUILD SUCCESSFUL**, `ProposalDraftIT` **tests=5 failures=0 errors=0 skipped=0** (happy-path priced DRAFT Quote total 9500.00 + prose + `PROPOSAL_DRAFTED` + GET read-back; garbage-AI → `aiApplied=false` no-throw; budget-exhausted → graceful zero-spend; blank-notes → 4621; module-off tenant → 4620). Full suite NOT run (CI-minute discipline). **Reused-core empty-diff vs merge-base `22a736a` confirmed** (`AnthropicAiAssistService`, `AiUsageRecorder`, `Quote`, `LineItem`, `QuoteService`, `QuotePdfService`, `ContractService` — 0 lines each). `switchIfEmpty(` in new code = only genuine not-found (2200 Quote, 1131 tenant) + the verbatim AI house-key fallback (1203) — **no `switchIfEmpty(create)`**.
 
 ## Key invariants for this branch (carry-forward)
@@ -37,6 +38,34 @@
 - **Empty-diff** — `AnthropicAiAssistService`, `Quote`, `LineItem`, `QuotePdfService`, `ContractService` (verify `git diff origin/main`, 0 lines each). Only pre-existing files touched: `GlobalErrorHandler` (Javadoc), `DomainEventType` (additive block), `application.properties`, the imports file, `docs/api/openapi.json` (regen).
 
 ## Deviations / notes
+- **SOW-3 SOW PDF renderer → new `SowPdfService`, a sibling of `QuotePdfService` (NOT a modification).**
+  `QuotePdfService` uses **OpenPDF 2.0.3** (the iText fork, `com.lowagie.text.*`; `build.gradle`
+  `com.github.librepdf:openpdf:2.0.3`) and wraps its blocking iText render on
+  `Mono.fromCallable(...).subscribeOn(Schedulers.boundedElastic())`. `SowPdfService` **mirrors that idiom
+  exactly** — same library, same Helvetica font ladder (H1/H2/BODY/BODY_BOLD), the same line-items +
+  totals `PdfPTable` construction copied verbatim, the same `boundedElastic` blocking bridge, and the same
+  `DigiPresBeException(..., 2100, 500)` PDF-failure code — but as a NEW class in `module/proposals/` that
+  ALSO appends the four `SowDraft` prose sections (Scope / Deliverables / Assumptions / Timeline) under
+  the quote totals and titles the doc "STATEMENT OF WORK". `QuotePdfService` stays **empty-diff**.
+  `SowPdfService` is `@Component` (an always-present stateless renderer with no routes/side-effects — the
+  same posture as the always-present `QuotePdfService` and `SowDraftRepository`; harmless when the module
+  is off). Endpoint `GET /proposals/{id}/pdf` (module-gated + STAFF) loads the tenant-scoped Quote
+  (`findByTenantIdAndId`, miss → `2200`/404 per the `get` posture) + its optional `SowDraft`, renders, and
+  returns `application/pdf` bytes.
+- **SOW-3 send-to-sign decision → REUSED AS-IS; the SOW PDF is NOT wired as the contract document.**
+  Read the real signatures: `ContractService.spawnFromQuote(quoteId, templateId)` requires the Quote to be
+  **ACCEPTED** (→3704) + an active `ContractTemplate` (→3705), then builds a DRAFT `Contract` snapshotting
+  the quote's line items into `variables`. Critically, the contract's signable **document is rendered by
+  `ContractPdfService` from the template's jmustache `bodyTemplate` string** at `/send` time — there is NO
+  seam to inject a pre-rendered PDF (the SOW PDF) as the contract document without modifying
+  `ContractService` / `ContractPdfService` / the Documenso core, all of which MUST stay empty-diff. Per the
+  SOW-3 brief's explicit branch ("if it would require modifying those cores, DON'T — reuse as-is"), the
+  decision is **reuse-as-is**: send-to-sign is the existing `POST /contracts/quotes/{quoteId}/spawn-contract`
+  → `spawnFromQuote` → Documenso path with **zero new send code**. The **signable Contract carries the
+  priced Quote** (line items snapshotted into `variables`); the **SOW prose lives in the `SowDraft` and is
+  surfaced via the new SOW PDF** (`GET /proposals/{id}/pdf`) for review / download. The IT proves a
+  SOW-drafted DRAFT Quote, flipped to ACCEPTED, flows through the UNCHANGED `spawnFromQuote` to a SOW
+  `Contract` carrying the `quoteId`, with `DocumensoClient` `@MockitoBean`'d → **no live send**.
 - **Prose-storage decision → new `SowDraft` (not reused `Quote` fields).** `Quote` carries only two
   free-text fields (`notes`, `terms`) — insufficient for the four independently-editable SOW sections
   (scope / deliverables / assumptions / timeline) the SOW-FE editor must surface separately. Overloading

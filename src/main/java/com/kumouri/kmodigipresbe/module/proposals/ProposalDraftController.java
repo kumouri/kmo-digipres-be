@@ -11,6 +11,7 @@ import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -64,16 +65,19 @@ public class ProposalDraftController {
     private final QuoteRepository quotes;
     private final SowDraftRepository sowDrafts;
     private final TenantRepository tenants;
+    private final SowPdfService sowPdfService;
 
     public ProposalDraftController(
             ProposalDraftService draftService,
             QuoteRepository quotes,
             SowDraftRepository sowDrafts,
-            TenantRepository tenants) {
+            TenantRepository tenants,
+            SowPdfService sowPdfService) {
         this.draftService = draftService;
         this.quotes = quotes;
         this.sowDrafts = sowDrafts;
         this.tenants = tenants;
+        this.sowPdfService = sowPdfService;
     }
 
     // ── POST /proposals/draft ──────────────────────────────────────────────────────────────────
@@ -108,6 +112,37 @@ public class ProposalDraftController {
                         .flatMap(quote -> sowDrafts.findByTenantIdAndQuoteId(ctx.tenantId(), id)
                                 .map(sow -> new ProposalDraftService.DraftResult(quote, sow))
                                 .defaultIfEmpty(new ProposalDraftService.DraftResult(quote, null)))));
+    }
+
+    // ── GET /proposals/{id}/pdf ────────────────────────────────────────────────────────────────
+
+    /**
+     * Renders a drafted SOW to a single client-facing PDF: the priced DRAFT {@link Quote} (header +
+     * line-item table + totals) plus the {@link SowDraft} prose (Scope / Deliverables / Assumptions /
+     * Timeline), via {@link SowPdfService} (a sibling of {@code QuotePdfService} — its blocking iText
+     * render runs on {@code boundedElastic}, off the Netty loop). Module-gated + STAFF.
+     *
+     * <p>Loads the tenant-scoped Quote ({@code QuoteRepository.findByTenantIdAndId}); a miss is the
+     * genuine not-found {@code 2200}/404 (the {@link #get} posture). The linked {@link SowDraft} is
+     * optional — a Quote with no draft renders the priced quote half only ({@code defaultIfEmpty}). The
+     * {@code switchIfEmpty} here is again ONLY for genuine not-found; no {@code switchIfEmpty(create)}.
+     *
+     * @return the rendered PDF bytes ({@code application/pdf})
+     */
+    @GetMapping(value = "/{id}/pdf", produces = MediaType.APPLICATION_PDF_VALUE)
+    public Mono<byte[]> pdf(@PathVariable UUID id) {
+        return proposalGuard().then(TenantContextHolder.required().flatMap(ctx ->
+                quotes.findByTenantIdAndId(ctx.tenantId(), id)
+                        .switchIfEmpty(Mono.error(new DigiPresBeException(
+                                "Quote not found", 2200, 404)))
+                        .flatMap(quote -> sowDrafts.findByTenantIdAndQuoteId(ctx.tenantId(), id)
+                                // Optional prose half: render with the draft if present, else quote-only
+                                // (null sow). flatMap skips on empty, so the no-draft case is its own
+                                // switchIfEmpty render — NOT a defaultIfEmpty(null) (Reactor forbids null
+                                // emissions). This switchIfEmpty is the optional-prose fallback, never a
+                                // find-or-create.
+                                .flatMap(sow -> sowPdfService.render(quote, sow))
+                                .switchIfEmpty(Mono.defer(() -> sowPdfService.render(quote, null))))));
     }
 
     // ── common guard ──────────────────────────────────────────────────────────────────────────
