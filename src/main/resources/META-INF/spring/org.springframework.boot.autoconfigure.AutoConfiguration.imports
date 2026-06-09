@@ -8,6 +8,7 @@ com.kumouri.kmodigipresbe.module.realestate.nurture.RealEstateNurtureAutoConfigu
 com.kumouri.kmodigipresbe.module.realestate.responder.RealEstateMidnightAutoConfiguration
 com.kumouri.kmodigipresbe.module.frontdesk.FrontDeskAutoConfiguration
 com.kumouri.kmodigipresbe.module.frontdesk.nurture.FrontDeskNurtureAutoConfiguration
+com.kumouri.kmodigipresbe.module.frontdesk.switchboard.SwitchboardAutoConfiguration
 com.kumouri.kmodigipresbe.module.nurture.NurtureAutoConfiguration
 com.kumouri.kmodigipresbe.module.responder.ResponderAutoConfiguration
 com.kumouri.kmodigipresbe.module.ar.ArAutoConfiguration
