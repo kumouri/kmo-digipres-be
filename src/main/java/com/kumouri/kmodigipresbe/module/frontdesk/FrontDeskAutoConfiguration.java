@@ -5,8 +5,11 @@ import com.kumouri.kmodigipresbe.automation.WorkflowRuleRepository;
 import com.kumouri.kmodigipresbe.extension.ModuleAutoConfigurationSupport;
 import com.kumouri.kmodigipresbe.extension.ModuleDefinition;
 import com.kumouri.kmodigipresbe.integration.IntegrationConnectionRepository;
+import com.kumouri.kmodigipresbe.integration.gbp.GbpReplyDraftService;
 import com.kumouri.kmodigipresbe.integration.twilio.TwilioSmsService;
 import com.kumouri.kmodigipresbe.module.chairfill.model.NoShowRisk;
+import com.kumouri.kmodigipresbe.module.chairfill.reviews.LedgerReplyExemplarSource;
+import com.kumouri.kmodigipresbe.module.chairfill.reviews.ReplyExemplarSource;
 import com.kumouri.kmodigipresbe.module.frontdesk.ai.ConfirmationCopyService;
 import com.kumouri.kmodigipresbe.module.frontdesk.automation.ConfirmationLogRepository;
 import com.kumouri.kmodigipresbe.module.frontdesk.automation.FrontDeskConfirmationService;
@@ -14,6 +17,7 @@ import com.kumouri.kmodigipresbe.module.frontdesk.automation.FrontDeskReminderAu
 import com.kumouri.kmodigipresbe.module.frontdesk.automation.RecallDetectorJob;
 import com.kumouri.kmodigipresbe.module.frontdesk.automation.RecallLogRepository;
 import com.kumouri.kmodigipresbe.module.frontdesk.model.AppointmentRepository;
+import com.kumouri.kmodigipresbe.module.frontdesk.reviews.FrontDeskReviewReplyService;
 import com.kumouri.kmodigipresbe.module.frontdesk.scoring.FrontDeskNoShowScoringService;
 import com.kumouri.kmodigipresbe.module.frontdesk.service.AppointmentService;
 import com.kumouri.kmodigipresbe.module.realestate.RealEstateAutoConfiguration;
@@ -21,6 +25,7 @@ import com.kumouri.kmodigipresbe.repository.ContactRepository;
 import com.kumouri.kmodigipresbe.repository.FrontDeskScoringJobRepository;
 import com.kumouri.kmodigipresbe.repository.SequenceRepository;
 import com.kumouri.kmodigipresbe.repository.TenantRepository;
+import com.kumouri.kmodigipresbe.repository.gbp.GbpReviewReplyRepository;
 import com.kumouri.kmodigipresbe.service.ai.AiUsageRecorder;
 import com.kumouri.kmodigipresbe.service.sequence.SequenceCrudService;
 import org.springframework.beans.factory.annotation.Value;
@@ -73,6 +78,19 @@ import java.util.List;
  * recall {@code Sequence} (the shipped engine) + sends a generic recare nudge. (c)
  * {@link FrontDeskReminderAutomation} — an owner-tunable baseline {@code SEND_SMS} {@code WorkflowRule}
  * seeder. All FD-2 beans reuse error codes only (AI {@code 1200-1203}, Twilio {@code 2530-2532}).
+ *
+ * <p>FD-4 build-out (error band {@code 4290-4294}): the <strong>HIPAA-safe review-reply</strong> — the
+ * flagship's signature demo (fence F4). {@link FrontDeskReviewReplyService} (the CF-4
+ * {@code SalonReviewReplyService} sibling) drafts a public reply via the <strong>unchanged</strong>
+ * {@link GbpReplyDraftService#draftReply(com.kumouri.kmodigipresbe.integration.gbp.GbpReview, String, java.util.List)}
+ * overload with a HIPAA-guardrail system prompt (thank / apologize / invite-offline — never confirming patient
+ * status or naming a procedure/treatment, even on an adversarial review), runs a deterministic
+ * {@link com.kumouri.kmodigipresbe.module.frontdesk.reviews.HipaaReplyLint} over the draft, parks it DRAFTED in
+ * the shared {@code GbpReviewReply} queue, and exposes a STAFF-gated draft → approve(copy-ready)/skip queue
+ * ({@code FrontDeskReviewReplyController}). It <strong>never auto-posts</strong> and never touches
+ * {@code GbpReplyDraftService} / the shared {@code GbpReviewReply} model / the GBP admin surface, so NMM / GBP /
+ * ChairFill review-reply stay byte-equivalent. Reuses the AI band {@code 1200-1203} (degraded best-effort to a
+ * generic HIPAA-safe fallback) + the ChairFill ledger {@code ReplyExemplarSource} for on-brand tone.
  */
 @AutoConfiguration(after = RealEstateAutoConfiguration.class)
 @ConditionalOnProperty(prefix = "kmosf.modules.frontdesk", name = "enabled")
@@ -194,5 +212,42 @@ public class FrontDeskAutoConfiguration {
             TenantRepository tenantRepository,
             WorkflowRuleRepository workflowRuleRepository) {
         return new FrontDeskReminderAutomation(tenantRepository, workflowRuleRepository);
+    }
+
+    // ── FD-4: HIPAA-safe review-reply (the flagship's signature demo) ────────────
+
+    /**
+     * The on-brand exemplar source for FD-4 review-reply grounding — reuses the ChairFill ledger-backed
+     * {@link LedgerReplyExemplarSource} (the tenant's own approved/POSTED replies, no embeddings, CI-robust).
+     * A FrontDesk-qualified bean ({@code frontDeskReplyExemplarSource}) so it never collides with ChairFill's
+     * (the two modules can both be enabled). The guardrail prompt is the load-bearing part of FD-4, not voice
+     * exemplars — but a few past on-brand replies still help the tone.
+     */
+    @Bean
+    public ReplyExemplarSource frontDeskReplyExemplarSource(GbpReviewReplyRepository reviewReplies) {
+        return new LedgerReplyExemplarSource(reviewReplies);
+    }
+
+    /**
+     * The HIPAA-safe review-reply drafter (FD-4) — the CF-4 {@code SalonReviewReplyService} sibling. Calls the
+     * <strong>unchanged</strong> {@link GbpReplyDraftService#draftReply(com.kumouri.kmodigipresbe.integration.gbp.GbpReview, String, java.util.List)}
+     * overload with the {@code HEALTH_DEFAULT_SYSTEM_PROMPT} guardrail (thank / apologize / invite-offline —
+     * never confirming patient status or naming a procedure, fence F4) + optional ledger exemplars, runs the
+     * deterministic {@code HipaaReplyLint} over the draft, parks it DRAFTED in the shared {@code GbpReviewReply}
+     * queue, and exposes a STAFF draft → approve(copy-ready)/skip queue. Never auto-posts. Best-effort: a Claude
+     * failure degrades to a generic HIPAA-safe fallback. Error band {@code 4290-4294}. Hand-constructed so the
+     * {@code @Value}-resolved config lands on the factory params (the ChairFill/salon-spa lesson).
+     */
+    @Bean
+    public FrontDeskReviewReplyService frontDeskReviewReplyService(
+            GbpReplyDraftService gbpReplyDraftService,
+            ReplyExemplarSource frontDeskReplyExemplarSource,
+            GbpReviewReplyRepository reviewReplies,
+            DomainEventPublisher eventPublisher,
+            @Value("${kmosf.frontdesk.review-system-prompt:}") String brandTonePrompt,
+            @Value("${kmosf.frontdesk.review-exemplars-enabled:true}") boolean exemplarsEnabled,
+            @Value("${kmosf.frontdesk.review-exemplar-limit:3}") int exemplarLimit) {
+        return new FrontDeskReviewReplyService(gbpReplyDraftService, frontDeskReplyExemplarSource,
+                reviewReplies, eventPublisher, brandTonePrompt, exemplarsEnabled, exemplarLimit);
     }
 }

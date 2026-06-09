@@ -89,6 +89,8 @@ public class GbpReviewPoller {
     private final EmailService emailService;
     private final TwilioSmsService twilioSmsService;
     private final DomainEventPublisher events;
+    private final ReviewSentimentService sentimentService;
+    private final ReviewNegativeAlertService negativeAlertService;
 
     private final boolean autoPost;
     private final String notifyFromAddress;
@@ -102,6 +104,8 @@ public class GbpReviewPoller {
             EmailService emailService,
             TwilioSmsService twilioSmsService,
             DomainEventPublisher events,
+            ReviewSentimentService sentimentService,
+            ReviewNegativeAlertService negativeAlertService,
             @Value("${kmosf.modules.gbp-reviews.auto-post:false}") boolean autoPost,
             @Value("${kmosf.mail.smtp.username:}") String notifyFromAddress) {
         this.tenants = tenants;
@@ -112,6 +116,8 @@ public class GbpReviewPoller {
         this.emailService = emailService;
         this.twilioSmsService = twilioSmsService;
         this.events = events;
+        this.sentimentService = sentimentService;
+        this.negativeAlertService = negativeAlertService;
         this.autoPost = autoPost;
         this.notifyFromAddress = notifyFromAddress;
     }
@@ -211,8 +217,14 @@ public class GbpReviewPoller {
     }
 
     /**
-     * Draft (best-effort) → persist the draft onto the ledger row → notify Rob → emit
+     * Draft (best-effort) → persist the draft onto the ledger row → <strong>E3 additive seam: classify
+     * + store sentiment, then best-effort negative manager alert</strong> → notify Rob → emit
      * {@code GBP_REVIEW_REPLY_DRAFTED} → optional auto-post.
+     *
+     * <p>The E3 sentiment/alert seam ({@link #storeSentimentAndAlert}) is inserted as an additional
+     * best-effort step that <strong>never</strong> changes the existing reply-draft / notify / auto-post
+     * behavior: it is {@code onErrorResume}'d to {@code saved} so a sentiment/alert failure leaves the
+     * row exactly as the draft step left it and the cycle proceeds unchanged.
      */
     private Mono<Void> draftAndFinish(UUID tenantId, GbpReview review, GbpReviewReply saved) {
         return draftService.draftReply(review)
@@ -226,9 +238,36 @@ public class GbpReviewPoller {
                     return reviewReplies.save(saved);
                 })
                 .defaultIfEmpty(saved)   // draft failed → keep the row as-is (draftedReply == null)
-                .flatMap(persisted -> notifyRob(persisted, review)
-                        .then(Mono.fromRunnable(() -> emitDrafted(tenantId, persisted)))
-                        .then(maybeAutoPost(tenantId, persisted)));
+                .flatMap(persisted -> storeSentimentAndAlert(tenantId, review, persisted)
+                        .flatMap(withSentiment -> notifyRob(withSentiment, review)
+                                .then(Mono.fromRunnable(() -> emitDrafted(tenantId, withSentiment)))
+                                .then(maybeAutoPost(tenantId, withSentiment))));
+    }
+
+    /**
+     * E3 Review Engine seam (additive): classify the review's sentiment ({@link ReviewSentimentService},
+     * rating-first + best-effort AI), persist the two additive {@code sentiment}/{@code sentimentSource}
+     * fields, then fire a best-effort manager alert if negative ({@link ReviewNegativeAlertService}).
+     * Returns the (possibly sentiment-stamped) row. Entirely best-effort — any failure degrades to the
+     * row unchanged ({@code onErrorResume(→ row)}) so the existing draft/notify/auto-post path is never
+     * affected and the review is never dropped (AI is triage, not truth — plan §8).
+     */
+    private Mono<GbpReviewReply> storeSentimentAndAlert(UUID tenantId, GbpReview review,
+                                                        GbpReviewReply row) {
+        return sentimentService.classify(review)
+                .flatMap(result -> {
+                    row.setSentiment(result.sentiment());
+                    row.setSentimentSource(result.source());
+                    return reviewReplies.save(row);
+                })
+                .defaultIfEmpty(row)
+                .flatMap(stamped -> negativeAlertService.maybeAlert(tenantId, stamped)
+                        .thenReturn(stamped))
+                .onErrorResume(e -> {
+                    log.warn("GBP sentiment/alert seam failed for review {} (best-effort, ignored): {}",
+                            review.reviewId(), e.getMessage());
+                    return Mono.just(row);
+                });
     }
 
     /**

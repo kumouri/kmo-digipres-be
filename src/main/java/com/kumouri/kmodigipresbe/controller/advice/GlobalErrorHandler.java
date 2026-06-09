@@ -651,6 +651,219 @@ import java.util.UUID;
  *       only {@code AppointmentRepository} / {@code ContactRepository} / the shipped {@code Sequence} engine,
  *       touches no salon {@code Booking} / deposit path, and the copy is provably generic (a release-blocking
  *       IT asserts a forbidden clinical/provider-token set is absent from every outbound body).</li>
+ *   <li>{@code 4285-4289} — <em>FrontDesk IQ FD-3 (Health-practices flagship #4)</em>: PHI-free
+ *       voicemail-to-callback. A new {@code HealthFrontDeskExtractionStrategy}
+ *       ({@code voicemailVertical="health-frontdesk"}) reuses the HS-1 voicemail seam end-to-end
+ *       ({@code VoicemailExtractionStrategyResolver} + {@code VoicemailExtractionService} +
+ *       {@code TwilioVoicemailService}) to turn an after-hours health-practice voicemail into a
+ *       <strong>logistics-only</strong> extraction (name / callback number / intent bucket — never a
+ *       symptom/diagnosis/medication) and a front-desk callback {@code Activity(CALL, INBOUND)} +
+ *       best-effort notify. <strong>FD-3 mints NO new error codes</strong> — it reuses AI
+ *       {@code 1200-1203} (the {@code VoicemailExtractionService} budget gate / upstream non-200 /
+ *       missing-key, all degraded best-effort so a callback is never dropped), Twilio signature
+ *       {@code 4000-4003} (the {@code TwilioVoicemailService} verify, unchanged), and {@code 1300}
+ *       Activity-create. The whole {@code 4285-4289} band is reserved for FD-3 growth.
+ *       <strong>The headline is the PHI boundary, enforced by construction (fence F2):</strong> the
+ *       single divergence from the shipped seam is the additive default-{@code true}
+ *       {@code VoicemailExtractionStrategy.persistTranscript()} bit — mole + multi-trade do not
+ *       override it (so {@code TwilioVoicemailIT} / {@code HomeServicesVoicemailIT} stay
+ *       byte-equivalent), while the health strategy returns {@code false} so the raw transcript is
+ *       NEVER stored on {@code Activity.body} (a redaction marker is) and the recording pointer is
+ *       omitted; a release-blocking IT asserts the stored health-voicemail Activity contains none of
+ *       the raw transcript text and no clinical token. NMM / Home-Services / ChairFill / Real Estate
+ *       are byte-equivalent.</li>
+ *   <li>{@code 4290-4294} — <em>FrontDesk IQ FD-4 (Health-practices flagship #4)</em>: the
+ *       <strong>HIPAA-safe review-reply</strong> (the flagship's signature demo). A
+ *       {@code FrontDeskReviewReplyService} (the CF-4 {@code SalonReviewReplyService} sibling) drafts a public
+ *       reply via the <strong>unchanged</strong> {@code GbpReplyDraftService.draftReply(review, prompt,
+ *       exemplars)} overload using a <strong>HIPAA-guardrail system prompt</strong> (thank / apologize /
+ *       invite-offline — NEVER confirm the reviewer was a patient, name a procedure/treatment/diagnosis/
+ *       medication, or echo a clinical term the review itself raised, fence F4), runs a deterministic
+ *       {@code HipaaReplyLint} over the draft (the RE-4 {@code FairHousingLint} / FD-2 F3-lint backstop —
+ *       surfaces residual patient-status / clinical phrases, never blocks), and parks it DRAFTED in the shared
+ *       {@code GbpReviewReply} queue, exposed through a STAFF-gated draft → approve(copy-ready)/skip queue
+ *       ({@code FrontDeskReviewReplyController} — {@code POST /frontdesk/reviews/draft},
+ *       {@code GET /frontdesk/reviews}, {@code POST /{id}/approve}|{@code /{id}/skip}). <strong>Never
+ *       auto-posted</strong> (the GBP posture); approval is copy-ready (no live Google call — the demo path,
+ *       no GBP OAuth). New codes: {@code 4290} a malformed paste-in (blank review text, 400); {@code 4291} the
+ *       draft is not DRAFTED — cannot approve/skip (the same-status guard, 409); {@code 4292} the draft was
+ *       not found for the tenant (404); {@code 4293-4294} reserved for FD-4 growth. Reused (NOT re-allocated):
+ *       the AI band {@code 1200-1203} (via the unchanged {@code GbpReplyDraftService} — budget / upstream
+ *       non-200 / missing-key, degraded best-effort to a generic HIPAA-safe fallback so a review is never
+ *       dropped and a leaky reply is never persisted); {@code 1130}/{@code 1132} module gate (a non-frontdesk
+ *       tenant → the shared not-enabled response, the {@code NoShowRiskController} posture); {@code 1800} STAFF
+ *       {@code RoleGuard}. <strong>{@code GbpReplyDraftService} + NMM / GBP + ChairFill review-reply
+ *       byte-equivalent:</strong> FD-4 passes an additive per-call prompt; it does NOT modify
+ *       {@code GbpReplyDraftService}, the shared {@code GbpReviewReply} model, or the GBP admin surface, so the
+ *       GBP draft-reply ITs and {@code SalonReviewReplyIT} pass unchanged.</li>
+ *   <li>{@code 4295-4299} — <em>FrontDesk IQ FD-5a (Health-practices flagship #4)</em>: the two
+ *       <strong>staff-facing board reads</strong> backing the FD-5 recall board + callback inbox FE
+ *       ({@code FrontDeskBoardController} — {@code GET /frontdesk/recall} + {@code GET /frontdesk/callbacks}).
+ *       The other two FD-5 surfaces already have their reads (the risk-sorted day view =
+ *       {@code NoShowRiskController GET /frontdesk/risk/appointments}; the review inbox =
+ *       {@code FrontDeskReviewReplyController GET /frontdesk/reviews}). A pure read over the FD-2
+ *       {@code RecallLog} / FD-1 {@code Appointment} / FD-3 callback {@code Activity} collections: the
+ *       recall board surfaces the FD-2 lapsed-contact selector (most-recent visit older than the recall
+ *       window AND no upcoming appointment, + the contact name + the nudged-this-period flag), and the
+ *       callback inbox surfaces the FD-3 PHI-free voicemail callbacks (fence F2 — logistics fields ONLY,
+ *       NEVER a transcript: the read keys on the {@code TRANSCRIPT_REDACTED_MARKER} body produced only by
+ *       the health front-desk strategy, and the {@code CallbackInboxItemDTO} has no transcript/body/
+ *       recording field). <strong>FD-5a mints NO new error code</strong> — it reuses the shared
+ *       {@code TenantModuleRegistry.requireEnabled} module gate ({@code 1130}/{@code 1132}, the
+ *       {@code 4202}/{@code 2700}/{@code 3930} not-enabled posture) and the {@code RoleGuard} STAFF gate
+ *       ({@code 1800}). The band {@code 4295-4299} is RESERVED for future board-read growth. The
+ *       {@code FrontDeskBoardController} is {@code @ConditionalOnProperty}-gated, so it is absent from the
+ *       generated OpenAPI spec when the module is off (the {@code NoShowRiskController} /
+ *       {@code WaitlistBoardController} / {@code ConciergeConversationController} precedent).
+ *       <strong>FD-1..FD-4 + ChairFill + NMM byte-equivalent:</strong> FD-5a is a purely additive read
+ *       controller + DTOs + two additive repo finders + a visibility-only constant promotion; it touches
+ *       no scoring / outbound-comms / voicemail-pipeline / review-reply behavior.</li>
+ *   <li>{@code 4300-4319} — <em>Nurture / Cadence Engine (E1)</em>: the keystone shared reactivation
+ *       engine ({@code model/nurture}, {@code service/nurture}, {@code controller/nurture}). Segments a
+ *       tenant's dormant contacts into vertical-agnostic dormancy buckets (thresholds carried by the
+ *       campaign — never hardcoded), runs a default-OFF multi-touch SMS+email cadence with per-step
+ *       backoff (the {@code NurtureRunner} — {@code kmosf.modules.nurture-runner.enabled}
+ *       matchIfMissing=false, the {@code CoverageNudgeJob}/{@code GbpReviewPoller} default-OFF posture;
+ *       per-(enrollment, step) ledger-insert-FIRST over the unique {@code tenant_enrollment_step_idx} so
+ *       a restart/concurrent tick sends ZERO duplicate, NEVER {@code switchIfEmpty(send)}), and
+ *       exits-and-books on a positive reply (per-tenant Cal.com booking link from
+ *       {@code IntegrationConnection(twilio).config["bookingLink"]} over SMS — NO live Cal.com call).
+ *       New codes: {@code 4300} nurture not enabled for the tenant (404 — the in-range parity code; the
+ *       admin controller actually surfaces the shared {@code 1130}/{@code 1132} via
+ *       {@code requireEnabled}); {@code 4301} NurtureCampaign not found (404); {@code 4302} campaign
+ *       inactive — cannot segment/enroll (409); {@code 4303} invalid campaign definition — no segments,
+ *       no steps, non-contiguous stepIndex, or a step missing its channel's template (400); {@code 4310}
+ *       NurtureEnrollment not found / no active enrollment for the reply (404, genuine
+ *       {@code switchIfEmpty}); {@code 4311} enrollment already terminal — a second positive-reply is a
+ *       no-op (409, explicit boolean); {@code 4312} reply ref invalid — blank contact phone (400). The
+ *       band {@code 4313-4319} is RESERVED for nurture growth. Reused (NOT re-allocated): {@code 1130}/
+ *       {@code 1131}/{@code 1132} (the module gate via {@code requireEnabled}), {@code 1200}-{@code 1203}
+ *       (AI budget / Anthropic upstream / missing-key — surfaced best-effort by the message composer,
+ *       which degrades to the template rather than dropping the send), {@code 2530}-{@code 2532} (Twilio
+ *       SMS), {@code 1300} (Activity via the unchanged {@code ActivityCrudService}), {@code 1800}
+ *       (RoleGuard ADMIN), {@code 3100} ({@code @IdempotentRoute} missing key). Consent is the
+ *       {@code sms-opt-out} tag (a skip, not an error). The {@code NurtureCampaignController} is
+ *       {@code @ConditionalOnProperty}-gated (matchIfMissing=true), so it is absent from the generated
+ *       OpenAPI spec when the module is off; the default-OFF runner means no live send in CI / any
+ *       default run. <strong>Strictly additive — the shipped Sequence engine, InboundSmsService,
+ *       TwilioSmsService, EmailService, and AnthropicAiAssistService are empty-diff vs {@code main}.</strong></li>
+ *   <li>{@code 4320-4339} — <em>Inbound Responder + Intent Router (E2)</em>: the reusable inbound-SMS
+ *       responder engine (a generic free-text intent classifier + a pluggable {@code IntentHandler}
+ *       registry + lightweight conversation state). The {@code responder} module is gated
+ *       {@code @ConditionalOnProperty(kmosf.modules.responder.enabled, matchIfMissing=true)}; per-tenant
+ *       membership is enforced by {@code TenantModuleRegistry.requireEnabled("responder")} (1130/1132) in
+ *       {@code ResponderConfigController}. The generic inbound delegation only ACTIVATES for a tenant with
+ *       a usable {@code ResponderConfig} — absent/disabled/empty config makes the {@code InboundIntentRouter}
+ *       return {@code IGNORED}, so the shipped {@code InboundSmsService} STOP/YES/realestate path is
+ *       byte-identical (the regression-gate invariant). New codes: {@code 4320} responder not enabled for
+ *       the tenant (404 — the in-range parity echo of the {@code requireEnabled} gate; the {@code 4250}/
+ *       {@code 4300}/{@code 2700}/{@code 3930} not-enabled posture); {@code 4321} responder config not
+ *       found for the tenant on a read (404 — a genuine {@code switchIfEmpty}); {@code 4322} invalid
+ *       responder config — an intent with a blank name (400). The band {@code 4323-4339} is RESERVED for
+ *       responder growth. Reused (NOT re-allocated): {@code 1130}/{@code 1131}/{@code 1132} (the module
+ *       gate), {@code 1200}-{@code 1203} (AI budget / Anthropic upstream / missing-key — surfaced
+ *       best-effort by the {@code InboundIntentClassifier}, which degrades to {@code UNKNOWN}+handoff
+ *       rather than throwing), {@code 2530}-{@code 2532} (Twilio SMS — the reply + handoff-notify paths),
+ *       {@code 1300} (Activity, if a handler logs one), {@code 1800} (RoleGuard ADMIN on the config
+ *       controller), {@code 3100} ({@code @IdempotentRoute} missing key on test-classify), {@code 4000}/
+ *       {@code 4001} (the inbound webhook's Twilio signature / not-connected — owned by the unchanged
+ *       {@code InboundSmsService}). Consent is the {@code sms-opt-out} tag (a skip, not an error). The
+ *       {@code ResponderConfigController} is {@code @ConditionalOnProperty}-gated (matchIfMissing=true);
+ *       the classifier is WireMock-able and the reply/notify SMS+email are mocked in ITs (no live send in
+ *       CI). <strong>The ONLY pre-existing service touched is {@code InboundSmsService} (an additive
+ *       IGNORED-fallthrough delegation); {@code TwilioSmsService}, {@code WaitlistClaimService},
+ *       {@code ConciergeInboundRouter}, and the AI transports are empty-diff vs {@code main}.</strong></li>
+ *   <li>{@code 4600-4619} — <em>"Get Paid" AR / collections</em>: tiered overdue-invoice dunning over
+ *       the existing billing core ({@code module/ar}). The {@code ar} module is gated
+ *       {@code @ConditionalOnProperty(kmosf.modules.ar.enabled, <strong>matchIfMissing=false</strong>)}
+ *       — DEFAULT-OFF (a money / customer-facing-comms module; the {@code GbpReviewPoller} /
+ *       {@code CoverageNudgeJob} default-OFF posture), so a non-AR tenant gets no aging sweep, no
+ *       SENT→OVERDUE transition, and no dunning — byte-identical to before this module existed. The
+ *       default-OFF {@code ArAgingSweepJob} sweeps each tenant's SENT/OVERDUE invoices past
+ *       {@code dueAt} (+ grace), and for each crossed tier (≥3→D3, ≥7→D7, ≥14→D14) NOT already in the
+ *       {@code DunningLog} it inserts the ledger row FIRST over the unique {@code tenant_invoice_tier_idx}
+ *       ({@code onErrorResume(DuplicateKeyException → empty)} so a restart/concurrent tick fires ZERO
+ *       duplicate, NEVER {@code switchIfEmpty(create)}), flips the invoice SENT→OVERDUE on the first
+ *       tier-insert (via the unchanged {@code InvoiceService.setStatus}), and emits the matching
+ *       advisory {@code INVOICE_OVERDUE_{D3,D7,D14}} event.
+ *       <strong>New codes (AR-4):</strong>
+ *       {@code 4600} ar not enabled for the tenant (404 — the in-range parity code; the
+ *       {@code 4250}/{@code 4300}/{@code 4320}/{@code 2700}/{@code 3930} not-enabled posture; the AR-4
+ *       read controller surfaces the shared {@code 1130}/{@code 1132} via {@code requireEnabled});
+ *       {@code 4601} invoice not found when creating a promise-to-pay — the tenant-scoped
+ *       {@code InvoiceRepository.findByTenantIdAndId} returned empty (404 — a genuine
+ *       {@code switchIfEmpty} for the entity-not-found case in {@code ArAgingController.createPromise});
+ *       {@code 4602} invalid promise-to-pay request — {@code promisedDate} is in the past,
+ *       {@code promisedAmount} ≤ 0, or a required field is missing (400). The band {@code 4603-4619}
+ *       is RESERVED for AR growth. Reused (NOT re-allocated):
+ *       {@code 1130}/{@code 1131}/{@code 1132} (the module gate via {@code requireEnabled}), the
+ *       existing invoice/billing codes via the unchanged {@code InvoiceService} ({@code 2300}/
+ *       {@code 2301}/{@code 3640}). <strong>Strictly additive — the shipped {@code Invoice},
+ *       {@code InvoiceService}, {@code StripeCheckoutService}, {@code RuleActionDispatcher},
+ *       {@code TwilioSmsService}, and {@code AnthropicAiAssistService} are empty-diff vs {@code main}
+ *       (the only pre-existing edits are an additive {@code InvoiceRepository} finder + additive
+ *       {@code DomainEventType} constants + the AR-4 additive guard in
+ *       {@code DunningDispatchService}).</strong></li>
+ *   <li>{@code 4340-4349} — <em>Review Engine (E3)</em>: post-visit review-REQUEST delivery + sentiment
+ *       triage + per-entity insights, extending the shipped {@code integration/gbp} review pipeline
+ *       additively. On a completed visit/job ({@code BOOKING_COMPLETED} salon + {@code MILESTONE_COMPLETED}
+ *       home/project) {@code ReviewRequestService} creates a {@code ReviewRequest} (explicit-boolean over
+ *       the unique {@code tenant_subject_contact_idx}); a <strong>default-OFF</strong>
+ *       {@code ReviewRequestSenderJob} ({@code @ConditionalOnProperty(kmosf.modules.review-engine.sender-enabled,
+ *       matchIfMissing=false)} — the {@code CoverageNudgeJob}/{@code ImapInboundPoller} posture) sends due
+ *       PENDING requests as a <strong>frictionless, no-incentive</strong> Google-review SMS (Google's 2026
+ *       policy bans incentives), opt-out-aware ({@code sms-opt-out}), frequency-capped, atomic-claim
+ *       idempotent. {@code ReviewSentimentService} (a NEW sibling mirroring {@code GbpReplyDraftService} —
+ *       that core is empty-diff) classifies each ingested review (rating-first always; the AI refinement
+ *       is opt-in {@code kmosf.review-engine.ai-refine-enabled}, default-OFF) on the one surgical
+ *       {@code GbpReviewPoller} seam and stores the additive {@code sentiment}/{@code sentimentSource}; a
+ *       negative ({@code rating <= threshold} OR {@code NEGATIVE}) fires a best-effort manager alert when
+ *       the opt-in {@code kmosf.review-engine.negative-alert-enabled} (default-OFF) is set. Both opt-ins
+ *       are default-OFF so the seam adds ZERO extra Anthropic calls and ZERO extra notify in the default
+ *       path (the existing {@code GbpReviewPollerIT} stays byte-identical). The generic
+ *       {@code ReviewInsightsService} +
+ *       ADMIN {@code ReviewInsightsController} ({@code GET /gbp/review-insights[/{subjectType}/{subjectId}]})
+ *       aggregate per {@code (subjectType, subjectId)} + per-tenant. New codes: {@code 4340} review-insights
+ *       subject type invalid (400 — an unparseable {@code {subjectType}} path segment). The band
+ *       {@code 4341-4349} is RESERVED for review-engine growth. Reused (NOT re-allocated): {@code 1200}-
+ *       {@code 1203} (AI budget / Anthropic upstream / missing-key — surfaced best-effort by
+ *       {@code ReviewSentimentService}, which degrades to the rating-based result rather than throwing),
+ *       {@code 2530}-{@code 2532} (Twilio SMS — the request-send + negative-alert paths), {@code 1800}
+ *       (RoleGuard ADMIN on the insights controller). The insights controller is
+ *       {@code @ConditionalOnProperty(kmosf.modules.gbp-reviews, matchIfMissing=true)} + ADMIN — the
+ *       {@code GbpReviewReplyAdminController} precedent, NOT {@code requireEnabled} ({@code gbp-reviews} is
+ *       an {@code integration/} package, not a registered module — E3 deviation D1). The sender is default-OFF
+ *       (no live request SMS in CI); the sentiment Anthropic call is WireMock-able; the request-send +
+ *       negative-alert SMS/email are mocked in ITs (no live send). <strong>The ONLY pre-existing service
+ *       touched is {@code GbpReviewPoller} (a surgical additive sentiment-store + negative-alert seam in
+ *       {@code draftAndFinish}, all {@code onErrorResume}'d); {@code GbpReviewReply} gains 2 additive nullable
+ *       fields; {@code GbpReplyDraftService}, {@code GbpReviewReplyAdminService}, {@code GbpApiClient},
+ *       {@code TwilioSmsService}, {@code EmailService}, {@code AnthropicAiAssistService},
+ *       {@code SalonBookingService}, and {@code MilestoneService} are empty-diff vs {@code main}.</strong></li>
+ *   <li>{@code 4350-4359} — <em>Gap-Fill Waitlist engine (E4)</em>: the vertical-agnostic gap-fill
+ *       waitlist engine ({@code model/waitlist}, {@code service/waitlist}, {@code controller/waitlist},
+ *       {@code repository/waitlist}). On a freed slot a consumer calls
+ *       {@code GapFillEngine.gapFill(tenantId, slot)} → {@code WaitlistRankingService} ranks the OPEN,
+ *       opted-in, slot-matching {@code WaitlistEntry} pool by inverted show-risk (most-likely-to-show
+ *       first; rules-based + FIFO tiebreak, over entry-carried stats — NO salon Booking coupling) → the
+ *       top-N get a time-boxed offer SMS + a {@code WaitlistOffer} ledger row. The first inbound YES
+ *       atomically claims the slot via {@code WaitlistClaimEngine} (a {@code findAndModify} on
+ *       {@code waitlist_slot_claims} with the {@code claimedByContactId:null} guard + {@code upsert} —
+ *       the CF-3 D2 / {@code WorkOrderNumberGenerator} double-YES-correct gate; winner → the consumer's
+ *       {@code SlotMaterializer} creates the real domain record, loser → an apology); offer-expiry is the
+ *       {@code WaitlistOfferExpiryService} ledger-hygiene sweep (no {@code @Scheduled} live job by default
+ *       — the engine is consumer-triggered + dormant). New codes: {@code 4350} waitlist entry not found
+ *       for the tenant (404); {@code 4351} waitlist entry invalid (blank {@code contactId} on create, 400);
+ *       {@code 4352} gap-fill slot request invalid (missing {@code slotKey} / {@code slotStart}, 400). The
+ *       band {@code 4353-4359} is RESERVED for waitlist-engine growth. Reused (NOT re-allocated):
+ *       {@code 1130}/{@code 1132} (module gate — the {@code waitlist} module on the admin controller, the
+ *       {@code NurtureCampaignController} posture); {@code 2530}-{@code 2532} (Twilio SMS — the offer /
+ *       confirmation / apology send paths); {@code 1800} (RoleGuard ADMIN on the admin controller). The
+ *       engine has <strong>no AI dependency</strong> (deterministic template copy) so it adds ZERO
+ *       Anthropic calls; {@code TwilioSmsService} is mocked in ITs (no live send). <strong>ChairFill is
+ *       byte-equivalent</strong> — the engine is a parallel generic package; the chairfill
+ *       {@code GapFillWaitlistIT} regression gate stays green and {@code InboundSmsService} /
+ *       {@code TwilioSmsService} / {@code NoShowRiskScoringService} are empty-diff vs {@code main}.</li>
  * </ul>
  */
 @Slf4j

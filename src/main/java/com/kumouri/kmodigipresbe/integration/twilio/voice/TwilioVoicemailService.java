@@ -512,7 +512,7 @@ public class TwilioVoicemailService {
                     return Mono.just(emptyDetails());
                 })
                 .flatMap(details -> createLeadAndNotify(
-                        tenantId, conn, params, transcript, details, savedLedger));
+                        tenantId, conn, params, transcript, details, savedLedger, strategy));
     }
 
     /**
@@ -546,9 +546,10 @@ public class TwilioVoicemailService {
                                            VoicemailCallbackParams params,
                                            VoicemailTranscription transcript,
                                            VoicemailLeadDetails details,
-                                           TwilioVoicemailEvent savedLedger) {
+                                           TwilioVoicemailEvent savedLedger,
+                                           VoicemailExtractionStrategy strategy) {
         return findOrCreateContact(tenantId, params, details)
-                .flatMap(contact -> logCallActivity(tenantId, contact, params, transcript, details)
+                .flatMap(contact -> logCallActivity(tenantId, contact, params, transcript, details, strategy)
                         .flatMap(activity -> maybeCreateWorkOrder(tenantId, params, details)
                                 .flatMap(woId -> {
                                     savedLedger.setResolvedContactId(contact.getId());
@@ -648,21 +649,58 @@ public class TwilioVoicemailService {
     }
 
     /**
+     * FD-3 fence F2 — the fixed redaction marker used as the {@code Activity.body} for a
+     * PHI-sensitive vertical (a strategy whose {@link VoicemailExtractionStrategy#persistTranscript()}
+     * is {@code false}). The raw transcript is NEVER stored; only the logistics fields the strategy
+     * surfaces (name / callback number / intent bucket) live on the record.
+     */
+    public static final String TRANSCRIPT_REDACTED_MARKER =
+            "(voicemail transcript not retained — front-desk callback)";
+
+    /**
      * Logs the inbound call via the UNCHANGED {@code ActivityCrudService.create}: summary = the
      * extracted one-liner, body = the raw transcript (so Rob can always verify), payload =
      * {callSid, recordingUrl, extracted fields}.
+     *
+     * <h2>FD-3 fence F2 — transcript-suppression seam</h2>
+     * The body (and the recording pointer) is gated on {@link VoicemailExtractionStrategy#persistTranscript()}:
+     * <ul>
+     *   <li><strong>{@code true} (the default — mole + multi-trade, which do not override it):</strong> the
+     *       raw transcript is stored as {@code Activity.body} <strong>byte-identically</strong> to before
+     *       (the {@code TwilioVoicemailIT} / {@code HomeServicesVoicemailIT} regression gates), and the
+     *       recording SID/URL pointer is retained in the payload as before.</li>
+     *   <li><strong>{@code false} (the health front-desk strategy):</strong> the raw transcript is NOT
+     *       written — {@code body} becomes the fixed {@link #TRANSCRIPT_REDACTED_MARKER}, and the
+     *       recording SID/URL (which could be re-fetched to recover the spoken words) is omitted from the
+     *       payload. Only the strategy's logistics-only {@code extractedJson} (name / callbackNumber /
+     *       intentBucket) plus the call/from metadata survive — PHI never lands on a stored Activity.</li>
+     * </ul>
+     * The {@code extractedJson} echo is the strategy's own map: the health strategy populates it with
+     * logistics fields only (no transcript text, no clinical token), so it is safe to store under either
+     * branch. {@code transcriptionSource} is the source enum name (e.g. {@code TWILIO_BUILTIN}) — not PHI.
      */
     private Mono<Activity> logCallActivity(UUID tenantId, Contact contact,
                                            VoicemailCallbackParams params,
                                            VoicemailTranscription transcript,
-                                           VoicemailLeadDetails details) {
+                                           VoicemailLeadDetails details,
+                                           VoicemailExtractionStrategy strategy) {
+        boolean persistTranscript = strategy.persistTranscript();
+
         Map<String, Object> payload = new HashMap<>();
         if (params.callSid() != null) payload.put("callSid", params.callSid());
-        if (params.recordingSid() != null) payload.put("recordingSid", params.recordingSid());
-        if (params.recordingUrl() != null) payload.put("recordingUrl", params.recordingUrl());
+        if (persistTranscript) {
+            // The recording SID/URL are a pointer back to the spoken words — suppressed alongside the
+            // transcript for a PHI-sensitive vertical (F2), retained byte-identically otherwise.
+            if (params.recordingSid() != null) payload.put("recordingSid", params.recordingSid());
+            if (params.recordingUrl() != null) payload.put("recordingUrl", params.recordingUrl());
+        }
         if (params.from() != null) payload.put("fromNumber", params.from());
         payload.put("extractedJson", details.extractedJson());
         payload.put("transcriptionSource", transcript.source().name());
+
+        String body = persistTranscript
+                ? (transcript.hasText() ? transcript.text() : "(no transcript)")
+                : TRANSCRIPT_REDACTED_MARKER;
 
         Activity activity = Activity.builder()
                 .tenantId(tenantId)
@@ -671,7 +709,7 @@ public class TwilioVoicemailService {
                 .subjectType(SubjectType.CONTACT)
                 .subjectId(contact.getId())
                 .summary(details.summaryLine())
-                .body(transcript.hasText() ? transcript.text() : "(no transcript)")
+                .body(body)
                 .payload(payload)
                 .build();
         return activityCrudService.create(activity);
