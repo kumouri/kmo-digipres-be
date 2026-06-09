@@ -3,18 +3,21 @@ package com.kumouri.kmodigipresbe.module.ar;
 import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
 import com.kumouri.kmodigipresbe.extension.ModuleAutoConfigurationSupport;
 import com.kumouri.kmodigipresbe.extension.ModuleDefinition;
+import com.kumouri.kmodigipresbe.extension.TenantModuleRegistry;
 import com.kumouri.kmodigipresbe.integration.IntegrationConnectionRepository;
 import com.kumouri.kmodigipresbe.integration.twilio.TwilioSmsService;
 import com.kumouri.kmodigipresbe.repository.ContactRepository;
 import com.kumouri.kmodigipresbe.repository.InvoiceRepository;
 import com.kumouri.kmodigipresbe.service.ai.AiUsageRecorder;
 import com.kumouri.kmodigipresbe.service.billing.StripeCheckoutService;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.time.Clock;
 import java.util.List;
 
 /**
@@ -76,13 +79,15 @@ public class ArAutoConfiguration {
     }
 
     /**
-     * The tiered dunning-dispatch subscriber (AR-3). Subscribes to {@code INVOICE_OVERDUE_{D3,D7,D14}};
-     * per tier it reloads the invoice (auto-stop if since-paid/voided), mints a one-touch Stripe pay
-     * link, composes tier-aware on-brand copy, and sends one SMS. Best-effort + duplicate-safe — the
+     * The tiered dunning-dispatch subscriber (AR-3 + AR-4 suppression guard). Subscribes to
+     * {@code INVOICE_OVERDUE_{D3,D7,D14}}; per tier it reloads the invoice (auto-stop if since-paid/
+     * voided), checks the AR-4 promise-to-pay suppression guard, mints a one-touch Stripe pay link,
+     * composes tier-aware on-brand copy, and sends one SMS. Best-effort + duplicate-safe — the
      * one-shot upstream {@code DunningLog} is the exactly-once guarantee (no new ledger here). A
      * dedicated event-listener (NOT a generic {@code SEND_SMS} WorkflowRule) because the generic
      * dispatcher's body is a literal {@code SmsTemplateRegistry} template — no AI copy / Stripe link /
-     * paid-guard. Default-OFF via this whole auto-configuration's {@code kmosf.modules.ar} gate.
+     * paid-guard / promise suppression. Default-OFF via this whole auto-configuration's
+     * {@code kmosf.modules.ar} gate.
      */
     @Bean
     public DunningDispatchService dunningDispatchService(
@@ -92,8 +97,30 @@ public class ArAutoConfiguration {
             StripeCheckoutService stripeCheckoutService,
             DunningCopyComposer dunningCopyComposer,
             TwilioSmsService twilioSmsService,
+            PromiseToPayRepository promiseToPayRepository,
+            ObjectProvider<Clock> clockProvider,
             @Value("${kmosf.modules.ar.brand-tone:}") String brandTone) {
         return new DunningDispatchService(eventPublisher, invoiceRepository, contactRepository,
-                stripeCheckoutService, dunningCopyComposer, twilioSmsService, brandTone);
+                stripeCheckoutService, dunningCopyComposer, twilioSmsService, brandTone,
+                promiseToPayRepository,
+                clockProvider.getIfAvailable(Clock::systemUTC));
+    }
+
+    // ── AR-4: AR-aging read controller + promise-to-pay ───────────────────────────────────────
+
+    /**
+     * The AR-aging read controller (AR-4). Provides the {@code GET /ar/aging} dashboard
+     * (5-bucket aging report) and the {@code POST /ar/promises} / {@code GET /ar/promises?invoiceId}
+     * promise-to-pay surface. Module-gated + per-tenant membership + STAFF role. Read-only aging;
+     * promise-to-pay creates ACTIVE records that suppress dunning while the promise holds.
+     */
+    @Bean
+    public ArAgingController arAgingController(
+            TenantModuleRegistry tenantModuleRegistry,
+            InvoiceRepository invoiceRepository,
+            PromiseToPayRepository promiseToPayRepository,
+            ObjectProvider<Clock> clockProvider) {
+        return new ArAgingController(tenantModuleRegistry, invoiceRepository,
+                promiseToPayRepository, clockProvider);
     }
 }

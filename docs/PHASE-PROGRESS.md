@@ -30,7 +30,7 @@
 | AR-1 | `ar` model (`DunningLog`) + repo + `DomainEventType` block (`INVOICE_OVERDUE_*`) + `ArAutoConfiguration` (gate OFF) + `application.properties` doc block + `GlobalErrorHandler` 4600–4619 Javadoc | `4c143e8` | DONE |
 | AR-2 | `ArAgingSweepJob` — clone `CoverageNudgeJob`: per-tenant SENT→OVERDUE past `dueAt`+grace (via unchanged `InvoiceService.setStatus`), tiered `INVOICE_OVERDUE_{D3,D7,D14}` emit, explicit-boolean `DunningLog` ledger-insert-FIRST idempotency + `ArAgingSweepIT` | `11cf29b` | DONE |
 | AR-3 | Dunning dispatch — `DunningDispatchService` (dedicated `INVOICE_OVERDUE_{D3,D7,D14}` event-listener, the ChairFill CF-2 `RiskTieredPreventionService` mirror) + `DunningCopyComposer` (budget-gated AnthropicAiAssistService-shape, tier-aware tone, defensive per-tier literal fallback) + one-touch `StripeCheckoutService` `PAYMENT_LINK`; paid-guard auto-stop (reload + status∈{SENT,OVERDUE}); advisory `DUNNING_SENT` + `DunningDispatchIT` | `bfd046e` | DONE |
-| AR-4 | `PromiseToPay` create/track + AR-aging read API (`ArAgingController`, buckets + totals) | — | PENDING |
+| AR-4 | `PromiseToPay` model+repo + `PromiseToPayRequest` + `ArAgingReport` DTO + `ArAgingController` (`GET /ar/aging` 5-bucket report + `POST /ar/promises` + `GET /ar/promises?invoiceId`) + suppression guard in `DunningDispatchService` (ACTIVE future-dated promise → skip send) + `ArAgingIT` (3) + `PromiseToPayIT` (8) + `DunningSuppressionIT` (5) | pending commit | DONE |
 | AR-5 | ITs (mirror `CoverageNudge*IT` sweep + a rule-dispatch IT) + `verifyOpenApi` regen + commit `docs/api/openapi.json` | — | PENDING |
 | AR-FE | AR-aging dashboard tab + send-nudge/mark-promise actions (separate; only AFTER BE merges) | — | DEFERRED |
 
@@ -60,6 +60,20 @@
   `RuleActionDispatcher` / `AnthropicAiAssistService` / `AiUsageRecorder` = **empty-diff vs `main`**
   (the `GlobalErrorHandler` + `InvoiceRepository` diffs vs `origin/main` are entirely AR-1/AR-2's
   pre-approved additive seams — confirmed absent from the AR-3 `git diff 70b4611` delta).
+- **AR-4 (2026-06-09, sub-agent):** `./gradlew compileJava compileTestJava` GREEN (`--no-daemon`;
+  pre-existing deprecation warnings only). IT run:
+  `./gradlew test --tests "*ArAgingIT" --tests "*PromiseToPayIT" --tests "*DunningSuppressionIT" --tests "*DunningDispatchIT" --rerun-tasks`
+  GREEN on Docker 29.4.3 Testcontainers:
+  `ArAgingIT tests=3 failures=0 errors=0 skipped=0` /
+  `PromiseToPayIT tests=8 failures=0 errors=0 skipped=0` /
+  `DunningSuppressionIT tests=5 failures=0 errors=0 skipped=0` /
+  `DunningDispatchIT tests=3 failures=0 errors=0 skipped=0` (AR-3 regression clean).
+  `switchIfEmpty(` in new AR-4 executable code: ONE call site in `ArAgingController.doCreatePromise`
+  (line 232) — the genuine invoice-not-found 4601 case (documented, §9-compliant). Zero in
+  `PromiseToPay` / `PromiseToPayRepository` / `ArAgingReport` / suppression guard in
+  `DunningDispatchService`. Reused cores: `Invoice` / `InvoiceService` / `StripeCheckoutService` /
+  `TwilioSmsService` / `RuleActionDispatcher` / `AnthropicAiAssistService` = **empty-diff vs
+  `3fe15ab` fork point** (verified `git diff 3fe15ab HEAD` zero lines on those files).
 
 ## Key invariants for this branch (carry-forward)
 - **`@ConditionalOnProperty(prefix="kmosf.modules.ar", name="enabled", matchIfMissing=false)`** on the job + controller — default OFF; non-AR tenants get no aging sweep, no dunning, byte-identical.

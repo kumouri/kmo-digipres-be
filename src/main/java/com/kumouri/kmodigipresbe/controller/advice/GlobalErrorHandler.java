@@ -785,18 +785,25 @@ import java.util.UUID;
  *       ({@code onErrorResume(DuplicateKeyException → empty)} so a restart/concurrent tick fires ZERO
  *       duplicate, NEVER {@code switchIfEmpty(create)}), flips the invoice SENT→OVERDUE on the first
  *       tier-insert (via the unchanged {@code InvoiceService.setStatus}), and emits the matching
- *       advisory {@code INVOICE_OVERDUE_{D3,D7,D14}} event. New code: {@code 4600} ar not enabled for
- *       the tenant (404 — the in-range parity code; the {@code 4250}/{@code 4300}/{@code 4320}/
- *       {@code 2700}/{@code 3930} not-enabled posture; the AR-4 read controller surfaces the shared
- *       {@code 1130}/{@code 1132} via {@code requireEnabled}). The band {@code 4601-4619} is RESERVED
- *       for AR growth (dunning / promise-to-pay / aging-read sub-phases). Reused (NOT re-allocated):
+ *       advisory {@code INVOICE_OVERDUE_{D3,D7,D14}} event.
+ *       <strong>New codes (AR-4):</strong>
+ *       {@code 4600} ar not enabled for the tenant (404 — the in-range parity code; the
+ *       {@code 4250}/{@code 4300}/{@code 4320}/{@code 2700}/{@code 3930} not-enabled posture; the AR-4
+ *       read controller surfaces the shared {@code 1130}/{@code 1132} via {@code requireEnabled});
+ *       {@code 4601} invoice not found when creating a promise-to-pay — the tenant-scoped
+ *       {@code InvoiceRepository.findByTenantIdAndId} returned empty (404 — a genuine
+ *       {@code switchIfEmpty} for the entity-not-found case in {@code ArAgingController.createPromise});
+ *       {@code 4602} invalid promise-to-pay request — {@code promisedDate} is in the past,
+ *       {@code promisedAmount} ≤ 0, or a required field is missing (400). The band {@code 4603-4619}
+ *       is RESERVED for AR growth. Reused (NOT re-allocated):
  *       {@code 1130}/{@code 1131}/{@code 1132} (the module gate via {@code requireEnabled}), the
  *       existing invoice/billing codes via the unchanged {@code InvoiceService} ({@code 2300}/
  *       {@code 2301}/{@code 3640}). <strong>Strictly additive — the shipped {@code Invoice},
  *       {@code InvoiceService}, {@code StripeCheckoutService}, {@code RuleActionDispatcher},
  *       {@code TwilioSmsService}, and {@code AnthropicAiAssistService} are empty-diff vs {@code main}
  *       (the only pre-existing edits are an additive {@code InvoiceRepository} finder + additive
- *       {@code DomainEventType} constants).</strong></li>
+ *       {@code DomainEventType} constants + the AR-4 additive guard in
+ *       {@code DunningDispatchService}).</strong></li>
  * </ul>
  */
 @Slf4j

@@ -14,12 +14,16 @@ import com.kumouri.kmodigipresbe.integration.twilio.TwilioSmsService;
 import com.kumouri.kmodigipresbe.service.billing.StripeCheckoutService;
 import com.kumouri.kmodigipresbe.tenancy.TenantContext;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
+import org.springframework.beans.factory.ObjectProvider;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -60,6 +64,17 @@ import java.util.UUID;
  * send if its status is NOT in {@code {SENT, OVERDUE}} (i.e. it has been PAID / VOIDED / PARTIALLY_PAID
  * since the event was emitted). The since-paid ladder simply goes quiet.
  *
+ * <h2>AR-4 — Promise-to-Pay suppression guard (additive)</h2>
+ * Before dispatching, this service checks whether the invoice has an <strong>ACTIVE
+ * {@link PromiseToPay} whose {@code promisedDate} is today-or-future</strong>. If so, the send
+ * is <em>suppressed</em> — the customer committed to a date, so we don't nag them until it
+ * lapses. The guard is best-effort / reactive: a repository error on the lookup degrades to
+ * "proceed as if no promise" (log + continue) — the product risk of a missed suppression is a
+ * spurious dunning SMS (minor), whereas blocking a promised customer on a lookup failure is a
+ * worse customer experience. The {@link PromiseToPayRepository} is injected via
+ * {@link ObjectProvider} so the AR-3 bean construction contract (constructor parameters) is
+ * not broken; if the repository is unavailable for any reason the guard degrades gracefully.
+ *
  * <h2>Best-effort + duplicate-safe (never {@code switchIfEmpty(send)})</h2>
  * Every external step (Stripe link, Claude copy, Twilio send) is wrapped {@code onErrorResume}: a Stripe
  * failure degrades to no pay link in the (still-sent) copy via the literal fallback path is avoided —
@@ -90,6 +105,10 @@ public class DunningDispatchService {
     private final DunningCopyComposer copyComposer;
     private final TwilioSmsService twilioSms;
     private final String brandTone;
+    /** AR-4: promise-to-pay repo for the suppression guard. May be null if not yet registered. */
+    private final PromiseToPayRepository promisesToPay;
+    /** AR-4: clock for today-check in the suppression guard (same ObjectProvider pattern as the sweep). */
+    private final Clock clock;
 
     public DunningDispatchService(DomainEventPublisher events,
                                   InvoiceRepository invoices,
@@ -98,6 +117,24 @@ public class DunningDispatchService {
                                   DunningCopyComposer copyComposer,
                                   TwilioSmsService twilioSms,
                                   String brandTone) {
+        this(events, invoices, contacts, stripeCheckout, copyComposer, twilioSms, brandTone,
+                null, Clock.systemUTC());
+    }
+
+    /**
+     * AR-4 full constructor — adds the promise-to-pay suppression guard. Called by
+     * {@link ArAutoConfiguration} in the AR-4 update; the no-arg-promise constructor above is
+     * retained for backward-compat with any existing tests that construct the bean directly.
+     */
+    public DunningDispatchService(DomainEventPublisher events,
+                                  InvoiceRepository invoices,
+                                  ContactRepository contacts,
+                                  StripeCheckoutService stripeCheckout,
+                                  DunningCopyComposer copyComposer,
+                                  TwilioSmsService twilioSms,
+                                  String brandTone,
+                                  PromiseToPayRepository promisesToPay,
+                                  Clock clock) {
         this.events = events;
         this.invoices = invoices;
         this.contacts = contacts;
@@ -105,6 +142,8 @@ public class DunningDispatchService {
         this.copyComposer = copyComposer;
         this.twilioSms = twilioSms;
         this.brandTone = brandTone == null ? "" : brandTone;
+        this.promisesToPay = promisesToPay;
+        this.clock = clock != null ? clock : Clock.systemUTC();
     }
 
     @PostConstruct
@@ -157,11 +196,48 @@ public class DunningDispatchService {
                                 invoiceId, invoice.getStatus());
                         return Mono.empty();
                     }
-                    return resolvePhone(tenantId, invoice)
-                            .flatMap(phone -> actOnInvoice(tenantId, invoice, tier, daysOverdue, phone));
-                    // No phone ⇒ resolvePhone is empty ⇒ no send (clean skip).
+                    // AR-4: Promise-to-pay suppression guard — skip the send if the customer has
+                    // committed to a future date (don't nag them until it lapses).
+                    return checkPromiseSuppression(tenantId, invoiceId)
+                            .flatMap(suppressed -> {
+                                if (suppressed) {
+                                    log.info("AR-4: invoice {} has an ACTIVE future-dated promise-to-pay "
+                                            + "— suppressing tier {} dunning send", invoiceId, tier);
+                                    return Mono.empty();
+                                }
+                                return resolvePhone(tenantId, invoice)
+                                        .flatMap(phone -> actOnInvoice(tenantId, invoice, tier, daysOverdue, phone));
+                                // No phone ⇒ resolvePhone is empty ⇒ no send (clean skip).
+                            });
                 })
                 .then();
+    }
+
+    /**
+     * AR-4 — Promise-to-pay suppression check. Returns {@code true} if the invoice has an
+     * ACTIVE promise whose {@code promisedDate} is today-or-future (suppress the send); false
+     * otherwise (proceed).
+     *
+     * <p><strong>On lookup error, proceed as if no promise</strong> (log + return false).
+     * The product risk of a spurious dunning SMS is minor; blocking a legitimate dunning on a
+     * repository failure is the worse customer/business outcome. This is the "safer product
+     * behavior" choice documented in the AR-4 spec.
+     */
+    private Mono<Boolean> checkPromiseSuppression(UUID tenantId, UUID invoiceId) {
+        if (promisesToPay == null) {
+            // Repository not wired (e.g. old-constructor path or test override) — proceed.
+            return Mono.just(false);
+        }
+        LocalDate today = LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC);
+        return promisesToPay.findAllByTenantIdAndInvoiceIdAndStatus(
+                        tenantId, invoiceId, PromiseToPay.Status.ACTIVE)
+                .filter(p -> p.getPromisedDate() != null && !p.getPromisedDate().isBefore(today))
+                .hasElements()
+                .onErrorResume(err -> {
+                    log.warn("AR-4: promise-to-pay lookup failed for invoice {} (proceeding with send): {}",
+                            invoiceId, err.toString());
+                    return Mono.just(false);
+                });
     }
 
     private Mono<Void> actOnInvoice(UUID tenantId, Invoice invoice, DunningCopyComposer.DunningTier tier,
