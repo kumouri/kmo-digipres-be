@@ -15,19 +15,24 @@
 
 | Sub-phase | Scope | Commit | Status |
 |---|---|---|---|
-| E2.0 | Detail plan + fresh ledger | _this commit_ | DONE |
-| E2.1 | model + repos + DomainEventType block + config props | | TODO |
-| E2.2 | `InboundIntentClassifier` (VoicemailExtractionService clone, text) | | TODO |
-| E2.3 | `ConversationStateService` + `IntentHandler` + `DefaultHandoffIntentHandler` + `InboundIntentRouter` | | TODO |
-| E2.4 | surgical `InboundSmsService` delegation + `InboundOutcome.RESPONDER_HANDLED` (re-run regression ITs) | | TODO |
-| E2.5 | `ResponderAutoConfiguration` + condition + `@ConditionalOnMissingBean` fallback + wiring bean | | TODO |
-| E2.6 | `ResponderConfigController` + `GlobalErrorHandler` 4320-4339 Javadoc | | TODO |
-| E2.7 | ITs + `verifyOpenApi` regen + commit `docs/api/openapi.json` | | TODO |
+| E2.0 | Detail plan + fresh ledger | 40827dd | DONE |
+| E2.1 | model + repos + DomainEventType block + config props | b0f5eda | DONE |
+| E2.2 | `InboundIntentClassifier` (VoicemailExtractionService clone, text) | 831b1d6 | DONE |
+| E2.3 | `ConversationStateService` + `IntentHandler` + `DefaultHandoffIntentHandler` + `InboundIntentRouter` | 8358baf | DONE |
+| E2.4 | surgical `InboundSmsService` delegation + `InboundOutcome.RESPONDER_HANDLED` | cd09875 | DONE |
+| E2.5 | `ResponderAutoConfiguration` + condition + `@ConditionalOnMissingBean` fallback + wiring bean | 76124e2 | DONE |
+| E2.6 | `ResponderConfigController` + `GlobalErrorHandler` 4320-4339 Javadoc | 2a86c8c | DONE |
+| E2.7 | ITs (25 tests) + `verifyOpenApi` regen + commit `docs/api/openapi.json` | c7c3234 | DONE |
 
-## Validation log
-- (pending) `./gradlew test --tests "*GapFillWaitlistIT" --tests "*RealEstateConciergeIT"` — REGRESSION gate.
-- (pending) `./gradlew test --tests "com.kumouri.kmodigipresbe.module.responder.*" --tests "*OpenApiEndpointIT"` — new.
-- (pending) `./gradlew check` — runs `verifyOpenApi`, refreshes `docs/api/openapi.json`.
+## Validation log (all GREEN, local Docker/Testcontainers)
+- REGRESSION gate — `./gradlew test --tests "*GapFillWaitlistIT" --tests "*RealEstateConciergeIT"`:
+  `GapFillWaitlistIT` **11/0/0/0**, `RealEstateConciergeIT` **5/0/0/0** — pass UNCHANGED with the seam wired.
+- New — `./gradlew test --tests "com.kumouri.kmodigipresbe.module.responder.*"`:
+  `InboundIntentClassifierIT` **8/0/0/0**, `InboundIntentRouterIT` **7/0/0/0**,
+  `ConversationStateIT` **3/0/0/0**, `ResponderConfigIT` **7/0/0/0** = **25/0/0/0**.
+- Boot guard — `OpenApiEndpointIT` **2/0/0/0** (full context boots with the responder wiring active).
+- `verifyOpenApi` refreshed `docs/api/openapi.json` (adds `/responder/config[/test-classify]` +
+  the now-default-registered `/public/integrations/twilio/{tenantId}/sms`).
 
 ## Key invariants for this branch (carry-forward)
 - **`switchIfEmpty` only for genuine not-found.** find-or-create (conversation, config) is
