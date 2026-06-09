@@ -30,7 +30,7 @@ domain-event subscriber (no seam).
 | T5.6 | `CallbackAutoConfiguration` (both-modules gate; default-OFF `home-callback-offer` send bean) + AutoConfiguration.imports + `DomainEventType` T5 block (CALLBACK_OFFERED/REQUESTED/DISPATCHED) | DONE | (this) | compileJava OK |
 | T5.7 | Demo seed (`CallbackDemoSeeder`, `@Profile("demo-home-callback")`) | DONE | (this) | compileJava OK |
 | T5.8 | ITs (offer / reply / revenue-rank / recovery-stats / module-gate / opt-out) + 2 unit tests | DONE | (this) | T5 suite GREEN (see log) |
-| T5.9 | Docs (CLAUDE.md T5 entry) + error codes (4400-4409 Javadoc DONE) + openapi regen + regression run | PARTIAL | | error Javadoc DONE |
+| T5.9 | Docs (CLAUDE.md T5 entry) + error codes (4400-4409 Javadoc) + openapi (no-diff, default-OFF) + regression run (all green) + empty-diff verify | DONE | (this) | regression GREEN; reused cores 0-diff |
 
 ## Decisions / deviations (filled in as work lands)
 - **Reused voicemail core empty-diff via event subscriber (T5.3).** The callback-offer SMS hooks off
@@ -58,3 +58,18 @@ domain-event subscriber (no seam).
   - CallbackOfferIT (3), CallbackReplyIT (2), CallbackQueueAndStatsIT (6),
     CallbackModuleGateIT (4 nested: HomeServicesOff/ResponderOff/BothOnOfferOff/BothOnOfferOn),
     CallbackOptOutIT (1) — all 0 failures / 0 errors.
+- T5.9: REGRESSION all GREEN —
+  - `TwilioVoicemailIT` + `HomeServicesVoicemailIT` + `HomeServicesVoicemailFieldServiceDisabledIT`
+    + `HomeServicesEmergencyForwardIT` + `HealthFrontDeskVoicemailIT` + `module.responder.*`
+    (ConversationStateIT/InboundIntentClassifierIT/InboundIntentRouterIT/ResponderConfigIT) → BUILD SUCCESSFUL.
+  - `EquipmentVisionIT` + `HomeServicesModuleGatingIT` + `ServiceRequestWidgetIT` + `OnTheWayDispatchIT`
+    + `OpenApiEndpointIT` (2/0) → BUILD SUCCESSFUL.
+  - `verifyOpenApi`: "docs/api/openapi.json already matches the generated spec. OK." (default-OFF →
+    no callback paths in the spec; FE uses hand-written api/*.ts — the AR/T1-T4 precedent).
+  - Reused cores EMPTY-DIFF vs `main` (0 changes each, verified): TwilioVoicemailService,
+    VoicemailExtractionService, TwilioSmsService, InboundSmsService, InboundIntentRouter,
+    InboundIntentClassifier, DefaultHandoffIntentHandler, ConversationStateService,
+    MissedCallInboxController, ResponderAutoConfiguration, HomeServicesAutoConfiguration, WorkOrderService.
+  - Reactive-invariant grep: NO `switchIfEmpty(create/send)` in module/homeservices/callback — every
+    switchIfEmpty is genuine not-found (4400/4401); offer dedupe is ledger-insert-FIRST + explicit-boolean;
+    CallbackRequest upsert is explicit-boolean; no `.block()` in production paths.
