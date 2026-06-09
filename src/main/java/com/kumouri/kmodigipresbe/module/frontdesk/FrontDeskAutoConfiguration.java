@@ -105,10 +105,15 @@ public class FrontDeskAutoConfiguration {
                 List.of("APPOINTMENT", "NO_SHOW_RISK"));
     }
 
-    /** Staff CRUD for the thin {@code Appointment} (the {@code ListingService} posture). */
+    /**
+     * Staff CRUD for the thin {@code Appointment} (the {@code ListingService} posture). Takes the
+     * {@link DomainEventPublisher} for the T7 additive {@code APPOINTMENT_CANCELLED} emit on a real
+     * SCHEDULED|CONFIRMED -> CANCELLED transition (advisory; the only T7 frontdesk-core edit).
+     */
     @Bean
-    public AppointmentService frontDeskAppointmentService(AppointmentRepository appointments) {
-        return new AppointmentService(appointments);
+    public AppointmentService frontDeskAppointmentService(AppointmentRepository appointments,
+                                                          DomainEventPublisher eventPublisher) {
+        return new AppointmentService(appointments, eventPublisher);
     }
 
     /**
