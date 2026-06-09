@@ -8,4 +8,5 @@ com.kumouri.kmodigipresbe.module.frontdesk.FrontDeskAutoConfiguration
 com.kumouri.kmodigipresbe.module.nurture.NurtureAutoConfiguration
 com.kumouri.kmodigipresbe.module.responder.ResponderAutoConfiguration
 com.kumouri.kmodigipresbe.module.ar.ArAutoConfiguration
+com.kumouri.kmodigipresbe.module.waitlist.WaitlistAutoConfiguration
 com.kumouri.kmodigipresbe.integration.square.SquareAutoConfiguration

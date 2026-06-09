@@ -458,6 +458,40 @@ public final class DomainEventType {
     // upstream INVOICE_OVERDUE_* one-shot is the exactly-once guarantee (AR-3 adds no new ledger).
     // Emitted only when the `ar` module is on. Payload: {invoiceId, contactId, tier, channel}.
     public static final String DUNNING_SENT = "ar.dunningSent";
+    // E3 (Review Engine) — post-visit review-REQUEST delivery + sentiment triage + per-entity insights.
+    // All four are advisory (RuleEngine / webhook fan-out) — they do NOT drive any core mutation; the
+    // request create-on-completion, the default-OFF scheduled send, the sentiment store, and the
+    // negative manager alert all happen synchronously + explicitly inside the E3 services, gated by
+    // explicit-boolean probes over unique indexes / the atomic PENDING->SENT claim (never switchIfEmpty).
+    // REVIEW_REQUEST_CREATED: emitted by ReviewRequestService when a completed visit/job
+    //   (BOOKING_COMPLETED / MILESTONE_COMPLETED) yields a fresh PENDING ReviewRequest; payload
+    //   {subjectType, subjectId, contactId, sourceEventType}.
+    // REVIEW_REQUEST_SENT: emitted by the default-OFF ReviewRequestSenderJob after a due PENDING request
+    //   is atomically claimed and the no-incentive Google-review SMS is dispatched; payload
+    //   {reviewRequestId, subjectType, subjectId, contactId}.
+    // REVIEW_REQUEST_SKIPPED: emitted when a due request is skipped by a gate (opt-out / no review link /
+    //   frequency cap) and marked SKIPPED; payload {reviewRequestId, contactId, reason}.
+    // GBP_REVIEW_NEGATIVE_ALERTED: emitted after a negative ingested review (rating <= threshold OR
+    //   sentiment NEGATIVE) triggers the best-effort manager alert; payload
+    //   {reviewId, reviewReplyId, rating, sentiment}.
+    public static final String REVIEW_REQUEST_CREATED      = "review.requestCreated";
+    public static final String REVIEW_REQUEST_SENT         = "review.requestSent";
+    public static final String REVIEW_REQUEST_SKIPPED      = "review.requestSkipped";
+    public static final String GBP_REVIEW_NEGATIVE_ALERTED = "gbp.reviewNegativeAlerted";
+
+    // E4 (Gap-Fill Waitlist engine) — the vertical-agnostic gap-fill waitlist engine. Both are advisory
+    // (RuleEngine / webhook fan-out) — they do NOT drive any core mutation. Distinct from the chairfill
+    // CF-3 WAITLIST_OFFER_SENT / WAITLIST_SLOT_CLAIMED constants above (which stay byte-equivalent): the
+    // generic engine uses the WAITLIST_ENGINE_ prefix so the two never collide. The engine is
+    // consumer-triggered + module-gated; a tenant without the `waitlist` module emits nothing.
+    // WAITLIST_ENGINE_OFFER_SENT: emitted by GapFillEngine once per WaitlistOffer dispatched (a ranked
+    //   waitlisted contact texted a time-boxed offer for the freed slot). Payload:
+    //   {slotKey, offerId, contactId, rank, expiresAt}.
+    // WAITLIST_ENGINE_SLOT_CLAIMED: emitted by WaitlistClaimEngine when the first YES atomically claims the
+    //   freed slot and the consumer's SlotMaterializer creates the real record (or the no-op fallback).
+    //   Payload: {slotKey, offerId, contactId, refType, refId}.
+    public static final String WAITLIST_ENGINE_OFFER_SENT   = "waitlistEngine.offerSent";
+    public static final String WAITLIST_ENGINE_SLOT_CLAIMED = "waitlistEngine.slotClaimed";
 
     private DomainEventType() {
     }

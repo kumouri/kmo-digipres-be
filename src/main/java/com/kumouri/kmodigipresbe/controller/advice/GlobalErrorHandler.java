@@ -804,6 +804,66 @@ import java.util.UUID;
  *       (the only pre-existing edits are an additive {@code InvoiceRepository} finder + additive
  *       {@code DomainEventType} constants + the AR-4 additive guard in
  *       {@code DunningDispatchService}).</strong></li>
+ *   <li>{@code 4340-4349} — <em>Review Engine (E3)</em>: post-visit review-REQUEST delivery + sentiment
+ *       triage + per-entity insights, extending the shipped {@code integration/gbp} review pipeline
+ *       additively. On a completed visit/job ({@code BOOKING_COMPLETED} salon + {@code MILESTONE_COMPLETED}
+ *       home/project) {@code ReviewRequestService} creates a {@code ReviewRequest} (explicit-boolean over
+ *       the unique {@code tenant_subject_contact_idx}); a <strong>default-OFF</strong>
+ *       {@code ReviewRequestSenderJob} ({@code @ConditionalOnProperty(kmosf.modules.review-engine.sender-enabled,
+ *       matchIfMissing=false)} — the {@code CoverageNudgeJob}/{@code ImapInboundPoller} posture) sends due
+ *       PENDING requests as a <strong>frictionless, no-incentive</strong> Google-review SMS (Google's 2026
+ *       policy bans incentives), opt-out-aware ({@code sms-opt-out}), frequency-capped, atomic-claim
+ *       idempotent. {@code ReviewSentimentService} (a NEW sibling mirroring {@code GbpReplyDraftService} —
+ *       that core is empty-diff) classifies each ingested review (rating-first always; the AI refinement
+ *       is opt-in {@code kmosf.review-engine.ai-refine-enabled}, default-OFF) on the one surgical
+ *       {@code GbpReviewPoller} seam and stores the additive {@code sentiment}/{@code sentimentSource}; a
+ *       negative ({@code rating <= threshold} OR {@code NEGATIVE}) fires a best-effort manager alert when
+ *       the opt-in {@code kmosf.review-engine.negative-alert-enabled} (default-OFF) is set. Both opt-ins
+ *       are default-OFF so the seam adds ZERO extra Anthropic calls and ZERO extra notify in the default
+ *       path (the existing {@code GbpReviewPollerIT} stays byte-identical). The generic
+ *       {@code ReviewInsightsService} +
+ *       ADMIN {@code ReviewInsightsController} ({@code GET /gbp/review-insights[/{subjectType}/{subjectId}]})
+ *       aggregate per {@code (subjectType, subjectId)} + per-tenant. New codes: {@code 4340} review-insights
+ *       subject type invalid (400 — an unparseable {@code {subjectType}} path segment). The band
+ *       {@code 4341-4349} is RESERVED for review-engine growth. Reused (NOT re-allocated): {@code 1200}-
+ *       {@code 1203} (AI budget / Anthropic upstream / missing-key — surfaced best-effort by
+ *       {@code ReviewSentimentService}, which degrades to the rating-based result rather than throwing),
+ *       {@code 2530}-{@code 2532} (Twilio SMS — the request-send + negative-alert paths), {@code 1800}
+ *       (RoleGuard ADMIN on the insights controller). The insights controller is
+ *       {@code @ConditionalOnProperty(kmosf.modules.gbp-reviews, matchIfMissing=true)} + ADMIN — the
+ *       {@code GbpReviewReplyAdminController} precedent, NOT {@code requireEnabled} ({@code gbp-reviews} is
+ *       an {@code integration/} package, not a registered module — E3 deviation D1). The sender is default-OFF
+ *       (no live request SMS in CI); the sentiment Anthropic call is WireMock-able; the request-send +
+ *       negative-alert SMS/email are mocked in ITs (no live send). <strong>The ONLY pre-existing service
+ *       touched is {@code GbpReviewPoller} (a surgical additive sentiment-store + negative-alert seam in
+ *       {@code draftAndFinish}, all {@code onErrorResume}'d); {@code GbpReviewReply} gains 2 additive nullable
+ *       fields; {@code GbpReplyDraftService}, {@code GbpReviewReplyAdminService}, {@code GbpApiClient},
+ *       {@code TwilioSmsService}, {@code EmailService}, {@code AnthropicAiAssistService},
+ *       {@code SalonBookingService}, and {@code MilestoneService} are empty-diff vs {@code main}.</strong></li>
+ *   <li>{@code 4350-4359} — <em>Gap-Fill Waitlist engine (E4)</em>: the vertical-agnostic gap-fill
+ *       waitlist engine ({@code model/waitlist}, {@code service/waitlist}, {@code controller/waitlist},
+ *       {@code repository/waitlist}). On a freed slot a consumer calls
+ *       {@code GapFillEngine.gapFill(tenantId, slot)} → {@code WaitlistRankingService} ranks the OPEN,
+ *       opted-in, slot-matching {@code WaitlistEntry} pool by inverted show-risk (most-likely-to-show
+ *       first; rules-based + FIFO tiebreak, over entry-carried stats — NO salon Booking coupling) → the
+ *       top-N get a time-boxed offer SMS + a {@code WaitlistOffer} ledger row. The first inbound YES
+ *       atomically claims the slot via {@code WaitlistClaimEngine} (a {@code findAndModify} on
+ *       {@code waitlist_slot_claims} with the {@code claimedByContactId:null} guard + {@code upsert} —
+ *       the CF-3 D2 / {@code WorkOrderNumberGenerator} double-YES-correct gate; winner → the consumer's
+ *       {@code SlotMaterializer} creates the real domain record, loser → an apology); offer-expiry is the
+ *       {@code WaitlistOfferExpiryService} ledger-hygiene sweep (no {@code @Scheduled} live job by default
+ *       — the engine is consumer-triggered + dormant). New codes: {@code 4350} waitlist entry not found
+ *       for the tenant (404); {@code 4351} waitlist entry invalid (blank {@code contactId} on create, 400);
+ *       {@code 4352} gap-fill slot request invalid (missing {@code slotKey} / {@code slotStart}, 400). The
+ *       band {@code 4353-4359} is RESERVED for waitlist-engine growth. Reused (NOT re-allocated):
+ *       {@code 1130}/{@code 1132} (module gate — the {@code waitlist} module on the admin controller, the
+ *       {@code NurtureCampaignController} posture); {@code 2530}-{@code 2532} (Twilio SMS — the offer /
+ *       confirmation / apology send paths); {@code 1800} (RoleGuard ADMIN on the admin controller). The
+ *       engine has <strong>no AI dependency</strong> (deterministic template copy) so it adds ZERO
+ *       Anthropic calls; {@code TwilioSmsService} is mocked in ITs (no live send). <strong>ChairFill is
+ *       byte-equivalent</strong> — the engine is a parallel generic package; the chairfill
+ *       {@code GapFillWaitlistIT} regression gate stays green and {@code InboundSmsService} /
+ *       {@code TwilioSmsService} / {@code NoShowRiskScoringService} are empty-diff vs {@code main}.</li>
  * </ul>
  */
 @Slf4j
