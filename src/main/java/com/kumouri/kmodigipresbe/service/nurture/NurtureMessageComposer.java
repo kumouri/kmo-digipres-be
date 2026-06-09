@@ -4,6 +4,7 @@ import com.kumouri.kmodigipresbe.model.contact.Contact;
 import com.kumouri.kmodigipresbe.model.nurture.NurtureCadenceStep;
 import com.kumouri.kmodigipresbe.model.nurture.NurtureChannel;
 import com.kumouri.kmodigipresbe.service.ai.AiAssistService;
+import jakarta.annotation.Nullable;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
@@ -24,6 +25,15 @@ import reactor.core.publisher.Mono;
  *       <strong>degrades to the rendered template, never drops the send</strong> (the plan §8 "AI is
  *       triage, not truth" rule). The body field reflects which was used via {@code aiApplied}.</li>
  * </ol>
+ *
+ * <h2>Optional post-compose copy filter (strictly additive — T1)</h2>
+ * After the two stages above, the final body is piped through an optional {@link NurtureCopyFilter} when
+ * one is wired via {@link #setCopyFilter} (the {@code InboundSmsService.setConciergeRouter} setter
+ * precedent). This is the single chokepoint a vertical deployment uses to vet/sanitize <em>every</em>
+ * outbound message (e.g. the Real-Estate Fair-Housing screen) — template AND AI-rewritten copy both
+ * funnel through here. <strong>When no filter is wired (the default) the output is byte-identical to
+ * before</strong>, so the shipped E1 nurture behavior + ITs are unaffected. The filter is best-effort
+ * (an error degrades to the unfiltered body) and never drops the send.
  */
 @Slf4j
 @RequiredArgsConstructor
@@ -38,13 +48,64 @@ public class NurtureMessageComposer {
     private final AiAssistService aiAssistService;
 
     /**
-     * Compose the message for one step + contact.
+     * Optional post-compose copy filter (T1). Null by default — set via {@link #setCopyFilter} by a
+     * vertical module's wiring bean (the {@code conciergeRouter}/{@code intentRouter} setter precedent),
+     * so when absent the composer is byte-identical to pre-T1. Hand-constructed bean (not
+     * component-scanned), so this is a setter, not field-{@code @Autowired}.
+     */
+    @Nullable
+    private NurtureCopyFilter copyFilter;
+
+    /**
+     * Wire the optional post-compose copy filter (T1). Invoked by a vertical module's side-effecting
+     * wiring bean when that vertical's screen must apply to all nurture outbound; never called otherwise
+     * (the filter stays null → byte-identical to pre-T1). Idempotent / last-wins.
+     */
+    public void setCopyFilter(@Nullable NurtureCopyFilter copyFilter) {
+        this.copyFilter = copyFilter;
+    }
+
+    /**
+     * Compose the message for one step + contact, then apply the optional post-compose copy filter (T1).
+     * When no filter is wired this is byte-identical to the raw composition.
      *
      * @param step    the cadence step (carries channel + templates + the aiPersonalize flag)
      * @param contact the recipient (for placeholder substitution)
-     * @return the composed message (never errors — AI failure degrades to the template)
+     * @return the composed message (never errors — AI failure degrades to the template; a filter failure
+     *         degrades to the unfiltered body)
      */
     public Mono<ComposedMessage> compose(NurtureCadenceStep step, Contact contact) {
+        return composeRaw(step, contact).flatMap(msg -> applyFilter(msg, contact));
+    }
+
+    /**
+     * Apply the optional {@link NurtureCopyFilter} to the composed body. No filter wired → the message is
+     * returned unchanged (byte-identical to pre-T1). A filter that replaces the body returns a new
+     * {@link ComposedMessage} with the safe body (channel/subject/aiApplied preserved). Best-effort: a
+     * filter error degrades to the unfiltered message (logged), never drops the send.
+     */
+    private Mono<ComposedMessage> applyFilter(ComposedMessage msg, Contact contact) {
+        if (copyFilter == null) {
+            return Mono.just(msg);
+        }
+        return copyFilter.filter(msg.channel(), msg.body(), contact)
+                .map(result -> {
+                    if (!result.replaced()) {
+                        return msg;
+                    }
+                    log.info("Nurture copy filter replaced a {} body (reason: {})",
+                            msg.channel(), result.reason());
+                    return new ComposedMessage(msg.channel(), msg.subject(), result.body(), msg.aiApplied());
+                })
+                .onErrorResume(e -> {
+                    log.warn("Nurture copy filter failed (best-effort, using unfiltered body): {}",
+                            e.toString());
+                    return Mono.just(msg);
+                });
+    }
+
+    /** The raw template-render + best-effort AI-personalize composition (pre-T1 behavior, unchanged). */
+    private Mono<ComposedMessage> composeRaw(NurtureCadenceStep step, Contact contact) {
         if (step.channel() == NurtureChannel.EMAIL) {
             String subject = render(step.emailSubject(), contact);
             String body = render(step.emailBody(), contact);
