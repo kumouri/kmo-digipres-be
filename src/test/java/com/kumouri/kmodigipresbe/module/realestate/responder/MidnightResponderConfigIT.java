@@ -8,7 +8,6 @@ import com.kumouri.kmodigipresbe.model.tenant.Tenant;
 import com.kumouri.kmodigipresbe.model.user.User;
 import com.kumouri.kmodigipresbe.repository.UserRepository;
 import com.kumouri.kmodigipresbe.service.JwtTokenService;
-import com.kumouri.kmodigipresbe.integration.twilio.TwilioSmsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,7 +18,6 @@ import org.springframework.data.mongodb.core.ReactiveMongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 import java.math.BigDecimal;
@@ -49,8 +47,6 @@ class MidnightResponderConfigIT {
     @Autowired ReactiveMongoTemplate mongo;
     @Autowired JwtTokenService jwt;
     @Autowired UserRepository users;
-
-    @MockitoBean TwilioSmsService twilioSmsService;
 
     private UUID tenantId;
     private String staffToken;
@@ -84,7 +80,7 @@ class MidnightResponderConfigIT {
 
     @Test
     void get_returns4380_whenNoConfig() {
-        web.get().uri("/api/v1/realestate/responder/config")
+        web.get().uri("/realestate/responder/config")
                 .header("Authorization", staffToken)
                 .exchange()
                 .expectStatus().isNotFound();
@@ -93,7 +89,7 @@ class MidnightResponderConfigIT {
     @Test
     void upsert_thenGet_roundTrips() {
         // First upsert — creates.
-        web.put().uri("/api/v1/realestate/responder/config")
+        web.put().uri("/realestate/responder/config")
                 .header("Authorization", staffToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(new MidnightResponderConfigDTO(warmCampaignId, null, true, 9, 17))
@@ -109,7 +105,7 @@ class MidnightResponderConfigIT {
         assertThat(mongo.findAll(MidnightResponderConfig.class).collectList().block()).hasSize(1);
 
         // GET returns it.
-        web.get().uri("/api/v1/realestate/responder/config")
+        web.get().uri("/realestate/responder/config")
                 .header("Authorization", staffToken)
                 .exchange()
                 .expectStatus().isOk()
@@ -117,7 +113,7 @@ class MidnightResponderConfigIT {
                 .jsonPath("$.warmCampaignId").isEqualTo(warmCampaignId.toString());
 
         // Second upsert — updates in place (still one row).
-        web.put().uri("/api/v1/realestate/responder/config")
+        web.put().uri("/realestate/responder/config")
                 .header("Authorization", staffToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(new MidnightResponderConfigDTO(null, null, false, null, null))
@@ -132,7 +128,7 @@ class MidnightResponderConfigIT {
 
     @Test
     void upsert_returns4381_whenTierCampaignNotATenantCampaign() {
-        web.put().uri("/api/v1/realestate/responder/config")
+        web.put().uri("/realestate/responder/config")
                 .header("Authorization", staffToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(new MidnightResponderConfigDTO(UUID.randomUUID(), null, true, null, null))
@@ -149,7 +145,7 @@ class MidnightResponderConfigIT {
         users.save(noRole).block();
         String noRoleToken = "Bearer " + jwt.mint(noRole);
 
-        web.get().uri("/api/v1/realestate/responder/config")
+        web.get().uri("/realestate/responder/config")
                 .header("Authorization", noRoleToken)
                 .exchange()
                 .expectStatus().isForbidden();

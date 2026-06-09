@@ -192,7 +192,7 @@ class MidnightResponderLatencyIT {
 
         // The stats endpoint aggregates the latency + the after-hours share.
         MidnightResponderLatencyStats stats = web.get()
-                .uri("/api/v1/realestate/responder/latency-stats")
+                .uri("/realestate/responder/latency-stats")
                 .header("Authorization", staffToken)
                 .exchange()
                 .expectStatus().isOk()
@@ -213,7 +213,7 @@ class MidnightResponderLatencyIT {
     @Test
     void latencyStats_emptyWhenNoConversations() {
         MidnightResponderLatencyStats stats = web.get()
-                .uri("/api/v1/realestate/responder/latency-stats")
+                .uri("/realestate/responder/latency-stats")
                 .header("Authorization", staffToken)
                 .exchange()
                 .expectStatus().isOk()

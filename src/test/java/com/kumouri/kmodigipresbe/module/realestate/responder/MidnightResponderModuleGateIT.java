@@ -77,6 +77,9 @@ class MidnightResponderModuleGateIT {
             assertThat(ctx.getBean(ResponderHandoffDelegate.class)).isNotNull();
             assertThat(ctx.getBean(RealEstateMidnightAutoConfiguration.MidnightResponderHandoffWiring.class))
                     .isNotNull();
+            // The component-scanned controllers are present too (realestate gate on).
+            assertThat(ctx.getBean(MidnightResponderConfigController.class)).isNotNull();
+            assertThat(ctx.getBean(MidnightResponderStatsController.class)).isNotNull();
         }
     }
 }
