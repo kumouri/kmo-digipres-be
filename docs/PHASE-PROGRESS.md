@@ -1,75 +1,47 @@
-# PHASE-PROGRESS — T5 Home Services "Instant Callback" (`home-instant-callback`)
+# PHASE-PROGRESS — T6 Salon "ReviewBoost" (BE leg) (`salon-reviewboost`)
 
-> Fresh ledger for this branch (off `main` @ `eb30acb`). Replaces the prior `health-switchboard-ai`
-> (T4) ledger that occupied this path — that work is already on `main`. Tracks per-sub-phase progress
+> Fresh ledger for this branch (off `main` @ `b345d27`). Replaces the prior `home-instant-callback`
+> (T5) ledger that occupied this path — that work is already on `main`. Tracks per-sub-phase progress
 > + validation status so a resume-after-crash reconstructs the frontier from git + this file, never
 > agent memory.
 
-Detail plan: `~/.claude/plans/home-instant-callback.md`. Error band **4400–4409**. Module gate:
-`kmosf.modules.home-services` AND `kmosf.modules.responder` (the callback-offer send default-OFF via
-`kmosf.modules.home-callback-offer`, matchIfMissing=false). Consumes **E2** (Inbound Responder +
-Intent-Router) — the T3/T4 structural twin for Home Services. Wave-2 vertical AI tool over E1–E4.
+Detail plan: `~/.claude/plans/salon-reviewboost.md`. Error band **4410–4419** (reuse E3's 4340-4349;
+mint only the genuinely-new). Deploys engine **E3** (Review engine: requests + insights, PR #104) to the
+salon vertical. Module gate: `kmosf.modules.chairfill` (the salon flagship's key) + `@ConditionalOnBean
+(SalonBookingService)` (salon-spa loaded) + per-tenant `requireEnabled(chairfill)` & `requireEnabled
+(salon-spa)`. Wave-2 vertical AI tool over E1–E4.
 
-## What T5 is
-Missed-call voicemail → an opt-in callback SMS to the caller → the caller's reply (handled via the E2
-responder as a `CallbackIntentHandler`) records a revenue-ranked `CallbackRequest` → a dispatcher read
-endpoint returns ranked callback cards with the AI one-liner → recovery (missed→offered→accepted→
-dispatched) analytics. Heavy reuse of the shipped HS-1 voicemail intake + E2 responder; the reused
-voicemail core (`TwilioVoicemailService`) stays **byte-unchanged** via a `VOICEMAIL_LEAD_CREATED`
-domain-event subscriber (no seam).
+## Framing (investigation result — what already ships)
+Most of ReviewBoost ALREADY SHIPS via E3 + ChairFill (CF-1..CF-5). T6's genuine net-new is a
+**per-stylist insights LIST** read surface + a demo seed.
+
+- **Per-stylist attribution already works** — `SalonBookingService.complete()` emits `BOOKING_COMPLETED`
+  carrying `staffMemberId`; `ReviewRequestService.handleBookingCompleted` maps it to
+  `ReviewSubjectType.STAFF` + `staffMemberId`. T6 asserts it, does not change it.
+- **No-incentive review-request SMS** — `ReviewRequestSenderJob` (default-OFF; per-tenant `reviewLink`).
+- **Sentiment triage + negative manager alert** — `ReviewSentimentService` + `ReviewNegativeAlertService`.
+- **1-click AI reply drafts + approval queue** — `GbpReplyDraftService` + CF-4 `SalonReviewReplyService`
+  + `GbpReviewReplyAdminController`.
+- **Per-(subjectType,subjectId) insights** — `ReviewInsightsService` + `ReviewInsightsController`.
+
+The shipped insights API answers one subject at a time (or whole-tenant). The salon dashboard needs every
+stylist's funnel side-by-side — that LIST is T6's only real net-new BE code.
 
 ## Sub-phases
 
 | # | Sub-phase | Status | Commit | Validation |
 |---|-----------|--------|--------|------------|
-| T5.1 | Detail plan + this ledger | DONE | (first commit) | n/a (docs) |
-| T5.2 | Model + ledgers (`CallbackRequest`, `CallbackOfferLog`, `CallbackFunnelLog`, enums, repos) | DONE | 2c8e18c | compileJava OK |
-| T5.3 | `CallbackIntentHandler` (E2 handler) + `CallbackOfferSubscriber` (`VOICEMAIL_LEAD_CREATED`) + `CallbackIntents` + `RequestedWindowParser` + `CallbackRevenueRanker` | DONE | (this) | compileJava OK |
-| T5.4 | `CallbackController` (ranked queue + dispatch + recovery-stats + config CRUD; repos inline — T3/T4 controller precedent) + DTOs | DONE | (this) | compileJava OK |
-| T5.5 | recovery funnel (inlined in controller) + `CallbackConfig` admin CRUD | DONE | (this) | compileJava OK |
-| T5.6 | `CallbackAutoConfiguration` (both-modules gate; default-OFF `home-callback-offer` send bean) + AutoConfiguration.imports + `DomainEventType` T5 block (CALLBACK_OFFERED/REQUESTED/DISPATCHED) | DONE | (this) | compileJava OK |
-| T5.7 | Demo seed (`CallbackDemoSeeder`, `@Profile("demo-home-callback")`) | DONE | (this) | compileJava OK |
-| T5.8 | ITs (offer / reply / revenue-rank / recovery-stats / module-gate / opt-out) + 2 unit tests | DONE | (this) | T5 suite GREEN (see log) |
-| T5.9 | Docs (CLAUDE.md T5 entry) + error codes (4400-4409 Javadoc) + openapi (no-diff, default-OFF) + regression run (all green) + empty-diff verify | DONE | (this) | regression GREEN; reused cores 0-diff |
+| T6.1 | Detail plan + this ledger | DONE | (first commit) | n/a (docs) |
+| T6.2 | `module/chairfill/reviewboost/` — DTOs + `SalonReviewInsightsService` (reuses `ReviewInsightsService` + `StaffMemberRepository`) + `ReviewBoostController` + `ReviewBoostAutoConfiguration`; register in AutoConfiguration.imports; app-props doc; `GlobalErrorHandler` 4410-4419 Javadoc | PENDING | — |
+| T6.3 | `SalonReviewBoostDemoSeeder` (`@Profile("demo-salon-reviewboost")`) | PENDING | — |
+| T6.4 | ITs: `SalonReviewBoostInsightsIT`, `SalonReviewBoostConfigIT` | PENDING | — |
+| T6.5 | openapi regen + CLAUDE.md T6 entry + ledger finalize | PENDING | — |
 
-## Decisions / deviations (filled in as work lands)
-- **Reused voicemail core empty-diff via event subscriber (T5.3).** The callback-offer SMS hooks off
-  the shipped `DomainEventType.VOICEMAIL_LEAD_CREATED` (already published by `TwilioVoicemailService`
-  after the Contact+Activity are durable), so `TwilioVoicemailService` needs **no seam** — strictly
-  additive subscriber. Strongest possible "reused core empty-diff." Scoped to home tenants
-  (`ResponderConfig(vertical="home")`) so a mole/NMM lead is a no-op (NMM byte-equivalent).
-- **Default-OFF caller-SMS send.** Only the offer-send bean carries the extra
-  `@ConditionalOnProperty(kmosf.modules.home-callback-offer, matchIfMissing=false)` gate — no live
-  caller SMS in CI / any default run (the AR/Nurture comms-runner precedent). The handler + read
-  endpoints + analytics are on with the both-modules gate.
-- **No E2 edit.** `CallbackIntentHandler` registers purely by being a `@Bean`; the
-  `InboundIntentRouter` auto-discovers it via `List<IntentHandler>`. The reply send + consent gate +
-  cap + `ConversationState` persistence + advisory events are all the router's (the handler returns a
-  `HandlerResult` only).
-- **Deterministic revenue ranking, no ML.** `CallbackRevenueRanker` is pure/static — job-value band
-  (LARGE>MEDIUM>SMALL>unknown) primary, urgency secondary, recency tie-break — reusing the WorkOrder
-  `customFields.jobValueBand`/`urgency` the multi-trade intake already stamped.
+## Reused cores — MUST stay empty-diff vs `main`
+`ReviewRequestService`, `ReviewSentimentService`, `ReviewNegativeAlertService`, `ReviewInsightsService`,
+`ReviewRequestSenderJob`, `GbpReplyDraftService`, `GbpReviewReplyAdminController`/`Service`,
+`SalonReviewReplyService`, `TwilioSmsService`, `SalonBookingService`, `Booking`, `StaffMember`,
+`ReviewInsightsController`, `ReviewInsights`, `ReviewRequest`(+repo). No seam needed.
 
 ## Validation log
-- T5.1: docs only — no build needed.
-- T5.2–T5.7: `./gradlew compileJava` GREEN at each step.
-- T5.8: `./gradlew compileTestJava` GREEN. New T5 tests all GREEN (Docker/Testcontainers):
-  - CallbackRevenueRankerTest (5), RequestedWindowParserTest (5) — no-Docker unit.
-  - CallbackOfferIT (3), CallbackReplyIT (2), CallbackQueueAndStatsIT (6),
-    CallbackModuleGateIT (4 nested: HomeServicesOff/ResponderOff/BothOnOfferOff/BothOnOfferOn),
-    CallbackOptOutIT (1) — all 0 failures / 0 errors.
-- T5.9: REGRESSION all GREEN —
-  - `TwilioVoicemailIT` + `HomeServicesVoicemailIT` + `HomeServicesVoicemailFieldServiceDisabledIT`
-    + `HomeServicesEmergencyForwardIT` + `HealthFrontDeskVoicemailIT` + `module.responder.*`
-    (ConversationStateIT/InboundIntentClassifierIT/InboundIntentRouterIT/ResponderConfigIT) → BUILD SUCCESSFUL.
-  - `EquipmentVisionIT` + `HomeServicesModuleGatingIT` + `ServiceRequestWidgetIT` + `OnTheWayDispatchIT`
-    + `OpenApiEndpointIT` (2/0) → BUILD SUCCESSFUL.
-  - `verifyOpenApi`: "docs/api/openapi.json already matches the generated spec. OK." (default-OFF →
-    no callback paths in the spec; FE uses hand-written api/*.ts — the AR/T1-T4 precedent).
-  - Reused cores EMPTY-DIFF vs `main` (0 changes each, verified): TwilioVoicemailService,
-    VoicemailExtractionService, TwilioSmsService, InboundSmsService, InboundIntentRouter,
-    InboundIntentClassifier, DefaultHandoffIntentHandler, ConversationStateService,
-    MissedCallInboxController, ResponderAutoConfiguration, HomeServicesAutoConfiguration, WorkOrderService.
-  - Reactive-invariant grep: NO `switchIfEmpty(create/send)` in module/homeservices/callback — every
-    switchIfEmpty is genuine not-found (4400/4401); offer dedupe is ledger-insert-FIRST + explicit-boolean;
-    CallbackRequest upsert is explicit-boolean; no `.block()` in production paths.
+(filled as sub-phases complete)
