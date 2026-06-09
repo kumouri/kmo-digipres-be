@@ -53,14 +53,14 @@ import java.util.UUID;
 public class SwitchboardController {
 
     private final SwitchboardConfigRepository configs;
-    private final SwitchboardDeflectionService deflection;
+    private final SwitchboardDeflectionLogRepository deflectionLogs;
     private final TenantModuleRegistry modules;
 
     public SwitchboardController(SwitchboardConfigRepository configs,
-                                SwitchboardDeflectionService deflection,
+                                SwitchboardDeflectionLogRepository deflectionLogs,
                                 TenantModuleRegistry modules) {
         this.configs = configs;
-        this.deflection = deflection;
+        this.deflectionLogs = deflectionLogs;
         this.modules = modules;
     }
 
@@ -97,7 +97,17 @@ public class SwitchboardController {
     @GetMapping("/deflection-stats")
     public Mono<SwitchboardDeflectionStats> deflectionStats() {
         return guard().then(TenantContextHolder.required())
-                .flatMap(ctx -> deflection.stats(ctx.tenantId()));
+                .flatMap(ctx -> Mono.zip(
+                                deflectionLogs.countByTenantIdAndCategory(
+                                        ctx.tenantId(), SwitchboardDeflectionCategory.LOGISTICS)
+                                        .defaultIfEmpty(0L),
+                                deflectionLogs.countByTenantIdAndCategory(
+                                        ctx.tenantId(), SwitchboardDeflectionCategory.TRIPWIRE)
+                                        .defaultIfEmpty(0L),
+                                deflectionLogs.countByTenantIdAndCategory(
+                                        ctx.tenantId(), SwitchboardDeflectionCategory.HANDOFF)
+                                        .defaultIfEmpty(0L))
+                        .map(t -> SwitchboardDeflectionStats.of(t.getT1(), t.getT2(), t.getT3())));
     }
 
     /** Both modules (frontdesk AND responder) loaded + enabled for the tenant, then ADMIN. */
