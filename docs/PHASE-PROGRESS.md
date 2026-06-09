@@ -23,9 +23,19 @@
 | W1 | model (`WaitlistSlot`/`WaitlistEntry`/`WaitlistOffer`) + repos + `SlotMaterializer` SPI + `NoOpSlotMaterializer` | DONE | 7d09a18 |
 | W2 | `WaitlistRankingService` + `GapFillEngine` + `WaitlistOfferExpiryService` | DONE | fc54dc6 |
 | W3 | `WaitlistClaimEngine` (atomic findAndModify + materializer dispatch) | DONE | e3e2b82 |
-| W4 | `WaitlistAutoConfiguration` + controller + `DomainEventType` block + `GlobalErrorHandler` 4350-4359 + imports | DONE (compileJava green) | (this commit) |
-| W5 | ITs + run new + REGRESSION (`GapFillWaitlistIT`) + `OpenApiEndpointIT` | pending | |
-| W6 | regen + commit `docs/api/openapi.json`; final ledger + report | pending | |
+| W4 | `WaitlistAutoConfiguration` + controller + `DomainEventType` block + `GlobalErrorHandler` 4350-4359 + imports | DONE (compileJava green) | a444dc5 |
+| W5 | ITs + repo-rename fix + run new + REGRESSION (`GapFillWaitlistIT`) + `OpenApiEndpointIT` | DONE (all green) | (this commit) |
+| W6 | regen + commit `docs/api/openapi.json`; final ledger + report | DONE | (this commit) |
+
+## W5 fix — repository simple-name collision (a real bug, caught by the ITs)
+
+Spring Data derives a repository's bean name from the uncapitalized **simple** name. My initial generic
+repos `repository.waitlist.WaitlistEntryRepository` / `WaitlistOfferRepository` collided with the shipped
+chairfill `module.chairfill.model.WaitlistEntryRepository` / `WaitlistOfferRepository` (same simple names)
+→ `BeanDefinitionOverrideException` at context load (would have broken the whole app, not just the test).
+Fix: renamed the generic repos to **`WaitlistEngineEntryRepository`** / **`WaitlistEngineOfferRepository`**
+(distinct simple names) — chairfill untouched (byte-equivalent preserved). All references updated
+(engines, auto-config, controller).
 
 ## Key design decisions (mirrors the detail plan)
 
@@ -52,13 +62,19 @@
 `WAITLIST_ENGINE_OFFER_SENT`, `WAITLIST_ENGINE_SLOT_CLAIMED` (prefixed to NOT collide with chairfill's
 `WAITLIST_OFFER_SENT`/`WAITLIST_SLOT_CLAIMED`, which stay byte-equivalent).
 
-## Test results (filled at W5)
-- `GapFillWaitlistIT` (REGRESSION, chairfill): _pending_
-- `WaitlistEngineIT` (new engine): _pending_
-- `WaitlistRankingServiceTest` (no-Docker): _pending_
-- `OpenApiEndpointIT`: _pending_
+## Test results (W5 — all green, local Docker/Testcontainers Mongo)
+- `GapFillWaitlistIT` (REGRESSION, chairfill): **11 tests, 0 failures, 0 skipped** — green + unchanged.
+- `WaitlistEngineIT` (new engine): **7 tests, 0 failures** — incl. the double-YES race showpiece
+  (exactly one CLAIMED + one apology + one materialize).
+- `WaitlistRankingServiceTest` (no-Docker): **4 tests, 0 failures**.
+- `OpenApiEndpointIT`: **2 tests, 0 failures** — proves the full context boots with the new module.
 
-## Verification (filled at W5/W6)
-- `git diff main --stat` — confirm zero `module/chairfill/**` changed; `InboundSmsService` /
-  `TwilioSmsService` / `NoShowRiskScoringService` empty-diff: _pending_
-- reactive-invariant grep (claim is atomic findAndModify, not switchIfEmpty): _pending_
+## Verification (W5/W6 — all pass)
+- `git diff main` — **zero `module/chairfill/**` files changed**; `InboundSmsService` /
+  `TwilioSmsService` / `NoShowRiskScoringService` are **0 diff lines each** (empty-diff vs `main`).
+- reactive-invariant grep: the only `switchIfEmpty` in `service/waitlist/` is in a Javadoc comment; the
+  claim is the atomic `mongo.findAndModify` with the `claimedByContactId:null` guard + `upsert(true)` +
+  `DuplicateKeyException → loser` (NOT `switchIfEmpty(claim)`). The 3 controller `switchIfEmpty` are
+  genuine entity-not-found (4350).
+- `docs/api/openapi.json` regenerated — carries `/waitlist/entries`, `/waitlist/entries/{id}`,
+  `/waitlist/offers`, `/waitlist/offers/sweep-expired`, `/waitlist/slots/gap-fill`.

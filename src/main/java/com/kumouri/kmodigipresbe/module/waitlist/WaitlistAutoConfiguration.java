@@ -6,8 +6,8 @@ import com.kumouri.kmodigipresbe.extension.ModuleDefinition;
 import com.kumouri.kmodigipresbe.integration.twilio.TwilioSmsService;
 import com.kumouri.kmodigipresbe.repository.ContactRepository;
 import com.kumouri.kmodigipresbe.repository.TenantRepository;
-import com.kumouri.kmodigipresbe.repository.waitlist.WaitlistEntryRepository;
-import com.kumouri.kmodigipresbe.repository.waitlist.WaitlistOfferRepository;
+import com.kumouri.kmodigipresbe.repository.waitlist.WaitlistEngineEntryRepository;
+import com.kumouri.kmodigipresbe.repository.waitlist.WaitlistEngineOfferRepository;
 import com.kumouri.kmodigipresbe.service.waitlist.GapFillEngine;
 import com.kumouri.kmodigipresbe.service.waitlist.NoOpSlotMaterializer;
 import com.kumouri.kmodigipresbe.service.waitlist.SlotMaterializer;
@@ -88,8 +88,8 @@ public class WaitlistAutoConfiguration {
     public GapFillEngine waitlistGapFillEngine(
             DomainEventPublisher eventPublisher,
             TenantRepository tenantRepository,
-            WaitlistEntryRepository entryRepository,
-            WaitlistOfferRepository offerRepository,
+            WaitlistEngineEntryRepository entryRepository,
+            WaitlistEngineOfferRepository offerRepository,
             ContactRepository contactRepository,
             WaitlistRankingService waitlistRankingService,
             TwilioSmsService twilioSmsService,
@@ -109,8 +109,8 @@ public class WaitlistAutoConfiguration {
     @Bean
     public WaitlistClaimEngine waitlistClaimEngine(
             ReactiveMongoTemplate mongoTemplate,
-            WaitlistOfferRepository offerRepository,
-            WaitlistEntryRepository entryRepository,
+            WaitlistEngineOfferRepository offerRepository,
+            WaitlistEngineEntryRepository entryRepository,
             TwilioSmsService twilioSmsService,
             DomainEventPublisher eventPublisher,
             List<SlotMaterializer> materializers,
@@ -131,7 +131,7 @@ public class WaitlistAutoConfiguration {
     @Bean
     public WaitlistOfferExpiryService waitlistOfferExpiryService(
             TenantRepository tenantRepository,
-            WaitlistOfferRepository offerRepository) {
+            WaitlistEngineOfferRepository offerRepository) {
         return new WaitlistOfferExpiryService(tenantRepository, offerRepository);
     }
 }

@@ -10,11 +10,18 @@ import java.util.UUID;
 /**
  * E4 — repository for the generic {@link WaitlistEntry} pool.
  *
+ * <p>Named {@code WaitlistEngineEntryRepository} (not {@code WaitlistEntryRepository}) deliberately: the
+ * shipped ChairFill CF-3 {@code module.chairfill.model.WaitlistEntryRepository} already owns the simple
+ * name {@code WaitlistEntryRepository}, and Spring Data derives a repository's bean name from the
+ * uncapitalized simple name — two repos with the same simple name collide
+ * ({@code BeanDefinitionOverrideException}). A distinct simple name keeps the generic engine additive and
+ * chairfill byte-equivalent.
+ *
  * <p>Derived finders carry an explicit {@code tenantId} predicate — the
  * {@link TenantScopedReactiveMongoRepository} marker does NOT auto-scope derived finders, and the
  * {@code GapFillEngine} runs OUTSIDE a request context (it establishes a synthetic {@code TenantContext}).
  */
-public interface WaitlistEntryRepository
+public interface WaitlistEngineEntryRepository
         extends TenantScopedReactiveMongoRepository<WaitlistEntry, UUID> {
 
     /** All entries for a tenant in a given status — the gap-fill loads {@code OPEN} ones to rank. */

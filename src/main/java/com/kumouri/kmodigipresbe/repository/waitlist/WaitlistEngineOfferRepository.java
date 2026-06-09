@@ -10,12 +10,19 @@ import java.util.UUID;
 /**
  * E4 — repository for the generic {@link WaitlistOffer} ledger.
  *
+ * <p>Named {@code WaitlistEngineOfferRepository} (not {@code WaitlistOfferRepository}) deliberately: the
+ * shipped ChairFill CF-3 {@code module.chairfill.model.WaitlistOfferRepository} already owns the simple
+ * name {@code WaitlistOfferRepository}, and Spring Data derives a repository's bean name from the
+ * uncapitalized simple name — two repos with the same simple name collide
+ * ({@code BeanDefinitionOverrideException}). A distinct simple name keeps the generic engine additive and
+ * chairfill byte-equivalent.
+ *
  * <p>Derived finders carry an explicit {@code tenantId} predicate — the
  * {@link TenantScopedReactiveMongoRepository} marker does NOT auto-scope derived finders, and both the
  * {@code GapFillEngine} (offer mint) and the inbound-YES correlation run OUTSIDE a request context (a
  * synthetic {@code TenantContext}).
  */
-public interface WaitlistOfferRepository
+public interface WaitlistEngineOfferRepository
         extends TenantScopedReactiveMongoRepository<WaitlistOffer, UUID> {
 
     /**

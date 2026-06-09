@@ -9,8 +9,8 @@ import com.kumouri.kmodigipresbe.model.request.SmsCommunicationRequest;
 import com.kumouri.kmodigipresbe.model.waitlist.WaitlistEntry;
 import com.kumouri.kmodigipresbe.model.waitlist.WaitlistOffer;
 import com.kumouri.kmodigipresbe.model.waitlist.WaitlistSlot;
-import com.kumouri.kmodigipresbe.repository.waitlist.WaitlistEntryRepository;
-import com.kumouri.kmodigipresbe.repository.waitlist.WaitlistOfferRepository;
+import com.kumouri.kmodigipresbe.repository.waitlist.WaitlistEngineEntryRepository;
+import com.kumouri.kmodigipresbe.repository.waitlist.WaitlistEngineOfferRepository;
 import com.kumouri.kmodigipresbe.tenancy.TenantContext;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
 import lombok.extern.slf4j.Slf4j;
@@ -69,8 +69,8 @@ public class WaitlistClaimEngine {
     private static final String CLAIMS_COLLECTION = "waitlist_slot_claims";
 
     private final ReactiveMongoTemplate mongo;
-    private final WaitlistOfferRepository offers;
-    private final WaitlistEntryRepository entries;
+    private final WaitlistEngineOfferRepository offers;
+    private final WaitlistEngineEntryRepository entries;
     private final TwilioSmsService twilioSms;
     private final DomainEventPublisher events;
     private final List<SlotMaterializer> materializers;
@@ -80,8 +80,8 @@ public class WaitlistClaimEngine {
     private final String apologyTemplate;
 
     public WaitlistClaimEngine(ReactiveMongoTemplate mongo,
-                               WaitlistOfferRepository offers,
-                               WaitlistEntryRepository entries,
+                               WaitlistEngineOfferRepository offers,
+                               WaitlistEngineEntryRepository entries,
                                TwilioSmsService twilioSms,
                                DomainEventPublisher events,
                                List<SlotMaterializer> materializers,

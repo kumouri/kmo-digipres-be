@@ -14,8 +14,8 @@ import com.kumouri.kmodigipresbe.model.waitlist.WaitlistSlot;
 import com.kumouri.kmodigipresbe.module.chairfill.automation.RiskTieredPreventionService;
 import com.kumouri.kmodigipresbe.repository.ContactRepository;
 import com.kumouri.kmodigipresbe.repository.TenantRepository;
-import com.kumouri.kmodigipresbe.repository.waitlist.WaitlistEntryRepository;
-import com.kumouri.kmodigipresbe.repository.waitlist.WaitlistOfferRepository;
+import com.kumouri.kmodigipresbe.repository.waitlist.WaitlistEngineEntryRepository;
+import com.kumouri.kmodigipresbe.repository.waitlist.WaitlistEngineOfferRepository;
 import com.kumouri.kmodigipresbe.tenancy.TenantContext;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
 import lombok.extern.slf4j.Slf4j;
@@ -77,8 +77,8 @@ public class GapFillEngine {
 
     private final DomainEventPublisher events;
     private final TenantRepository tenants;
-    private final WaitlistEntryRepository entries;
-    private final WaitlistOfferRepository offers;
+    private final WaitlistEngineEntryRepository entries;
+    private final WaitlistEngineOfferRepository offers;
     private final ContactRepository contacts;
     private final WaitlistRankingService rankingService;
     private final TwilioSmsService twilioSms;
@@ -88,8 +88,8 @@ public class GapFillEngine {
 
     public GapFillEngine(DomainEventPublisher events,
                          TenantRepository tenants,
-                         WaitlistEntryRepository entries,
-                         WaitlistOfferRepository offers,
+                         WaitlistEngineEntryRepository entries,
+                         WaitlistEngineOfferRepository offers,
                          ContactRepository contacts,
                          WaitlistRankingService rankingService,
                          TwilioSmsService twilioSms,

@@ -3,7 +3,7 @@ package com.kumouri.kmodigipresbe.service.waitlist;
 import com.kumouri.kmodigipresbe.model.tenant.Tenant;
 import com.kumouri.kmodigipresbe.model.waitlist.WaitlistOffer;
 import com.kumouri.kmodigipresbe.repository.TenantRepository;
-import com.kumouri.kmodigipresbe.repository.waitlist.WaitlistOfferRepository;
+import com.kumouri.kmodigipresbe.repository.waitlist.WaitlistEngineOfferRepository;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
@@ -34,10 +34,10 @@ import java.util.UUID;
 public class WaitlistOfferExpiryService {
 
     private final TenantRepository tenantRepository;
-    private final WaitlistOfferRepository offerRepository;
+    private final WaitlistEngineOfferRepository offerRepository;
 
     public WaitlistOfferExpiryService(TenantRepository tenantRepository,
-                                      WaitlistOfferRepository offerRepository) {
+                                      WaitlistEngineOfferRepository offerRepository) {
         this.tenantRepository = tenantRepository;
         this.offerRepository = offerRepository;
     }

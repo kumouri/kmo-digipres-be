@@ -7,8 +7,8 @@ import com.kumouri.kmodigipresbe.model.waitlist.WaitlistEntry;
 import com.kumouri.kmodigipresbe.model.waitlist.WaitlistOffer;
 import com.kumouri.kmodigipresbe.model.waitlist.WaitlistSlot;
 import com.kumouri.kmodigipresbe.module.waitlist.WaitlistAutoConfiguration;
-import com.kumouri.kmodigipresbe.repository.waitlist.WaitlistEntryRepository;
-import com.kumouri.kmodigipresbe.repository.waitlist.WaitlistOfferRepository;
+import com.kumouri.kmodigipresbe.repository.waitlist.WaitlistEngineEntryRepository;
+import com.kumouri.kmodigipresbe.repository.waitlist.WaitlistEngineOfferRepository;
 import com.kumouri.kmodigipresbe.service.waitlist.GapFillEngine;
 import com.kumouri.kmodigipresbe.service.waitlist.WaitlistOfferExpiryService;
 import com.kumouri.kmodigipresbe.tenancy.RoleGuard;
@@ -61,8 +61,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class WaitlistEngineController {
 
-    private final WaitlistEntryRepository entries;
-    private final WaitlistOfferRepository offers;
+    private final WaitlistEngineEntryRepository entries;
+    private final WaitlistEngineOfferRepository offers;
     private final GapFillEngine gapFillEngine;
     private final WaitlistOfferExpiryService expiryService;
     private final TenantModuleRegistry modules;
