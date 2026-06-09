@@ -408,6 +408,25 @@ public final class DomainEventType {
     // {appointmentId, contactId, providerId, riskTier, riskScore, source}.
     public static final String APPOINTMENT_RISK_SCORED = "appointment.riskScored";
 
+    // E1 (Nurture / Cadence Engine) — the keystone shared reactivation engine. All four are advisory
+    // (RuleEngine / webhook fan-out) — they do NOT drive any core mutation; segmentation/enroll, the
+    // per-step ledger-insert-FIRST send, and the reply→exit→book are all synchronous + explicit in the
+    // nurture services, gated by explicit-boolean probes over unique indexes (never switchIfEmpty).
+    // Emitted only when the `nurture` module is on (and, for NURTURE_TOUCH_SENT, only when the
+    // default-OFF runner is opted in).
+    // NURTURE_CONTACT_ENROLLED: emitted per fresh enrollment in NurtureSegmentationService.segmentAndEnroll;
+    //   payload {campaignId, contactId, bucket}.
+    // NURTURE_TOUCH_SENT: emitted after a cadence step's ledger-insert + SMS/email send by NurtureRunner;
+    //   payload {campaignId, enrollmentId, contactId, stepIndex, channel, aiApplied}.
+    // NURTURE_POSITIVE_REPLY: emitted when a positive reply exits an enrollment (status REPLIED) in
+    //   NurtureReplyService; payload {campaignId, enrollmentId, contactId}.
+    // NURTURE_BOOKING_LINK_SENT: emitted after the per-tenant Cal.com booking-link SMS is dispatched
+    //   (status BOOKED) — NO live Cal.com call; payload {campaignId, enrollmentId, contactId}.
+    public static final String NURTURE_CONTACT_ENROLLED  = "nurture.contactEnrolled";
+    public static final String NURTURE_TOUCH_SENT        = "nurture.touchSent";
+    public static final String NURTURE_POSITIVE_REPLY    = "nurture.positiveReply";
+    public static final String NURTURE_BOOKING_LINK_SENT = "nurture.bookingLinkSent";
+
     private DomainEventType() {
     }
 }
