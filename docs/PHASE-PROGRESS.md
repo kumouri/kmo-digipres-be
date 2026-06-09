@@ -33,7 +33,7 @@ stylist's funnel side-by-side — that LIST is T6's only real net-new BE code.
 |---|-----------|--------|--------|------------|
 | T6.1 | Detail plan + this ledger | DONE | ebc295e | n/a (docs) |
 | T6.2 | `module/chairfill/reviewboost/` — DTOs + `SalonReviewInsightsService` (reuses `ReviewInsightsService` + `StaffMemberRepository`) + `ReviewBoostController` + `ReviewBoostAutoConfiguration`; register in AutoConfiguration.imports; app-props doc; `GlobalErrorHandler` 4410-4419 Javadoc | DONE | (this) | compileJava OK |
-| T6.3 | `SalonReviewBoostDemoSeeder` (`@Profile("demo-salon-reviewboost")`) | PENDING | — |
+| T6.3 | `SalonReviewBoostDemoSeeder` (`@Profile("demo-salon-reviewboost")`) | DONE | (this) | compileJava OK |
 | T6.4 | ITs: `SalonReviewBoostInsightsIT`, `SalonReviewBoostConfigIT` | PENDING | — |
 | T6.5 | openapi regen + CLAUDE.md T6 entry + ledger finalize | PENDING | — |
 
