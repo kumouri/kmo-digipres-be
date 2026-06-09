@@ -51,7 +51,7 @@ FrontDeskNurtureReplyHandler, FrontDeskNurtureDemoSeeder}` + `controller/frontde
 | T2.0 — detail plan + this ledger | DONE | `e71272a` | plan `~/.claude/plans/health-revenuerevive.md` |
 | T2.1 — `HipaaCopyFilter` + `HipaaCopyFilterTest` | DONE | `d997176` | reuses `HipaaReplyLint`; unit 7/7 green (no-Docker) |
 | T2.2 — service + reply handler + autoconfig + controller + `GlobalErrorHandler` 4370-4379 | DONE | _(this commit)_ | wires the 4 beans incl. `setCopyFilter` side-effect; both-module gate; autoconfig registered in `AutoConfiguration.imports`; compiles clean |
-| T2.3 — `FrontDeskNurtureDemoSeeder` | PENDING | | `@Profile("demo-frontdesk")`; fictional clinic + logistics-only dormant-patient DB |
+| T2.3 — `FrontDeskNurtureDemoSeeder` | DONE | _(this commit)_ | `@Profile("demo-frontdesk")`; "Bright Smiles Dental" + 12 lapsed patients (logistics-only: backdated `Activity` + PHI-free `Appointment`; 2 opted-out; A-tier WON deals) + health campaign; compiles clean |
 | T2.4 — T2 ITs | PENDING | | PHI-safe headline + segmentation + reply-rebook + analytics |
 | T2.5 — `CLAUDE.md` + `openapi.json` | PENDING | | T2 entry; regenerate spec (expect no diff — default-OFF) |
 | Validation — new + regression ITs | PENDING | | E1-nurture (`nurture.*`) + a frontdesk IT + `OpenApiEndpointIT`; capture counts |
