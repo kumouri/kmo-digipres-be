@@ -25,7 +25,7 @@ the composer at module init. The composer is the ONE E1 file with a (strictly ad
 | T1.0 | Detail plan + this fresh ledger | DONE |
 | T1.1 | Additive E1 `NurtureCopyFilter` SPI + composer wiring; **re-ran 5 E1 nurture ITs (regression gate)** | DONE (`FairHousingCopyFilterTest` moves to T1.2 with the filter) |
 | T1.2 | `module/realestate/nurture/`: `FairHousingCopyFilter`(+`Test`), `RealEstateNurtureReplyHandler` (E2 `IntentHandler`), `RealEstateNurtureService`+`RealEstateNurtureController`, `RealEstateNurtureAutoConfiguration` (two-module gate + composer-wiring side-effect bean), 4360-4369 Javadoc | DONE |
-| T1.3 | Demo seeder (`@Profile("demo-realestate")` `RealEstateNurtureDemoSeeder`, "Gateway Realty") | TODO |
+| T1.3 | Demo seeder (`@Profile("demo-realestate")` `RealEstateNurtureDemoSeeder`, "Gateway Realty" + 12 dormant leads + RE campaign) | DONE |
 | T1.4 | T1 ITs (segmentation / fair-housing / reply-book / analytics) + run new + regression ITs locally; capture counts | TODO |
 | T1.5 | Regen+commit `docs/api/openapi.json`; update repo `CLAUDE.md` T1 entry; push + PR | TODO |
 
@@ -63,3 +63,11 @@ the composer at module init. The composer is the ONE E1 file with a (strictly ad
   `RealEstateNurtureSmsWiring` side-effect bean — the `ConciergeInboundSmsWiring` precedent). Registered
   in `AutoConfiguration.imports`. Error band 4360-4369 `<li>` added after E4's 4350-4359 in
   `GlobalErrorHandler`. `compileJava` clean; **`FairHousingCopyFilterTest` GREEN (7 tests, 0 failures)**.
+- T1.3 — `RealEstateNurtureDemoSeeder` (`@Profile("demo-realestate")` `CommandLineRunner`, the
+  `DataSeeder` precedent; idempotent on slug `gateway-realty`). Seeds tenant "Gateway Realty"
+  (realestate+nurture+responder modules, $25 AI budget) + ADMIN user + Twilio connection
+  (`config.bookingLink`/`notifyPhone`/`notifyEmail`, smsMode UNSET so the E2 reply handler path is live) +
+  `ResponderConfig(vertical=realestate)` + the RE nurture campaign (A/B/C/D segments + SMS/email cadence) +
+  12 dormant leads across the bands (3 A with WON deals ≥$300k, 4 B incl. 1 opted-out, 3 C incl. 1
+  opted-out, 2 D), each with a backdated `Activity` so segmentation buckets deterministically. The 60-sec
+  "watch this" documented in the class Javadoc + the detail plan. `compileJava` clean.
