@@ -44,4 +44,7 @@ public interface ReviewRequestRepository
             UUID tenantId, ReviewSubjectType subjectType, UUID subjectId);
 
     Flux<ReviewRequest> findByTenantId(UUID tenantId);
+
+    /** Tenant-scoped single load (explicit {@code tenantId} predicate). */
+    Mono<ReviewRequest> findByTenantIdAndId(UUID tenantId, UUID id);
 }
