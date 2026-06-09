@@ -29,8 +29,8 @@ domain-event subscriber (no seam).
 | T5.5 | recovery funnel (inlined in controller) + `CallbackConfig` admin CRUD | DONE | (this) | compileJava OK |
 | T5.6 | `CallbackAutoConfiguration` (both-modules gate; default-OFF `home-callback-offer` send bean) + AutoConfiguration.imports + `DomainEventType` T5 block (CALLBACK_OFFERED/REQUESTED/DISPATCHED) | DONE | (this) | compileJava OK |
 | T5.7 | Demo seed (`CallbackDemoSeeder`, `@Profile("demo-home-callback")`) | DONE | (this) | compileJava OK |
-| T5.8 | ITs (offer / reply / revenue-rank / recovery-stats / module-gate / opt-out) + regression | PENDING | | |
-| T5.9 | Docs (CLAUDE.md T5 entry) + error codes (4400-4409 Javadoc DONE) + openapi regen | PARTIAL | | error Javadoc DONE |
+| T5.8 | ITs (offer / reply / revenue-rank / recovery-stats / module-gate / opt-out) + 2 unit tests | DONE | (this) | T5 suite GREEN (see log) |
+| T5.9 | Docs (CLAUDE.md T5 entry) + error codes (4400-4409 Javadoc DONE) + openapi regen + regression run | PARTIAL | | error Javadoc DONE |
 
 ## Decisions / deviations (filled in as work lands)
 - **Reused voicemail core empty-diff via event subscriber (T5.3).** The callback-offer SMS hooks off
@@ -52,3 +52,9 @@ domain-event subscriber (no seam).
 
 ## Validation log
 - T5.1: docs only — no build needed.
+- T5.2–T5.7: `./gradlew compileJava` GREEN at each step.
+- T5.8: `./gradlew compileTestJava` GREEN. New T5 tests all GREEN (Docker/Testcontainers):
+  - CallbackRevenueRankerTest (5), RequestedWindowParserTest (5) — no-Docker unit.
+  - CallbackOfferIT (3), CallbackReplyIT (2), CallbackQueueAndStatsIT (6),
+    CallbackModuleGateIT (4 nested: HomeServicesOff/ResponderOff/BothOnOfferOff/BothOnOfferOn),
+    CallbackOptOutIT (1) — all 0 failures / 0 errors.
