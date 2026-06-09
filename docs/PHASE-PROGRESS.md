@@ -18,7 +18,7 @@ scheduled runner has its OWN gate `kmosf.modules.nurture-runner` (`matchIfMissin
 | N0 | Detail plan + this ledger | DONE | — | (this commit) |
 | N1 | Model (`NurtureCampaign`/`NurtureEnrollment`/`NurtureSendLog` + enums/embedded) + 3 repositories | DONE (compiles) | compile + `OpenApiEndpointIT` boot | (N1 commit) |
 | N2 | `NurtureSegmentationService` + `NurtureAutoConfiguration` (ModuleDefinition) + `AutoConfiguration.imports` entry + `DomainEventType` Nurture block | DONE | `NurtureSegmentationIT` (3/3 green) | (N2 commit) |
-| N3 | `NurtureMessageComposer` + `NurtureRunner` (default-OFF) | TODO | `NurtureRunnerIT` | |
+| N3 | `NurtureMessageComposer` + `NurtureRunner` (default-OFF) | DONE | `NurtureRunnerIT` (6/6 green) | (N3 commit) |
 | N4 | `NurtureReplyService` (reply→exit→book) | TODO | `NurtureReplyBookIT` | |
 | N5 | `NurtureAnalyticsService` | TODO | `NurtureAnalyticsIT` | |
 | N6 | `NurtureCampaignController` + DTOs + `GlobalErrorHandler` 4300-4319 Javadoc + openapi regen | TODO | `NurtureCampaignControllerIT` + `OpenApiEndpointIT` | |

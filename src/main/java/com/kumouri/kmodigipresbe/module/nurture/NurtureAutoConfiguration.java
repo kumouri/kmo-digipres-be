@@ -8,6 +8,8 @@ import com.kumouri.kmodigipresbe.repository.ContactRepository;
 import com.kumouri.kmodigipresbe.repository.DealRepository;
 import com.kumouri.kmodigipresbe.repository.nurture.NurtureCampaignRepository;
 import com.kumouri.kmodigipresbe.repository.nurture.NurtureEnrollmentRepository;
+import com.kumouri.kmodigipresbe.service.ai.AiAssistService;
+import com.kumouri.kmodigipresbe.service.nurture.NurtureMessageComposer;
 import com.kumouri.kmodigipresbe.service.nurture.NurtureSegmentationService;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -58,5 +60,10 @@ public class NurtureAutoConfiguration {
             ObjectProvider<Clock> clockProvider) {
         return new NurtureSegmentationService(
                 campaigns, enrollments, contacts, activities, deals, events, clockProvider);
+    }
+
+    @Bean
+    public NurtureMessageComposer nurtureMessageComposer(AiAssistService aiAssistService) {
+        return new NurtureMessageComposer(aiAssistService);
     }
 }
