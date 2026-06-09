@@ -17,4 +17,11 @@ public interface CallbackOfferLogRepository
 
     /** Whether an offer was already sent for this CallSid (the explicit-boolean probe source). */
     Mono<CallbackOfferLog> findByTenantIdAndCallSid(UUID tenantId, String callSid);
+
+    /**
+     * The most-recent offer sent to this caller's Contact — the handler's reply→voicemail correlation
+     * (the reply carries only the phone, this recovers the originating voicemail CallSid).
+     */
+    Mono<CallbackOfferLog> findFirstByTenantIdAndContactIdOrderByOfferedAtDesc(UUID tenantId,
+                                                                              UUID contactId);
 }

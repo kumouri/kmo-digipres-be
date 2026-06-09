@@ -23,9 +23,9 @@ domain-event subscriber (no seam).
 | # | Sub-phase | Status | Commit | Validation |
 |---|-----------|--------|--------|------------|
 | T5.1 | Detail plan + this ledger | DONE | (first commit) | n/a (docs) |
-| T5.2 | Model + ledgers (`CallbackRequest`, `CallbackOfferLog`, `CallbackFunnelLog`, enums, repos) | PENDING | | |
-| T5.3 | `CallbackIntentHandler` (E2 handler) + `CallbackOfferSubscriber` (`VOICEMAIL_LEAD_CREATED`) + `CallbackIntents` + parsers | PENDING | | |
-| T5.4 | `CallbackRevenueRanker` + `CallbackQueueService` + `CallbackController` (ranked queue + dispatch) | PENDING | | |
+| T5.2 | Model + ledgers (`CallbackRequest`, `CallbackOfferLog`, `CallbackFunnelLog`, enums, repos) | DONE | 2c8e18c | compileJava OK |
+| T5.3 | `CallbackIntentHandler` (E2 handler) + `CallbackOfferSubscriber` (`VOICEMAIL_LEAD_CREATED`) + `CallbackIntents` + `RequestedWindowParser` + `CallbackRevenueRanker` | DONE | (this) | compileJava OK |
+| T5.4 | `CallbackQueueService` + `CallbackController` (ranked queue + dispatch) + DTOs | PENDING | | |
 | T5.5 | `CallbackAnalyticsService` (recovery funnel) + `CallbackConfig` + admin CRUD | PENDING | | |
 | T5.6 | `CallbackAutoConfiguration` (both-modules gate; default-OFF send bean) | PENDING | | |
 | T5.7 | Demo seed (`CallbackDemoSeeder`, `@Profile("demo-home-callback")`) | PENDING | | |
