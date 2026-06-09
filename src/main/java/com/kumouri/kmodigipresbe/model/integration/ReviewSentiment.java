@@ -12,5 +12,16 @@ package com.kumouri.kmodigipresbe.model.integration;
 public enum ReviewSentiment {
     POSITIVE,
     NEUTRAL,
-    NEGATIVE
+    NEGATIVE;
+
+    /**
+     * The classification outcome carried back from {@code ReviewSentimentService.classify} — the
+     * sentiment plus how it was determined.
+     *
+     * @param sentiment the classified sentiment (never null)
+     * @param source    how it was determined ({@link SentimentSource#RATING} baseline or
+     *                  {@link SentimentSource#AI} refinement)
+     */
+    public record Result(ReviewSentiment sentiment, SentimentSource source) {
+    }
 }

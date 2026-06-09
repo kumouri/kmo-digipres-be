@@ -783,9 +783,14 @@ import java.util.UUID;
  *       PENDING requests as a <strong>frictionless, no-incentive</strong> Google-review SMS (Google's 2026
  *       policy bans incentives), opt-out-aware ({@code sms-opt-out}), frequency-capped, atomic-claim
  *       idempotent. {@code ReviewSentimentService} (a NEW sibling mirroring {@code GbpReplyDraftService} —
- *       that core is empty-diff) classifies each ingested review (rating-first + optional best-effort
- *       Anthropic) on the one surgical {@code GbpReviewPoller} seam; a negative ({@code rating <= threshold}
- *       OR {@code NEGATIVE}) fires a best-effort manager alert. The generic {@code ReviewInsightsService} +
+ *       that core is empty-diff) classifies each ingested review (rating-first always; the AI refinement
+ *       is opt-in {@code kmosf.review-engine.ai-refine-enabled}, default-OFF) on the one surgical
+ *       {@code GbpReviewPoller} seam and stores the additive {@code sentiment}/{@code sentimentSource}; a
+ *       negative ({@code rating <= threshold} OR {@code NEGATIVE}) fires a best-effort manager alert when
+ *       the opt-in {@code kmosf.review-engine.negative-alert-enabled} (default-OFF) is set. Both opt-ins
+ *       are default-OFF so the seam adds ZERO extra Anthropic calls and ZERO extra notify in the default
+ *       path (the existing {@code GbpReviewPollerIT} stays byte-identical). The generic
+ *       {@code ReviewInsightsService} +
  *       ADMIN {@code ReviewInsightsController} ({@code GET /gbp/review-insights[/{subjectType}/{subjectId}]})
  *       aggregate per {@code (subjectType, subjectId)} + per-tenant. New codes: {@code 4340} review-insights
  *       subject type invalid (400 — an unparseable {@code {subjectType}} path segment). The band
