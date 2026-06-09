@@ -26,7 +26,7 @@ the composer at module init. The composer is the ONE E1 file with a (strictly ad
 | T1.1 | Additive E1 `NurtureCopyFilter` SPI + composer wiring; **re-ran 5 E1 nurture ITs (regression gate)** | DONE (`FairHousingCopyFilterTest` moves to T1.2 with the filter) |
 | T1.2 | `module/realestate/nurture/`: `FairHousingCopyFilter`(+`Test`), `RealEstateNurtureReplyHandler` (E2 `IntentHandler`), `RealEstateNurtureService`+`RealEstateNurtureController`, `RealEstateNurtureAutoConfiguration` (two-module gate + composer-wiring side-effect bean), 4360-4369 Javadoc | DONE |
 | T1.3 | Demo seeder (`@Profile("demo-realestate")` `RealEstateNurtureDemoSeeder`, "Gateway Realty" + 12 dormant leads + RE campaign) | DONE |
-| T1.4 | T1 ITs (segmentation / fair-housing / reply-book / analytics) + run new + regression ITs locally; capture counts | TODO |
+| T1.4 | T1 ITs (segmentation / fair-housing / reply-book / analytics) + ran new + regression ITs locally; counts captured | DONE |
 | T1.5 | Regen+commit `docs/api/openapi.json`; update repo `CLAUDE.md` T1 entry; push + PR | TODO |
 
 ## Invariants (carried from E1)
@@ -71,3 +71,12 @@ the composer at module init. The composer is the ONE E1 file with a (strictly ad
   12 dormant leads across the bands (3 A with WON deals ≥$300k, 4 B incl. 1 opted-out, 3 C incl. 1
   opted-out, 2 D), each with a backdated `Activity` so segmentation buckets deterministically. The 60-sec
   "watch this" documented in the class Javadoc + the detail plan. `compileJava` clean.
+- T1.4 — wrote + ran the T1 ITs. **NEW T1 (all GREEN):** `RealEstateNurtureFairHousingIT` (4 — the
+  headline: clean template verbatim; non-compliant template → safe fallback; non-compliant AI rewrite →
+  caught by lint → safe fallback; opt-out → zero send), `RealEstateNurtureSegmentationIT` (2 — A/B/C/D
+  bucketing incl. value-band A, opt-out + non-dormant skip; re-run idempotent),
+  `RealEstateNurtureReplyBookIT` (3 — supports() matrix; positive reply → BOOKED + booking-link SMS +
+  events; no-enrollment → ignored/zero-send), `RealEstateNurtureAnalyticsIT` (3 — per-segment funnel;
+  non-ADMIN 1800; tenant-missing-nurture-module rejected), `FairHousingCopyFilterTest` (7, unit). Total
+  19 T1 tests, 0 failures. **REGRESSION GREEN:** 5 E1 nurture ITs (21, 0 fail), `RealEstateConciergeIT`
+  (5, 0 fail), `OpenApiEndpointIT` (2, 0 fail). Naming: `*IT` (full-ci lane) + `*Test` (fast lane).
