@@ -19,6 +19,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -148,8 +149,19 @@ public class CallbackOfferSubscriber {
                     }
                     return resolveOfferMessage(tenantId)
                             .flatMap(message -> sendSms(tenantId, contactId, message))
-                            .then(recordOfferedFunnel(tenantId, callSid));
+                            .then(recordOfferedFunnel(tenantId, callSid))
+                            .then(Mono.fromRunnable(() -> emitOffered(tenantId, callSid, contactId)));
                 });
+    }
+
+    /** Advisory {@code CALLBACK_OFFERED} — after the opt-in SMS + funnel row. Drives no core mutation. */
+    private void emitOffered(UUID tenantId, String callSid, UUID contactId) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("callSid", callSid);
+        if (contactId != null) {
+            payload.put("contactId", contactId.toString());
+        }
+        events.publish(DomainEvent.of(DomainEventType.CALLBACK_OFFERED, tenantId, contactId, payload));
     }
 
     /** Resolve the per-tenant offer copy, falling back to the generic default. */

@@ -1,5 +1,8 @@
 package com.kumouri.kmodigipresbe.module.homeservices.callback;
 
+import com.kumouri.kmodigipresbe.automation.DomainEvent;
+import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
+import com.kumouri.kmodigipresbe.automation.DomainEventType;
 import com.kumouri.kmodigipresbe.model.activity.Activity;
 import com.kumouri.kmodigipresbe.model.activity.ActivityType;
 import com.kumouri.kmodigipresbe.model.activity.SubjectType;
@@ -15,6 +18,7 @@ import org.springframework.dao.DuplicateKeyException;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -63,6 +67,7 @@ public class CallbackIntentHandler implements IntentHandler {
     private final ContactRepository contacts;
     private final ActivityRepository activities;
     private final WorkOrderRepository workOrders;
+    private final DomainEventPublisher events;
 
     public CallbackIntentHandler(CallbackRequestRepository callbackRequests,
                                  CallbackOfferLogRepository offerLogs,
@@ -70,7 +75,8 @@ public class CallbackIntentHandler implements IntentHandler {
                                  CallbackConfigRepository configs,
                                  ContactRepository contacts,
                                  ActivityRepository activities,
-                                 WorkOrderRepository workOrders) {
+                                 WorkOrderRepository workOrders,
+                                 DomainEventPublisher events) {
         this.callbackRequests = callbackRequests;
         this.offerLogs = offerLogs;
         this.funnelLogs = funnelLogs;
@@ -78,6 +84,7 @@ public class CallbackIntentHandler implements IntentHandler {
         this.contacts = contacts;
         this.activities = activities;
         this.workOrders = workOrders;
+        this.events = events;
     }
 
     @Override
@@ -103,7 +110,8 @@ public class CallbackIntentHandler implements IntentHandler {
 
         return correlate(tenantId, fromPhone)
                 .flatMap(c -> upsertCallback(tenantId, fromPhone, mode, windowText, c)
-                        .flatMap(saved -> funnel(tenantId, saved.getCallSid())))
+                        .flatMap(saved -> funnel(tenantId, saved.getCallSid())
+                                .then(Mono.fromRunnable(() -> emitRequested(tenantId, saved)))))
                 .then(confirmReply(tenantId, mode))
                 .map(HandlerResult::reply)
                 .onErrorResume(e -> {
@@ -264,6 +272,25 @@ public class CallbackIntentHandler implements IntentHandler {
                             e.getMessage());
                     return Mono.empty();
                 });
+    }
+
+    /** Advisory {@code CALLBACK_REQUESTED} after the card is recorded. Drives no core mutation. */
+    private void emitRequested(UUID tenantId, CallbackRequest saved) {
+        Map<String, Object> payload = new HashMap<>();
+        if (saved.getId() != null) {
+            payload.put("callbackRequestId", saved.getId().toString());
+        }
+        if (saved.getContactId() != null) {
+            payload.put("contactId", saved.getContactId().toString());
+        }
+        if (saved.getMode() != null) {
+            payload.put("mode", saved.getMode().name());
+        }
+        if (saved.getCallSid() != null) {
+            payload.put("callSid", saved.getCallSid());
+        }
+        events.publish(DomainEvent.of(
+                DomainEventType.CALLBACK_REQUESTED, tenantId, saved.getId(), payload));
     }
 
     /**

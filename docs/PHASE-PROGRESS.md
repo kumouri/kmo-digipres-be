@@ -25,12 +25,12 @@ domain-event subscriber (no seam).
 | T5.1 | Detail plan + this ledger | DONE | (first commit) | n/a (docs) |
 | T5.2 | Model + ledgers (`CallbackRequest`, `CallbackOfferLog`, `CallbackFunnelLog`, enums, repos) | DONE | 2c8e18c | compileJava OK |
 | T5.3 | `CallbackIntentHandler` (E2 handler) + `CallbackOfferSubscriber` (`VOICEMAIL_LEAD_CREATED`) + `CallbackIntents` + `RequestedWindowParser` + `CallbackRevenueRanker` | DONE | (this) | compileJava OK |
-| T5.4 | `CallbackQueueService` + `CallbackController` (ranked queue + dispatch) + DTOs | PENDING | | |
-| T5.5 | `CallbackAnalyticsService` (recovery funnel) + `CallbackConfig` + admin CRUD | PENDING | | |
-| T5.6 | `CallbackAutoConfiguration` (both-modules gate; default-OFF send bean) | PENDING | | |
-| T5.7 | Demo seed (`CallbackDemoSeeder`, `@Profile("demo-home-callback")`) | PENDING | | |
+| T5.4 | `CallbackController` (ranked queue + dispatch + recovery-stats + config CRUD; repos inline — T3/T4 controller precedent) + DTOs | DONE | (this) | compileJava OK |
+| T5.5 | recovery funnel (inlined in controller) + `CallbackConfig` admin CRUD | DONE | (this) | compileJava OK |
+| T5.6 | `CallbackAutoConfiguration` (both-modules gate; default-OFF `home-callback-offer` send bean) + AutoConfiguration.imports + `DomainEventType` T5 block (CALLBACK_OFFERED/REQUESTED/DISPATCHED) | DONE | (this) | compileJava OK |
+| T5.7 | Demo seed (`CallbackDemoSeeder`, `@Profile("demo-home-callback")`) | DONE | (this) | compileJava OK |
 | T5.8 | ITs (offer / reply / revenue-rank / recovery-stats / module-gate / opt-out) + regression | PENDING | | |
-| T5.9 | Docs (CLAUDE.md T5 entry) + error codes (4400-4409 Javadoc) + `DomainEventType` T5 block + openapi regen | PENDING | | |
+| T5.9 | Docs (CLAUDE.md T5 entry) + error codes (4400-4409 Javadoc DONE) + openapi regen | PARTIAL | | error Javadoc DONE |
 
 ## Decisions / deviations (filled in as work lands)
 - **Reused voicemail core empty-diff via event subscriber (T5.3).** The callback-offer SMS hooks off

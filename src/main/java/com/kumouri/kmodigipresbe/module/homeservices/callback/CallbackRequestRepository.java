@@ -17,6 +17,9 @@ import java.util.UUID;
 public interface CallbackRequestRepository
         extends TenantScopedReactiveMongoRepository<CallbackRequest, UUID> {
 
+    /** Tenant-scoped single-card load (the dispatch transition; the not-found backstop). */
+    Mono<CallbackRequest> findByTenantIdAndId(UUID tenantId, UUID id);
+
     /** The revenue-ranked open queue: a status's cards for this tenant, highest revenueScore first. */
     Flux<CallbackRequest> findByTenantIdAndStatusOrderByRevenueScoreDesc(UUID tenantId,
                                                                          CallbackStatus status);
