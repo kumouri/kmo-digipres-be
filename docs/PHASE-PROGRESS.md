@@ -39,9 +39,9 @@ OFF → `InboundSmsService.claimService==null` → a YES falls through to the E2
 
 | # | Sub-phase | Status | Commit | Validation |
 |---|-----------|--------|--------|------------|
-| T7.1 | Detail plan + this ledger | DONE | (this) | n/a (docs) |
-| T7.2 | `DomainEventType.APPOINTMENT_CANCELLED` (+ T7 advisory events) + minimal additive `AppointmentService` cancel-event emit | PENDING | | |
-| T7.3 | `module/frontdesk/reschedule/` package — `FrontDeskSlotMaterializer`, `RescheduleGapFillSubscriber`, `RescheduleWaitlistIntentHandler`, `RescheduleAnalyticsService`/`RescheduleFillLog`/repo/`RescheduleFillStats`, `RescheduleController`, `RescheduleFlowAutoConfiguration`; `AutoConfiguration.imports` line; `GlobalErrorHandler` 4420-4429 Javadoc; app-props doc | PENDING | | |
+| T7.1 | Detail plan + this ledger | DONE | 0e821a3 | n/a (docs) |
+| T7.2 | `DomainEventType.APPOINTMENT_CANCELLED` (+ T7 advisory events) + minimal additive `AppointmentService` cancel-event emit | DONE | (T7.2 commit) | compileJava OK |
+| T7.3 | `module/frontdesk/reschedule/` package — `FrontDeskSlotMaterializer`, `RescheduleGapFillSubscriber`, `RescheduleWaitlistIntentHandler`, `RescheduleAnalyticsService`/`RescheduleFillLog`/repo/`RescheduleFillStats`, `RescheduleController`, `RescheduleFlowAutoConfiguration`; `AutoConfiguration.imports` line; `GlobalErrorHandler` 4420-4429 Javadoc; app-props doc | DONE | (this) | compileJava OK |
 | T7.4 | `RescheduleFlowDemoSeeder` (`@Profile("demo-health-reschedule")`) | PENDING | | |
 | T7.5 | ITs + regression + openapi regen + CLAUDE.md T7 entry + ledger finalize | PENDING | | |
 
