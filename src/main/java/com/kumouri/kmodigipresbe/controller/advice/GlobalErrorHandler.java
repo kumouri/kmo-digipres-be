@@ -804,6 +804,46 @@ import java.util.UUID;
  *       (the only pre-existing edits are an additive {@code InvoiceRepository} finder + additive
  *       {@code DomainEventType} constants + the AR-4 additive guard in
  *       {@code DunningDispatchService}).</strong></li>
+ *   <li>{@code 4620-4639} — <em>AI Proposal / SOW generator</em>: from a few lines of discovery notes,
+ *       Claude (Sonnet) drafts a scoped, line-item-<strong>priced</strong> SOW ({@code module/proposals}).
+ *       "A SOW is a priced {@code Quote} with prose" — the priced line items + computed totals are a DRAFT
+ *       {@code Quote} created via the UNCHANGED {@code QuoteService.create}, and the four narrative sections
+ *       (scope / deliverables / assumptions / timeline) are an additive {@code SowDraft} document linked by
+ *       {@code quoteId} (the shipped {@code Quote} model stays empty-diff vs {@code main}). The
+ *       {@code proposals} module is gated
+ *       {@code @ConditionalOnProperty(kmosf.modules.proposals.enabled, <strong>matchIfMissing=false</strong>)}
+ *       — DEFAULT-OFF (a day-one productization bet; the AR / {@code GbpReviewPoller} default-OFF posture),
+ *       so a non-proposals tenant gets no draft service and no {@code /proposals/**} routes — byte-identical
+ *       to before this module existed. {@code ProposalDraftService} calls the reused
+ *       {@code AnthropicAiAssistService}-shaped transport (per-tenant Anthropic key + house-key fallback,
+ *       {@code AiUsageRecorder} budget gate, WireMock-able base-url — the {@code VoicemailExtractionService}
+ *       sibling shape; that AI core stays empty-diff) with a strict system prompt → ONLY JSON
+ *       {@code {lineItems:[{description,quantity,unitPrice}], scope, deliverables, assumptions, timeline}};
+ *       the parse is <strong>defensive</strong> (strips code fences / prose; a blank / over-budget /
+ *       upstream-error / unparseable answer degrades to an empty draft with {@code aiApplied=false} — it
+ *       NEVER throws, so an AI outage never blocks a SOW draft; "AI is triage, not truth"). The parsed
+ *       line items materialize a DRAFT {@code Quote} (the existing {@code computeTotals} prices it; never
+ *       finalized) + the prose persists to {@code SowDraft}; an advisory {@code PROPOSAL_DRAFTED} fires.
+ *       <strong>New codes:</strong>
+ *       {@code 4620} proposals module not enabled for the tenant (404 — the in-range parity code; the
+ *       {@code 4600}/{@code 4250}/{@code 4220}/{@code 2700}/{@code 3930} not-enabled posture; the
+ *       {@code ProposalDraftController}'s per-tenant membership check surfaces this in-band, while the
+ *       {@code @ConditionalOnProperty} gate also makes the routes absent (404) when the deployment flag is
+ *       off — defense in depth);
+ *       {@code 4621} invalid draft request — blank {@code notes} or {@code notes} longer than
+ *       {@code kmosf.modules.proposals.max-notes-chars} (default 8000) (400). The band {@code 4622-4639}
+ *       is RESERVED for proposals growth (SOW-3 send-to-sign reuses the existing {@code ContractService} /
+ *       Documenso {@code 37xx} codes; SOW PDF reuses the existing {@code QuotePdfService} — no new codes).
+ *       Reused (NOT re-allocated): {@code 1200}-{@code 1203} (AI budget / Anthropic upstream / missing-key
+ *       — surfaced best-effort by {@code ProposalDraftService}, which degrades to an empty {@code aiApplied=false}
+ *       draft rather than throwing), {@code 1130}/{@code 1131}/{@code 1132} (the shared module-load /
+ *       tenant-not-found checks via {@code TenantModuleRegistry}), {@code 1800} (RoleGuard STAFF on the
+ *       controller), {@code 2200} (Quote-not-found on the {@code GET /proposals/{id}} read via the unchanged
+ *       {@code QuoteService}). <strong>Strictly additive — the shipped {@code Quote}, {@code LineItem},
+ *       {@code QuoteService}, {@code QuotePdfService}, {@code ContractService}, {@code AnthropicAiAssistService},
+ *       and {@code AiUsageRecorder} are empty-diff vs {@code main} (the only pre-existing edits are additive
+ *       {@code DomainEventType} constant + this Javadoc + additive {@code application.properties} doc +
+ *       the imports-file entry).</strong></li>
  *   <li>{@code 4340-4349} — <em>Review Engine (E3)</em>: post-visit review-REQUEST delivery + sentiment
  *       triage + per-entity insights, extending the shipped {@code integration/gbp} review pipeline
  *       additively. On a completed visit/job ({@code BOOKING_COMPLETED} salon + {@code MILESTONE_COMPLETED}
