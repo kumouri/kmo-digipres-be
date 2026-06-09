@@ -773,6 +773,30 @@ import java.util.UUID;
  *       CI). <strong>The ONLY pre-existing service touched is {@code InboundSmsService} (an additive
  *       IGNORED-fallthrough delegation); {@code TwilioSmsService}, {@code WaitlistClaimService},
  *       {@code ConciergeInboundRouter}, and the AI transports are empty-diff vs {@code main}.</strong></li>
+ *   <li>{@code 4600-4619} — <em>"Get Paid" AR / collections</em>: tiered overdue-invoice dunning over
+ *       the existing billing core ({@code module/ar}). The {@code ar} module is gated
+ *       {@code @ConditionalOnProperty(kmosf.modules.ar.enabled, <strong>matchIfMissing=false</strong>)}
+ *       — DEFAULT-OFF (a money / customer-facing-comms module; the {@code GbpReviewPoller} /
+ *       {@code CoverageNudgeJob} default-OFF posture), so a non-AR tenant gets no aging sweep, no
+ *       SENT→OVERDUE transition, and no dunning — byte-identical to before this module existed. The
+ *       default-OFF {@code ArAgingSweepJob} sweeps each tenant's SENT/OVERDUE invoices past
+ *       {@code dueAt} (+ grace), and for each crossed tier (≥3→D3, ≥7→D7, ≥14→D14) NOT already in the
+ *       {@code DunningLog} it inserts the ledger row FIRST over the unique {@code tenant_invoice_tier_idx}
+ *       ({@code onErrorResume(DuplicateKeyException → empty)} so a restart/concurrent tick fires ZERO
+ *       duplicate, NEVER {@code switchIfEmpty(create)}), flips the invoice SENT→OVERDUE on the first
+ *       tier-insert (via the unchanged {@code InvoiceService.setStatus}), and emits the matching
+ *       advisory {@code INVOICE_OVERDUE_{D3,D7,D14}} event. New code: {@code 4600} ar not enabled for
+ *       the tenant (404 — the in-range parity code; the {@code 4250}/{@code 4300}/{@code 4320}/
+ *       {@code 2700}/{@code 3930} not-enabled posture; the AR-4 read controller surfaces the shared
+ *       {@code 1130}/{@code 1132} via {@code requireEnabled}). The band {@code 4601-4619} is RESERVED
+ *       for AR growth (dunning / promise-to-pay / aging-read sub-phases). Reused (NOT re-allocated):
+ *       {@code 1130}/{@code 1131}/{@code 1132} (the module gate via {@code requireEnabled}), the
+ *       existing invoice/billing codes via the unchanged {@code InvoiceService} ({@code 2300}/
+ *       {@code 2301}/{@code 3640}). <strong>Strictly additive — the shipped {@code Invoice},
+ *       {@code InvoiceService}, {@code StripeCheckoutService}, {@code RuleActionDispatcher},
+ *       {@code TwilioSmsService}, and {@code AnthropicAiAssistService} are empty-diff vs {@code main}
+ *       (the only pre-existing edits are an additive {@code InvoiceRepository} finder + additive
+ *       {@code DomainEventType} constants).</strong></li>
  * </ul>
  */
 @Slf4j

@@ -444,6 +444,15 @@ public final class DomainEventType {
     public static final String RESPONDER_INTENT_HANDLED     = "responder.intentHandled";
     public static final String RESPONDER_HANDED_OFF         = "responder.handedOff";
 
+    // "Get Paid" AR / collections (band 4600-4619) — tiered overdue-invoice dunning. All advisory
+    // (RuleEngine / webhook fan-out) — they do NOT drive any core mutation; the default-OFF
+    // ArAgingSweepJob flips SENT->OVERDUE and emits these synchronously, gated by an explicit-boolean
+    // DunningLog ledger-insert-FIRST (one row per (invoice, tier)). Emitted only when the `ar` module
+    // is on. Payload: {invoiceId, contactId, daysOverdue, balance, currency}.
+    public static final String INVOICE_OVERDUE_D3  = "invoice.overdueD3";
+    public static final String INVOICE_OVERDUE_D7  = "invoice.overdueD7";
+    public static final String INVOICE_OVERDUE_D14 = "invoice.overdueD14";
+
     private DomainEventType() {
     }
 }
