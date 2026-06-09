@@ -444,6 +444,19 @@ public final class DomainEventType {
     public static final String RESPONDER_INTENT_HANDLED     = "responder.intentHandled";
     public static final String RESPONDER_HANDED_OFF         = "responder.handedOff";
 
+    // T5 (Home Services "Instant Callback", band 4400-4409) — the missed-call → callback recovery loop.
+    // All advisory (RuleEngine / webhook fan-out) — they do NOT drive any core mutation; the funnel
+    // CallbackFunnelLog ledger is the analytics source, these are the timeline/breadcrumb events.
+    // CALLBACK_OFFERED: emitted after the (default-OFF) opt-in SMS is sent to a caller following a
+    //   home-services voicemail; payload {callSid, contactId}.
+    // CALLBACK_REQUESTED: emitted after a caller's reply records/updates a CallbackRequest card;
+    //   payload {callbackRequestId, contactId, mode, callSid}.
+    // CALLBACK_DISPATCHED: emitted after a dispatcher claims a callback card; payload
+    //   {callbackRequestId, callSid}.
+    public static final String CALLBACK_OFFERED    = "callback.offered";
+    public static final String CALLBACK_REQUESTED  = "callback.requested";
+    public static final String CALLBACK_DISPATCHED = "callback.dispatched";
+
     // "Get Paid" AR / collections (band 4600-4619) — tiered overdue-invoice dunning. All advisory
     // (RuleEngine / webhook fan-out) — they do NOT drive any core mutation; the default-OFF
     // ArAgingSweepJob flips SENT->OVERDUE and emits these synchronously, gated by an explicit-boolean

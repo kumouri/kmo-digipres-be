@@ -1034,6 +1034,45 @@ import java.util.UUID;
  *       package is strictly additive. Anthropic is WireMock + Twilio/email are mocked in ITs (no live send);
  *       the module is default-OFF. A live Switchboard on real patient data implies PHI/BA status — the
  *       separately-priced, BAA-gated compliance tier applies; the demo runs on fictional data only.</li>
+ *   <li>{@code 4400-4409} — <em>Home Services "Instant Callback" (T5)</em>: deploys the shipped E2 inbound
+ *       responder to the home-services vertical as a missed-call → callback recovery loop
+ *       ({@code module/homeservices/callback}). When a home-services voicemail is captured, a default-OFF
+ *       {@code CallbackOfferSubscriber} (a {@code VOICEMAIL_LEAD_CREATED} bus subscriber — so
+ *       {@code TwilioVoicemailService} stays empty-diff, NO seam) texts the caller an opt-in offer
+ *       (immediate or scheduled callback), idempotent per CallSid via a ledger-insert-FIRST
+ *       {@code CallbackOfferLog} (unique {@code tenant_callsid_idx}; never {@code switchIfEmpty(send)}). The
+ *       caller's reply is routed through the E2 {@code InboundIntentRouter} to a {@code CallbackIntentHandler}
+ *       (a vertical {@code IntentHandler} the router auto-discovers via {@code List<IntentHandler>} — NO
+ *       router edit) that records a revenue-ranked {@code CallbackRequest} (explicit-boolean upsert, never
+ *       {@code switchIfEmpty(create)}) — the deterministic {@code CallbackRevenueRanker} (job-value band &gt;
+ *       urgency &gt; recency, no ML) reuses the home-services voicemail intake's DRAFT WorkOrder
+ *       {@code customFields.jobValueBand}/{@code urgency}. The dispatcher reads the revenue-ranked queue
+ *       ({@code GET /home-services/callbacks}, a pure DB sort on {@code tenant_status_score_idx}), claims a
+ *       card ({@code POST /home-services/callbacks/{id}/dispatch}, {@code @IdempotentRoute}), and sees the
+ *       missed→offered→accepted→dispatched recovery funnel ({@code GET
+ *       /home-services/callbacks/recovery-stats}, over the {@code CallbackFunnelLog} ledger). Per-tenant
+ *       copy is the {@code CallbackConfig} ({@code GET/PUT /home-services/callbacks/config}, ADMIN — never
+ *       hardcoded business copy). <strong>New codes:</strong> {@code 4400} callback request not found
+ *       (404); {@code 4401} callback config not found for the tenant (404, on a read); {@code 4402}
+ *       callback not in REQUESTED state — cannot dispatch (409, explicit-boolean — a double-dispatch is a
+ *       defensive 409); {@code 4403} invalid config body (400). {@code 4404-4409} RESERVED for callback
+ *       growth. Module gate requires <strong>both</strong> {@code kmosf.modules.home-services} AND
+ *       {@code kmosf.modules.responder} ({@code CallbackAutoConfiguration} composes the home-services
+ *       {@code @ConditionalOnProperty} with {@code @ConditionalOnBean(InboundIntentRouter)} + per-tenant
+ *       {@code TenantModuleRegistry.requireEnabled} for both keys; the T3/T4 pattern). The caller-facing
+ *       offer SMS is additionally gated default-OFF on {@code kmosf.modules.home-callback-offer}
+ *       (matchIfMissing=false — no live caller SMS in CI / any default run). Reused (NOT re-allocated):
+ *       {@code 1130}/{@code 1132} (module gate), {@code 1800} (RoleGuard ADMIN on config CRUD),
+ *       {@code 2530-2532} (Twilio SMS — the reused {@code TwilioSmsService} on the offer + reply paths),
+ *       {@code 3100}/{@code 3101} (the {@code @IdempotentRoute} middleware on dispatch), {@code 1200-1203}
+ *       (the reused E2 classifier AI gate — surfaced as a degraded UNKNOWN, never an HTTP error).
+ *       <strong>The reused cores ({@code TwilioVoicemailService}, {@code InboundIntentRouter},
+ *       {@code InboundIntentClassifier}, {@code DefaultHandoffIntentHandler}, {@code ConversationState*},
+ *       {@code InboundSmsService}, {@code TwilioSmsService}, {@code MissedCallInboxController},
+ *       {@code WorkOrderService}, {@code ResponderAutoConfiguration}, {@code HomeServicesAutoConfiguration})
+ *       stay empty-diff vs {@code main}</strong>; the T5 package is strictly additive. Anthropic is WireMock
+ *       + Twilio is mocked in ITs (no live send). Going live needs A2P 10DLC for the caller SMS (a separate
+ *       human action — never the loop).</li>
  * </ul>
  */
 @Slf4j
