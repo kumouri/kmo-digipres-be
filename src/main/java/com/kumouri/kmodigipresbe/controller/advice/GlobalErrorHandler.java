@@ -962,6 +962,45 @@ import java.util.UUID;
  *       {@code FrontDeskAutoConfiguration}) stay empty-diff vs {@code main}</strong> — T2 needed ZERO E1
  *       edits (T1's SPI sufficed). The {@code NurtureRunner} stays default-OFF; Twilio/Email are mocked +
  *       Anthropic is WireMock in ITs (no live send).</li>
+ *   <li>{@code 4380-4389} — <em>RE "Midnight Responder" (T3)</em>: the routing + completeness layer over the
+ *       shipped RE concierge (RE-1..RE-5) + T1 (RE nurture) + E2 (responder) ({@code module/realestate/responder}).
+ *       It does NOT rebuild RAG / qualification / scoring / booking / nurture. Three routing pieces + a demo
+ *       seed: <strong>(1) tier routing on qualification</strong> — when the UNCHANGED nightly
+ *       {@code LeadScoringV2Service} tiers a concierge-sourced realestate lead, a {@code TierRoutingService}
+ *       ({@code LEAD_SCORE_UPDATED} subscriber, the {@code LeadHandoffService} mirror) routes <strong>HOT</strong>
+ *       to the existing RE-2 hot-handoff (untouched — T3 no-ops on HOT, so exactly one handler per tier),
+ *       <strong>WARM</strong> to a tenant-configured nurture campaign, and <strong>COLD</strong> to a
+ *       tenant-configured long-cadence campaign; the enroll is the E1 explicit-boolean find-or-enroll over
+ *       the unique {@code NurtureEnrollment.tenant_campaign_contact_idx} (never {@code switchIfEmpty(create)}),
+ *       idempotent on re-fire; emits the advisory {@code CONCIERGE_TIER_ROUTED}. <strong>(2) off-listing /
+ *       unknown-intent merge</strong> — when the grounded concierge cannot ground an inbound buyer SMS (no
+ *       listing matched → {@code NO_LISTING}, always; or a strict {@code HANDOFF}, iff the per-tenant flag),
+ *       it delegates to the E2 {@code DefaultHandoffIntentHandler} (staff notify + a vetted, static, generic
+ *       "team member will follow up" reply) via an additive {@code @Nullable ResponderHandoffDelegate} seam
+ *       on {@code ConciergeInboundRouter} (the {@code setConciergeRouter}/{@code setIntentRouter} setter-
+ *       injection precedent; null delegate ⇒ byte-identical RE-1). <strong>(3) response-latency
+ *       instrumentation</strong> — additive nullable {@code ConciergeTurn.receivedAt}/{@code latencyMs}
+ *       (legacy turns null) + the {@code GET /realestate/responder/latency-stats} read (p50/p95/max + the
+ *       after-hours share). Tier→campaign mapping + the handoff-delegation flag + the after-hours window are
+ *       <strong>per-tenant config</strong> ({@code MidnightResponderConfig}; never hardcoded campaign ids).
+ *       <strong>New codes:</strong> {@code 4380} Midnight Responder config not found for the tenant (404);
+ *       {@code 4381} invalid config — a tier campaign id that does not resolve to one of the tenant's
+ *       {@code NurtureCampaign}s (400); {@code 4382} RESERVED-as-advisory (a tier-route enroll into a
+ *       missing/inactive campaign — logged, never thrown, the best-effort posture). {@code 4383-4389}
+ *       RESERVED for Midnight-Responder growth. Module gate requires <strong>both</strong>
+ *       {@code kmosf.modules.realestate} AND {@code kmosf.modules.responder}
+ *       ({@code RealEstateMidnightAutoConfiguration} composes the realestate {@code @ConditionalOnProperty}
+ *       with {@code @ConditionalOnBean(DefaultHandoffIntentHandler)} + per-tenant
+ *       {@code TenantModuleRegistry.requireEnabled} for both keys; re-checked on the event path in
+ *       {@code TierRoutingService}). Reused (NOT re-allocated): {@code 1130}/{@code 1132} (module gate),
+ *       {@code 1800} (RoleGuard STAFF), {@code 2530-2532} (Twilio). <strong>The reused cores
+ *       ({@code ConciergeAnswerService}, {@code LeadScoringV2Service}, {@code LeadHandoffService},
+ *       {@code QualificationService}, {@code NurtureSegmentationService}/{@code NurtureReplyService},
+ *       {@code InboundSmsService}, {@code InboundIntentRouter}, {@code DefaultHandoffIntentHandler},
+ *       {@code RealEstateAutoConfiguration}, {@code ResponderAutoConfiguration}) stay empty-diff vs
+ *       {@code main}</strong>; the only additive edits are the {@code ConciergeInboundRouter} delegate seam +
+ *       the {@code ConciergeTurn} latency fields. Twilio is mocked + Anthropic is WireMock in ITs (no live
+ *       send); the module is default-OFF.</li>
  * </ul>
  */
 @Slf4j

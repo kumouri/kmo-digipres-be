@@ -32,6 +32,23 @@ public class ConciergeTurn {
 
     private Instant at;
 
+    /**
+     * T3 (Midnight Responder) — additive latency instrumentation. On a BUYER turn, when the inbound was
+     * received (== {@link #at}, recorded for symmetry). On an ASSISTANT turn, when the inbound buyer text
+     * this reply answers was received — paired with {@link #latencyMs} to give the received→replied
+     * responder latency (the "&lt;30s, 24/7" demo stat). Nullable: legacy turns deserialize null, and a
+     * reply with no recorded inbound-receipt time degrades to null (no latency recorded). Additive only —
+     * never changes a grounded answer / qualification / booking outcome.
+     */
+    private Instant receivedAt;
+
+    /**
+     * T3 (Midnight Responder) — the received→replied latency in milliseconds on an ASSISTANT turn
+     * ({@code at - receivedAt}); null on BUYER turns and when {@link #receivedAt} is unknown. The
+     * latency-stats endpoint aggregates these into p50/p95.
+     */
+    private Long latencyMs;
+
     /** True on the assistant turn that handed off to the agent (no grounded answer). */
     @Builder.Default
     private boolean handoff = false;
