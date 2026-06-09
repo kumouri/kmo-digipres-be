@@ -427,6 +427,23 @@ public final class DomainEventType {
     public static final String NURTURE_POSITIVE_REPLY    = "nurture.positiveReply";
     public static final String NURTURE_BOOKING_LINK_SENT = "nurture.bookingLinkSent";
 
+    // E2 (Inbound Responder + Intent Router) — the shared inbound-SMS responder engine. All three are
+    // advisory (RuleEngine / webhook fan-out) — they do NOT drive any core mutation; the classify, the
+    // handler dispatch, and the default handoff all happen synchronously + explicitly inside the
+    // responder-module-gated InboundIntentRouter (delegated to from the IGNORED fallthrough of the
+    // shipped InboundSmsService). Emitted only when the `responder` module is on AND the tenant has a
+    // ResponderConfig (absent/disabled/empty-intents config => the router is a no-op => nothing emits,
+    // byte-identical to today's IGNORED path).
+    // RESPONDER_MESSAGE_CLASSIFIED: emitted after the classifier returns (best-effort UNKNOWN on
+    //   failure); payload {phone, intent, confidence, vertical}.
+    // RESPONDER_INTENT_HANDLED: emitted after the matched handler runs; payload
+    //   {phone, intent, handlerKey, replied}.
+    // RESPONDER_HANDED_OFF: emitted after the default handoff fires (no specific handler matched, or the
+    //   intent was UNKNOWN); payload {phone, intent}.
+    public static final String RESPONDER_MESSAGE_CLASSIFIED = "responder.messageClassified";
+    public static final String RESPONDER_INTENT_HANDLED     = "responder.intentHandled";
+    public static final String RESPONDER_HANDED_OFF         = "responder.handedOff";
+
     private DomainEventType() {
     }
 }

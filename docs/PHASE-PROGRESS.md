@@ -1,50 +1,50 @@
-# PHASE-PROGRESS — E1 Nurture / Cadence Engine (`nurture-cadence-engine`)
+# PHASE-PROGRESS — E2 Inbound Responder + Intent Router (`responder-intent-router`)
 
-> Fresh ledger for this branch (off `main` @ f245547). Supersedes the prior FD-1 ledger that
-> occupied this path — that work is already on `main`.
+> Fresh ledger for this branch (off `main` @ `6b04ce0`, post-E1-nurture merge). Replaces the prior
+> E1-nurture ledger that occupied this path — that work is already on `main`.
+>
+> Detail plan: `~/.claude/plans/responder-intent-router.md`. Error band **4320–4339**. Module gate
+> `kmosf.modules.responder` (matchIfMissing=true).
+>
+> **The acceptance bar is the regression:** the in-use inbound-SMS ITs
+> (`GapFillWaitlistIT`, `RealEstateConciergeIT`) MUST stay green; the ONLY change to
+> `InboundSmsService` is the additive `IGNORED`-fallthrough delegation to the new
+> `InboundIntentRouter`.
 
-Detail plan: `~/.claude/plans/nurture-cadence-engine.md`.
-Error band **4300-4319**. Module key `nurture` (admin/CRUD controller, `matchIfMissing=true`); the
-scheduled runner has its OWN gate `kmosf.modules.nurture-runner` (`matchIfMissing=false`,
-**default-OFF** — the GBP poller/admin split precedent).
+## Sub-phase ledger
 
-**Extend-vs-sibling decision: SIBLING.** Strictly-additive `…/nurture/…` package. `SequenceEngine`,
-`model/sequence/Sequence*`, `SequenceStepType`, `WorkflowRule`/`RuleEngine`, `InboundSmsService`,
-`TwilioSmsService`, `EmailService`, `AnthropicAiAssistService` all MUST be empty-diff vs `main`
-(verify `git diff main -- <file>` = 0 lines). Rationale in the detail plan §0.
+| Sub-phase | Scope | Commit | Status |
+|---|---|---|---|
+| E2.0 | Detail plan + fresh ledger | 40827dd | DONE |
+| E2.1 | model + repos + DomainEventType block + config props | b0f5eda | DONE |
+| E2.2 | `InboundIntentClassifier` (VoicemailExtractionService clone, text) | 831b1d6 | DONE |
+| E2.3 | `ConversationStateService` + `IntentHandler` + `DefaultHandoffIntentHandler` + `InboundIntentRouter` | 8358baf | DONE |
+| E2.4 | surgical `InboundSmsService` delegation + `InboundOutcome.RESPONDER_HANDLED` | cd09875 | DONE |
+| E2.5 | `ResponderAutoConfiguration` + condition + `@ConditionalOnMissingBean` fallback + wiring bean | 76124e2 | DONE |
+| E2.6 | `ResponderConfigController` + `GlobalErrorHandler` 4320-4339 Javadoc | 2a86c8c | DONE |
+| E2.7 | ITs (25 tests) + `verifyOpenApi` regen + commit `docs/api/openapi.json` | c7c3234 | DONE |
 
-| Sub-phase | Scope | Status | Validating IT | Commit |
-|---|---|---|---|---|
-| N0 | Detail plan + this ledger | DONE | — | (this commit) |
-| N1 | Model (`NurtureCampaign`/`NurtureEnrollment`/`NurtureSendLog` + enums/embedded) + 3 repositories | DONE (compiles) | compile + `OpenApiEndpointIT` boot | (N1 commit) |
-| N2 | `NurtureSegmentationService` + `NurtureAutoConfiguration` (ModuleDefinition) + `AutoConfiguration.imports` entry + `DomainEventType` Nurture block | DONE | `NurtureSegmentationIT` (3/3 green) | (N2 commit) |
-| N3 | `NurtureMessageComposer` + `NurtureRunner` (default-OFF) | DONE | `NurtureRunnerIT` (6/6 green) | (N3 commit) |
-| N4 | `NurtureReplyService` (reply→exit→book) | DONE | `NurtureReplyBookIT` (5/5 green) | (N4 commit) |
-| N5 | `NurtureAnalyticsService` | DONE | `NurtureAnalyticsIT` (1/1 green) | (N5 commit) |
-| N6 | `NurtureCampaignController` + DTOs + `GlobalErrorHandler` 4300-4319 Javadoc + openapi regen | DONE | `NurtureCampaignControllerIT` (6/6) + `OpenApiEndpointIT` (nurture paths in spec) | (N6 commit) |
+## Validation log (all GREEN, local Docker/Testcontainers)
+- REGRESSION gate — `./gradlew test --tests "*GapFillWaitlistIT" --tests "*RealEstateConciergeIT"`:
+  `GapFillWaitlistIT` **11/0/0/0**, `RealEstateConciergeIT` **5/0/0/0** — pass UNCHANGED with the seam wired.
+- New — `./gradlew test --tests "com.kumouri.kmodigipresbe.module.responder.*"`:
+  `InboundIntentClassifierIT` **8/0/0/0**, `InboundIntentRouterIT` **7/0/0/0**,
+  `ConversationStateIT` **3/0/0/0**, `ResponderConfigIT` **7/0/0/0** = **25/0/0/0**.
+- Boot guard — `OpenApiEndpointIT` **2/0/0/0** (full context boots with the responder wiring active).
+- `verifyOpenApi` refreshed `docs/api/openapi.json` (adds `/responder/config[/test-classify]` +
+  the now-default-registered `/public/integrations/twilio/{tenantId}/sms`).
 
-## Invariants (must hold at every sub-phase)
-- **Reactive:** no `.block()` on the Netty loop; the scheduled tick subscribes on the scheduler
-  thread (the `CoverageNudgeJob`/`SequenceEngine` pattern); blocking work on
-  `Schedulers.boundedElastic()`. `@Bean` (not `@Component`) where the conditional pattern requires.
-- **`switchIfEmpty` only for genuine not-found** (4301 campaign / 4310 enrollment). Every
-  find-or-enroll + the per-(enrollment, step) send is **explicit-boolean probe + ledger-insert-FIRST**
-  over a unique index with `DuplicateKeyException → Mono.empty()`. NEVER `switchIfEmpty(create/send)`.
-- **Runner default-OFF** (`kmosf.modules.nurture-runner.enabled` matchIfMissing=false) → no live
-  sends in CI / any default run.
-- **No live external in the loop:** Anthropic → WireMock (`@DynamicPropertySource(kmosf.ai.anthropic.base-url)`);
-  Twilio/Email → the precedented `@MockitoBean` send seams; no host/key/charge/send hardcoded.
-- **TCPA:** skip `sms-opt-out`-tagged contacts (`RiskTieredPreventionService.SMS_OPT_OUT_TAG`); honor
-  the per-campaign rolling frequency cap.
+## Key invariants for this branch (carry-forward)
+- **`switchIfEmpty` only for genuine not-found.** find-or-create (conversation, config) is
+  explicit-boolean; the only new-package `switchIfEmpty` is the classifier's genuine house-key
+  fallback (the verbatim `VoicemailExtractionService` pattern).
+- **No-config = no-op = `IGNORED`** — default-tenant behavior unchanged (dedicated IT).
+- **No live external** — Anthropic → WireMock; Twilio/Email send → `@MockitoBean`; sandbox fakes.
+- **Empty-diff** — `TwilioSmsService`, `WaitlistClaimService`, `ConciergeInboundRouter`,
+  `AnthropicAiAssistService`, `AiVisionService` (verify `git diff main`, 0 lines each). The only
+  pre-existing files touched: `InboundSmsService` (surgical seam), `InboundSmsModuleEnabledCondition`
+  (one additive nested condition), `GlobalErrorHandler` (Javadoc), `DomainEventType` (additive block),
+  `application.properties` (additive keys), `docs/api/openapi.json` (regen).
 
-## Validation log
-- N0: detail plan + this fresh ledger committed; early push + draft PR for the hedge.
-- N1: compileJava green (model + repos).
-- N2: NurtureSegmentationIT 3/3.
-- N3: NurtureRunnerIT 6/6 (keystone).
-- N4: NurtureReplyBookIT 5/5.
-- N5: NurtureAnalyticsIT 1/1.
-- N6: NurtureCampaignControllerIT 6/6; OpenApiEndpointIT exports the 5 /nurture paths;
-  docs/api/openapi.json refreshed (cp1252, valid JSON, 228 paths). IT-URI lesson:
-  @AutoConfigureWebTestClient auto-applies spring.webflux.base-path=/api/v1, so IT URIs
-  must NOT prepend /api/v1 (a double prefix 404s as "No static resource").
+## Deviations / notes
+- (none yet)
