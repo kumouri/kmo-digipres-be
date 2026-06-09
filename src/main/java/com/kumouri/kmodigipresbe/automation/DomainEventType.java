@@ -493,6 +493,16 @@ public final class DomainEventType {
     public static final String WAITLIST_ENGINE_OFFER_SENT   = "waitlistEngine.offerSent";
     public static final String WAITLIST_ENGINE_SLOT_CLAIMED = "waitlistEngine.slotClaimed";
 
+    // AI Proposal/SOW generator (band 4620-4639) — advisory. Emitted by the (default-OFF) proposals
+    // module's ProposalDraftService after a DRAFT Quote (priced line items + computed totals via the
+    // UNCHANGED QuoteService.create) + its SowDraft prose are persisted from discovery notes. Advisory
+    // only (RuleEngine / webhook fan-out) — it does NOT drive any core mutation; the Quote create + the
+    // prose save happen synchronously and explicitly inside ProposalDraftService. There is no idempotency
+    // ledger (a draft is intentionally re-invocable — the MoleVisionService / mole-classify precedent),
+    // so it is not dedupe-gated. Emitted only when the `proposals` module is on. Payload:
+    // {quoteId, contactId (nullable), lineItemCount, aiApplied}.
+    public static final String PROPOSAL_DRAFTED = "proposal.drafted";
+
     private DomainEventType() {
     }
 }
