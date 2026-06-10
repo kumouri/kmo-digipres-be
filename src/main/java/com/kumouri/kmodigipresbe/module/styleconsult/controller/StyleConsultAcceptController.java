@@ -1,7 +1,6 @@
 package com.kumouri.kmodigipresbe.module.styleconsult.controller;
 
 import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
-import com.kumouri.kmodigipresbe.model.idempotency.IdempotentRoute;
 import com.kumouri.kmodigipresbe.module.styleconsult.controller.dto.StyleConsultResponse;
 import com.kumouri.kmodigipresbe.module.styleconsult.service.StyleConsultBookingService;
 import com.kumouri.kmodigipresbe.module.styleconsult.service.StyleConsultService;
@@ -33,11 +32,14 @@ import java.util.UUID;
  * only accept a consult in the tenant their token was issued for. The optional
  * {@code serviceMenuItemId} query param chooses which recommended service to book (default: the first).
  *
- * <h2>Idempotent</h2>
- * {@code @IdempotentRoute} (replays the same response for a repeated {@code Idempotency-Key}); the
- * booking-service accept is itself explicit-boolean idempotent (a re-accept re-confirms — no second
- * booking/SMS). {@code 4455} if the consult doesn't exist for the tenant; {@code 4453} if no bookable
- * service can be resolved.
+ * <h2>Idempotent (service-level explicit-boolean — NOT {@code @IdempotentRoute})</h2>
+ * The {@code @IdempotentRoute} middleware ({@code IdempotencyWebFilter}) resolves the
+ * {@code TenantContext} at <em>filter</em> time — before the controller establishes the synthetic
+ * tenant context from the token — so it cannot be used on a token-authed public route (the context
+ * isn't set yet). Idempotency therefore lives in {@link StyleConsultBookingService#accept}'s
+ * <strong>explicit-boolean</strong> guard: a consult already BOOKED ({@code bookingId != null})
+ * re-confirms and creates no second {@code Booking}/SMS. {@code 4455} if the consult doesn't exist for
+ * the tenant; {@code 4453} if no bookable service can be resolved.
  *
  * <h2>Module gate</h2>
  * {@code @ConditionalOnProperty(prefix="kmosf.modules.chairfill", name="enabled")} — the salon flagship
@@ -58,7 +60,6 @@ public class StyleConsultAcceptController {
     }
 
     @PostMapping("/{token}/consults/{consultId}/accept")
-    @IdempotentRoute
     public Mono<StyleConsultResponse> accept(@PathVariable String token,
                                              @PathVariable UUID consultId,
                                              @RequestParam(value = "serviceMenuItemId", required = false)
