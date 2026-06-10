@@ -159,6 +159,13 @@ tasks.named('bootBuildImage') {
 tasks.named('test') {
     outputs.dir snippetsDir
     useJUnitPlatform()
+    // CI-05 build-cache safety: full-ci.yml runs `./gradlew ... --build-cache` so unchanged
+    // sources reuse compiled classes across runs. The shard filter below is a *closure*
+    // exclude, which Gradle cannot fingerprint as a task input — so two shards (identical
+    // code, different -Dtest.shard.index) would share a test-task cache key and one could
+    // restore the other's result and skip its slice. Never cache the test task itself;
+    // compile/resource tasks still cache. (Testcontainers tests aren't reproducible anyway.)
+    outputs.cacheIf { false }
     // Single forked JVM (Gradle default: forkEvery=0, maxParallelForks=1) is REQUIRED
     // so the static singleton Testcontainers (TestcontainersConfiguration) are shared
     // across every @SpringBootTest context — multiple forks would mean multiple
