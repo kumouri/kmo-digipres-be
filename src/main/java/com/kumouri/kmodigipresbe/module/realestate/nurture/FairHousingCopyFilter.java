@@ -49,6 +49,9 @@ public class FairHousingCopyFilter implements NurtureCopyFilter {
     /** The advisory error-band marker for a Fair-Housing safe-fallback substitution (T1, 4360-4369). */
     public static final int FAIR_HOUSING_SAFE_FALLBACK_CODE = 4360;
 
+    /** The vertical this filter screens (the GATE-2 dispatch key) — campaigns tagged {@code "realestate"}. */
+    public static final String VERTICAL = "realestate";
+
     private final String safeSmsTemplate;
     private final String safeEmailBodyTemplate;
 
@@ -65,6 +68,11 @@ public class FairHousingCopyFilter implements NurtureCopyFilter {
     static final String DEFAULT_SAFE_EMAIL_BODY =
             "Hi {firstName}, just checking in. Reply and we'll set up a time to talk through your "
                     + "real-estate goals.";
+
+    @Override
+    public String vertical() {
+        return VERTICAL;
+    }
 
     @Override
     public Mono<FilterResult> filter(NurtureChannel channel, String body, Contact contact) {

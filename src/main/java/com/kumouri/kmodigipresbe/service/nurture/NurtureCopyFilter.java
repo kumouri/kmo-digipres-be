@@ -1,7 +1,9 @@
 package com.kumouri.kmodigipresbe.service.nurture;
 
 import com.kumouri.kmodigipresbe.model.contact.Contact;
+import com.kumouri.kmodigipresbe.model.nurture.NurtureCampaign;
 import com.kumouri.kmodigipresbe.model.nurture.NurtureChannel;
+import jakarta.annotation.Nullable;
 import reactor.core.publisher.Mono;
 
 /**
@@ -18,12 +20,25 @@ import reactor.core.publisher.Mono;
  * the single chokepoint both the template path AND the best-effort AI-rewrite path funnel through, so a
  * filter applied here vets <strong>all</strong> outbound copy.
  *
+ * <h2>VERTICAL-SCOPED (the GATE-2 fix)</h2>
+ * Each filter declares the {@linkplain #vertical() vertical} it screens (e.g. {@code "realestate"} for
+ * Fair-Housing, {@code "health"} for HIPAA). The composer holds a <strong>registry</strong> of filters
+ * (additive {@link NurtureMessageComposer#registerCopyFilter}, never last-wins) and, when composing for an
+ * enrollment, applies the filter whose {@link #appliesTo(String)} matches the <em>campaign's</em>
+ * {@link NurtureCampaign#getVertical() vertical}. This is the keystone correctness fix: a process that
+ * enables BOTH the realestate+nurture AND the frontdesk+nurture deployments now has each vertical's
+ * messages screened by its own filter — the second consumer's registration no longer clobbers the first
+ * (the prior single-field {@code setCopyFilter} bug, whose worst case was a health nurture message
+ * shipping without the HIPAA screen). A fair-housing/HIPAA filter is therefore <strong>never skipped for
+ * its own vertical and never applied to the wrong vertical</strong>.
+ *
  * <h2>Strictly additive — E1 stays byte-equivalent</h2>
- * The composer holds this as a {@code @Nullable} field set via {@link NurtureMessageComposer#setCopyFilter}
- * (the {@code InboundSmsService.setConciergeRouter}/{@code setIntentRouter} setter precedent). When no
- * filter is wired (the default — E1 standalone, ChairFill/Health/Home deployments) the composer's output
- * is unchanged, so the shipped E1 nurture ITs are byte-for-byte unaffected. A vertical module (here
- * Real Estate) contributes a filter bean + a side-effecting wiring bean that calls the setter at init.
+ * When no filter is registered (the default — E1 standalone, ChairFill/Home deployments) the composer's
+ * output is unchanged, so the shipped E1 nurture ITs are byte-for-byte unaffected. A campaign whose
+ * {@code vertical} is null/legacy (untagged) matches no filter and is likewise sent unfiltered — the safe
+ * legacy behavior (we never guess a vertical and risk applying the <em>wrong</em> vertical's screen). A
+ * vertical module (Real Estate / Health) contributes a filter bean + a side-effecting wiring bean that
+ * registers it at init.
  *
  * <h2>Contract: never non-compliant, never dropped, never throws</h2>
  * An implementation MUST return a compliant body — the input itself when it is already clean, or a vetted
@@ -33,6 +48,29 @@ import reactor.core.publisher.Mono;
  * does not itself send.
  */
 public interface NurtureCopyFilter {
+
+    /**
+     * The vertical this filter screens — matched case-insensitively against a campaign's
+     * {@link NurtureCampaign#getVertical()} by {@link #appliesTo(String)}. Stable, non-null (e.g.
+     * {@code "realestate"} for the Fair-Housing screen, {@code "health"} for the HIPAA screen).
+     */
+    String vertical();
+
+    /**
+     * Whether this filter applies to a campaign tagged with {@code campaignVertical}. Case-insensitive
+     * equality to {@link #vertical()}. A {@code null}/blank campaign vertical (legacy / untagged) returns
+     * {@code false} — the safe invariant: a vertical-specific screen is never applied to a campaign that
+     * has not opted into that vertical, and an untagged campaign therefore degrades to the unfiltered E1
+     * behavior rather than risk the <em>wrong</em> vertical's substitution.
+     *
+     * @param campaignVertical the composing campaign's vertical tag (may be null)
+     * @return true iff this filter should screen that campaign's copy
+     */
+    default boolean appliesTo(@Nullable String campaignVertical) {
+        return campaignVertical != null
+                && !campaignVertical.isBlank()
+                && campaignVertical.trim().equalsIgnoreCase(vertical());
+    }
 
     /**
      * Vet (and if necessary replace) one composed message body before it is sent.

@@ -231,6 +231,8 @@ public class RealEstateNurtureDemoSeeder implements CommandLineRunner {
                 .tenantId(tenantId)
                 .name(CAMPAIGN_NAME)
                 .description("Reactivate dormant real-estate leads with tiered, fair-housing-safe cadences.")
+                // GATE-2: tag the vertical so the composer dispatches the Fair-Housing copy filter.
+                .vertical(FairHousingCopyFilter.VERTICAL)
                 .active(true)
                 .segments(List.of(
                         // A — hot-dormant + high value (30-90d dormant, >= $300k lifetime WON value).

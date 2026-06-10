@@ -51,6 +51,9 @@ public class HipaaCopyFilter implements NurtureCopyFilter {
     /** The advisory error-band marker for a PHI-free safe-fallback substitution (T2, 4370-4379). */
     public static final int PHI_SAFE_FALLBACK_CODE = 4370;
 
+    /** The vertical this filter screens (the GATE-2 dispatch key) — health campaigns tagged {@code "health"}. */
+    public static final String VERTICAL = "health";
+
     private final String safeSmsTemplate;
     private final String safeEmailBodyTemplate;
 
@@ -67,6 +70,11 @@ public class HipaaCopyFilter implements NurtureCopyFilter {
     static final String DEFAULT_SAFE_EMAIL_BODY =
             "Hi {firstName}, it's been a while since your last visit. Reply and we'll find a time to get you "
                     + "back on the schedule.";
+
+    @Override
+    public String vertical() {
+        return VERTICAL;
+    }
 
     @Override
     public Mono<FilterResult> filter(NurtureChannel channel, String body, Contact contact) {

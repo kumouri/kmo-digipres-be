@@ -190,7 +190,8 @@ class FrontDeskNurturePhiSafeIT {
     private NurtureCampaign seedCampaign(String smsTemplate, boolean aiPersonalize) {
         return mongo.save(NurtureCampaign.builder()
                 .id(UUID.randomUUID()).tenantId(tenantId)
-                .name("Health Reactivation").active(true)
+                // GATE-2: campaigns are vertical-tagged so the composer dispatches the HIPAA filter.
+                .name("Health Reactivation").vertical(HipaaCopyFilter.VERTICAL).active(true)
                 .segments(List.of(new NurtureSegmentDefinition(DormancyBucket.A, 0, null, null, null)))
                 .steps(List.of(new NurtureCadenceStep(0, NurtureChannel.SMS, 0,
                         smsTemplate, null, null, aiPersonalize, 0)))

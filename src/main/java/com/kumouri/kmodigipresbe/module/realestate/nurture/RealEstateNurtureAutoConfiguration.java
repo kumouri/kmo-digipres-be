@@ -43,9 +43,10 @@ import org.springframework.context.annotation.Bean;
  *       {@code @Value}-resolved.</li>
  *   <li>{@link #realEstateNurtureSmsWiring} — a side-effecting wiring bean (the
  *       {@code ConciergeInboundSmsWiring} / {@code ResponderInboundSmsWiring} precedent) that calls
- *       {@code nurtureMessageComposer.setCopyFilter(filter)} at singleton init, flipping the Fair-Housing
- *       screen live for this (realestate+nurture) deployment. Without it the composer's filter stays null
- *       (= byte-identical E1).</li>
+ *       {@code nurtureMessageComposer.registerCopyFilter(filter)} at singleton init, registering the
+ *       Fair-Housing screen for the {@code "realestate"} vertical (the GATE-2 vertical-scoped dispatch;
+ *       additive, so a co-resident health deployment's HIPAA filter is not clobbered). Without it the
+ *       composer screens no RE copy (= byte-identical E1).</li>
  *   <li>{@link RealEstateNurtureReplyHandler} — the E2 {@code IntentHandler} (reply→book); auto-discovered
  *       by the responder router's {@code List<IntentHandler>} purely by being a bean (no router edit).</li>
  *   <li>{@link RealEstateNurtureService} — the thin RE facade the {@code RealEstateNurtureController}
@@ -75,17 +76,19 @@ public class RealEstateNurtureAutoConfiguration {
     }
 
     /**
-     * Wires the {@link FairHousingCopyFilter} onto the shared {@link NurtureMessageComposer} (the
-     * {@code ConciergeInboundSmsWiring} side-effect precedent). Returns a tiny marker; the side effect is
-     * the {@code setCopyFilter} call at singleton init. Without this the composer's filter stays null
-     * (byte-identical E1) and RE nurture copy would NOT be screened — so this is the bean that makes the
-     * Fair-Housing guarantee real for a realestate+nurture deployment.
+     * Registers the {@link FairHousingCopyFilter} on the shared {@link NurtureMessageComposer} for the
+     * {@code "realestate"} vertical (the {@code ConciergeInboundSmsWiring} side-effect precedent). Returns a
+     * tiny marker; the side effect is the {@code registerCopyFilter} call at singleton init. The GATE-2
+     * vertical-scoped dispatch means this registration is additive — a co-resident frontdesk+nurture
+     * deployment's HIPAA filter stays registered too, and each campaign is screened by its own vertical's
+     * filter. Without this the composer screens no RE copy (byte-identical E1) — so this is the bean that
+     * makes the Fair-Housing guarantee real for a realestate+nurture deployment.
      */
     @Bean
     public RealEstateNurtureSmsWiring realEstateNurtureSmsWiring(
             NurtureMessageComposer nurtureMessageComposer,
             FairHousingCopyFilter realEstateNurtureFairHousingCopyFilter) {
-        nurtureMessageComposer.setCopyFilter(realEstateNurtureFairHousingCopyFilter);
+        nurtureMessageComposer.registerCopyFilter(realEstateNurtureFairHousingCopyFilter);
         return new RealEstateNurtureSmsWiring();
     }
 
