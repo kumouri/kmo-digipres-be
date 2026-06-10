@@ -12,18 +12,22 @@ Match a new client's **requested service/style** → the **best-fit stylist** (s
 
 ## Sub-phase ledger
 
-- [ ] **P0 — detail plan** (`~/.claude/plans/salon-stylermatch.md`) + fresh `docs/PHASE-PROGRESS.md` (overwrites the stale T11 ledger on `main`).
-- [ ] **P1 — the `StaffMember.specialties` seam + `StylerMatchScoringService`** (pure/deterministic/explainable; the marquee). Weighted specialty-fit + eligibility + availability + preference; ranked + rationale + confidence; central `STYLIST_CONFIRM_NOTE`. `StaffMemberService` UNCHANGED.
-- [ ] **P2 — match intake + ranked result.** `StylerMatch` entity + `StylerMatchService` orchestrator + public widget intake (JSON, token) + staff create/inbox + ADMIN token mint. No multipart/AI (text match).
-- [ ] **P3 — match→booking funnel.** `StylerMatchBookingService.accept` (explicit-boolean idempotent; UNCHANGED `SalonBookingService.create`; `BookingPolicyService` enforces the hard eligibility/availability at book time) + public accept controller (no `@IdempotentRoute`).
-- [ ] **P4 — match analytics.** accept-rate-**by-rank** funnel (which rank got booked) + `GET /stylermatch/analytics`.
-- [ ] **P5 — wiring.** `StylerMatchAutoConfiguration` (chairfill + `@ConditionalOnBean(SalonBookingService)`) + `DomainEventType` T12 block + `GlobalErrorHandler` 4480-4489 Javadoc + `AutoConfiguration.imports` + app-props doc.
+- [x] **P0 — detail plan** (`~/.claude/plans/salon-stylermatch.md`) + fresh `docs/PHASE-PROGRESS.md` (overwrites the stale T11 ledger on `main`). Commit `cfee721`.
+- [x] **P1 — the `StaffMember.specialties` seam + `StylerMatchScoringService`** (pure/deterministic/explainable; the marquee). Weighted specialty-fit + eligibility + availability (window coverage + read-only slot-conflict) + preference (explicit + prior-COMPLETED-visit); ranked + rationale + confidence; central `STYLIST_CONFIRM_NOTE`. `StaffMemberService` UNCHANGED. `MatchRequest`/`RankedMatch`. **`StylerMatchScoringServiceTest` 11/11 green (pure, no Docker).** Commit `5dcb384`.
+- [x] **P2 — match intake + ranked result.** `StylerMatch` entity + `StylerMatchStatus` + repo + `StylerMatchService` orchestrator (public-token + staff-desk; find-or-create contact explicit-boolean) + `StylerMatchIntakeController` (public JSON, token; strips client `contactId`) + `StylerMatchController` (staff create/inbox) + `StylerMatchTokenController` (ADMIN mint) + `StylerMatchResponse`/`StylerMatchRequestBody`. No multipart/AI.
+- [x] **P3 — match→booking funnel.** `StylerMatchBookingService.accept` (explicit-boolean idempotent `bookingId != null`; UNCHANGED `SalonBookingService.create`; `BookingPolicyService` enforces the hard eligibility/availability at book time; stamps `selectedRank`) + `StylerMatchAcceptController` (public, no `@IdempotentRoute`).
+- [x] **P4 — match analytics.** `StylerMatchAnalyticsService` accept-rate-**by-rank** funnel (which rank got booked) + `StylerMatchAnalytics` DTO + `GET /stylermatch/analytics`.
+- [x] **P5 — wiring.** `StylerMatchAutoConfiguration` (chairfill + `@ConditionalOnBean(SalonBookingService)`) + `DomainEventType` T12 block (STYLER_MATCH_REQUESTED/BOOKED) + `GlobalErrorHandler` 4480-4489 Javadoc + `AutoConfiguration.imports` + app-props doc. **`compileJava` PASS.** Empty-diff + reactive-invariant verified (below).
 - [ ] **P6 — demo seed.** `StylerMatchDemoSeeder` (`@Profile("demo-salon-stylermatch")`) — "Shear Brilliance Studio" + stylists w/ varied specialties/availability/eligibility + a service menu + bookingLink.
-- [ ] **P7 — T12 tests.** `StylerMatchScoringServiceTest` (pure, no Docker — the ranking proof) + intake/accept/analytics/module-gate ITs. Reactive-invariant grep. Regression: `module.salonspa.*` + `module.chairfill.*` + `OpenApiEndpointIT`.
+- [ ] **P7 — T12 ITs.** intake/accept/analytics/module-gate ITs. Regression: `module.salonspa.*` + `module.chairfill.*` + `OpenApiEndpointIT`.
 - [ ] **P8 — docs + PR.** CLAUDE.md T12 entry; PR ready.
 
 ## Validation log
-(filled as sub-phases land)
+- `./gradlew compileJava` (P1) — PASS (clean; only pre-existing deprecation/unchecked notes).
+- `./gradlew test --tests "…stylermatch.StylerMatchScoringServiceTest"` (P1) — **PASS 11/11** (the ranking proof: specialty-fit ranks right; availability conflict demotes; window coverage outranks; eligibility miss penalized-but-visible; preference bump; explicit-preferred largest; deterministic across runs; empty-specialties ranked-not-excluded; confidence; guardrail on every rationale).
+- `./gradlew compileJava` (P2-P5) — PASS (clean).
+- **Empty-diff (reused cores) — VERIFIED EMPTY** vs `main`: `SalonBookingService`, `BookingPolicyService`, `Booking`, `ServiceMenu`, `ServiceMenuItem`, `SalonMenuService`, `StaffMemberService`, `PublicWidgetTokenService`, all `module/chairfill/*`, all `module/styleconsult/*`. Only reused-model edit = `StaffMember.java` (+16, the additive `specialties` seam).
+- **Reactive-invariant — VERIFIED**: the only `switchIfEmpty` code in `module/stylermatch` is 2× genuine not-found (`Mono.error` 4485) + 1× find-fallback (`byPhone.switchIfEmpty(byEmail)`). Find-or-create create branch is explicit-boolean (`Optional`); accept idempotency is explicit-boolean (`bookingId != null`). **Zero `switchIfEmpty(create/book)`.**
 
 ## Reactive-invariant check
 `grep switchIfEmpty module/stylermatch` MUST show only genuine not-found (`switchIfEmpty(Mono.error(...))`, codes 4480/4485) + the idempotent demo-seeder `switchIfEmpty(seedFresh)`. **Zero `switchIfEmpty(create/book)`** — the accept idempotency seam is explicit-boolean (`bookingId != null`).

@@ -1313,6 +1313,43 @@ import java.util.UUID;
  *       E1 runner + the E3 sender) are default-OFF and mocked/OFF in tests. Going live needs per-tenant module
  *       enablement (quoting + nurture + gbp-reviews) + A2P 10DLC for the cadence + review-request caller-facing
  *       SMS (separate human actions, never the loop).</li>
+ *   <li>{@code 4480-4489} — <em>Salon "StylerMatch" (T12)</em>: match a new client's requested
+ *       service/style to the <strong>best-fit stylist</strong> (specialty fit + availability + past-/explicit
+ *       preference) via a <strong>pure, deterministic, explainable</strong> scorer ({@code StylerMatchScoringService}
+ *       — NOT an LLM call; the T9 {@code StyleRecommendationService} + CF-1 deterministic-scoring precedent)
+ *       &rarr; a ranked, rationale-carrying stylist board &rarr; book via the <strong>unchanged</strong>
+ *       {@code SalonBookingService.create}. The stylist-side twin of T9 StyleConsult (which ranks services +
+ *       retail); rides the {@code chairfill} salon-flagship key (+ {@code @ConditionalOnBean(SalonBookingService)}),
+ *       default OFF. The one justified reused-model seam is the additive nullable {@code StaffMember.specialties}
+ *       (the {@code Product.unitCost} / {@code Booking.noShowRisk} additive-nullable precedent — the soft
+ *       style-fit signal, distinct from the hard {@code eligibleServiceIds}; legacy docs read empty = no declared
+ *       specialty, ranked-not-excluded; {@code StaffMemberService} stays byte-identical). The booking step still
+ *       enforces the HARD eligibility/availability via the unchanged {@code BookingPolicyService} ({@code 2900}/{@code 2901}),
+ *       so a visible-but-penalized non-eligible stylist the client picks is rejected at book time. <strong>New
+ *       codes:</strong> {@code 4480} styler-match token widgetType mismatch (401, the T9 {@code 4450} posture);
+ *       {@code 4481} invalid match request — nothing to match on (no service/style/slot/preferred-stylist; 400,
+ *       defensive); {@code 4482} no active stylists to match (404 — the salon has zero active {@code StaffMember}s,
+ *       the only empty-board case); {@code 4483} no rankable stylist to book on accept (404); {@code 4485} styler
+ *       match not found for the tenant (404, accept/detail); {@code 4486} match not in an acceptable state —
+ *       cannot accept (409, explicit-boolean) — RESERVED-as-advisory. {@code 4484}, {@code 4487-4489} RESERVED.
+ *       Reused (NOT re-allocated): {@code 1600-1603} widget token; {@code 2900}/{@code 2901} salon Booking
+ *       eligibility/availability via the unchanged {@code SalonBookingService}/{@code BookingPolicyService};
+ *       {@code 2530-2532} Twilio SMS (best-effort booking-link); {@code 1130}/{@code 1132} module gate via
+ *       {@code requireEnabled("chairfill")}; {@code 1800} RoleGuard ADMIN (the token mint). <strong>Module gate</strong>
+ *       {@code @ConditionalOnProperty(kmosf.modules.chairfill)} + {@code @ConditionalOnBean(SalonBookingService)}
+ *       on {@code StylerMatchAutoConfiguration} (default OFF; either prerequisite absent &rArr; the whole module —
+ *       beans, controllers, the public widget — is absent &rarr; out of the OpenAPI spec + 404) + the per-tenant
+ *       {@code requireEnabled} in the staff/admin controllers. <strong>No {@code @IdempotentRoute}</strong> on the
+ *       public accept (the {@code IdempotencyWebFilter}-resolves-tenant-at-filter-time limitation; idempotency is the
+ *       service-level explicit-boolean {@code bookingId != null} guard — never {@code switchIfEmpty(book)}). <strong>No
+ *       AI/vision + no multipart</strong> (a text/attribute match needs neither). <strong>Reused cores stay
+ *       empty-diff vs {@code main}</strong> ({@code SalonBookingService}, {@code BookingPolicyService}, {@code Booking},
+ *       {@code ServiceMenu}/{@code ServiceMenuItem}, {@code SalonMenuService}, {@code StaffMemberService},
+ *       {@code PublicWidgetTokenService}, {@code TwilioSmsService}, all {@code module/chairfill} + {@code module/styleconsult});
+ *       the {@code stylermatch} package is strictly additive (+ the {@code StaffMember.specialties} field, the
+ *       {@code DomainEventType} T12 block, this Javadoc, the {@code AutoConfiguration.imports} line). Going live needs
+ *       per-tenant module enablement (chairfill + salon-spa) + A2P 10DLC for the booking-link SMS + an optional
+ *       Cal.com OAuth (separate human actions, never the loop); no AI budget (deterministic match).</li>
  *   <li>{@code 4700-4719} — <em>Security hardening (PR B — BE-08/09/16, BE-10)</em>. A clean band above
  *       the flagship blocks for the cross-cutting security fixes. {@code 4700} outbound request blocked by
  *       the shared {@link com.kumouri.kmodigipresbe.security.OutboundUrlGuard} (400 — the URL is non-https,
