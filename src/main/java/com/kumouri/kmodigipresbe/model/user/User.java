@@ -86,6 +86,20 @@ public class User implements Auditable {
      */
     private BigDecimal defaultCostRate;
 
+    /**
+     * (T14 — Home "DispatchIQ") Nullable free-text skill/trade tags for a staff
+     * technician — e.g. {@code ["HVAC", "ELECTRICAL"]}. The soft skill-fit signal the
+     * {@code DispatchOptimizerService} matches against a {@code WorkOrder.serviceType}
+     * when proposing dispatch assignments. Strictly additive (the T12
+     * {@code StaffMember.specialties} precedent): legacy {@code users} docs deserialize
+     * an empty/null list = "no declared skills" → the optimizer scores them a
+     * neutral-low fit (ranked, never excluded). Owned by the dispatch optimizer only;
+     * {@code UserService}/{@code TeamController} do not read or write it (skill editing
+     * is an out-of-scope additive follow-up).
+     */
+    @Builder.Default
+    private java.util.List<String> skills = java.util.List.of();
+
     // Non-persisted projection of the owning Tenant's displayName, populated on
     // /auth/me (and mirrored on the login response) so the FE can show the
     // human business name instead of a raw tenant UUID. Spring Data @Transient

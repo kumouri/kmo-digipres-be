@@ -644,6 +644,20 @@ public final class DomainEventType {
     public static final String TECH_DOC_INDEXED     = "techCopilot.docIndexed";
     public static final String TECH_QUERY_ANSWERED  = "techCopilot.queryAnswered";
 
+    // T14 (Home "DispatchIQ", band 4520-4559) — an intelligent dispatch optimizer that proposes the
+    // best-fit technician for each open home-services WorkOrder (skill + availability + location/priority)
+    // on top of the EXISTING manual dispatch board, then applies the dispatcher-reviewed assignments via
+    // the unchanged WorkOrderService.update path. The ranking is pure/deterministic/explainable (the T12
+    // StylerMatchScoringService precedent), NOT an LLM. Both events are advisory — they drive no core
+    // mutation; the proposal is read-only compute, the apply is the synchronous explicit assignment loop
+    // inside the dispatch-gated services. Emitted only when the `dispatch` module is on.
+    // DISPATCH_PLAN_PROPOSED: emitted by DispatchPlanService after an optimize call computes a proposed
+    //   schedule. Payload: {date, openCount, assignedCount, unassignedCount, skillMatchRate}.
+    // DISPATCH_PLAN_APPLIED: emitted by DispatchPlanService after apply commits the dispatcher's reviewed
+    //   assignments. Payload: {date, appliedCount, skippedCount}.
+    public static final String DISPATCH_PLAN_PROPOSED = "dispatch.planProposed";
+    public static final String DISPATCH_PLAN_APPLIED  = "dispatch.planApplied";
+
     private DomainEventType() {
     }
 }
