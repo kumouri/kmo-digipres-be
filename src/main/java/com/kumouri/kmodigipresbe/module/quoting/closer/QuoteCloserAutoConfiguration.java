@@ -44,7 +44,7 @@ import java.time.Duration;
  * {@code gbp-reviews} enablement + the default-OFF {@code ReviewRequestSenderJob} are the deployment's send
  * controls (the review request is created regardless; nothing is texted unless the sender is opted in).
  *
- * <h2>What it wires (hand-constructed beans — the realestate-module {@code @Value} lesson)</h2>
+ * <h2>What it wires — the ACTIVE composition glue (hand-constructed beans)</h2>
  * <ul>
  *   <li>{@link QuoteCloserEnrollmentJob} — the <strong>default-OFF</strong> enrollment + stop sweep
  *       ({@code @ConditionalOnProperty(kmosf.modules.quote-closer-job)} on the {@code @Bean} method —
@@ -52,10 +52,14 @@ import java.time.Duration;
  *       posture). Resolves its {@link Clock} via {@link ObjectProvider} (a test fixed-clock bean overrides
  *       it).</li>
  *   <li>{@link QuoteWonSubscriber} — the {@code QUOTE_ACCEPTED} subscriber (stop the cadence + create one
- *       review request); its {@code @PostConstruct} fires the bus subscription at init. Always wired when
- *       the module is on (the create-on-accept is harmless — the E3 sender that delivers is default-OFF).</li>
- *   <li>{@link QuoteCloserAnalyticsService} — the abandonment + recovery funnel read service.</li>
+ *       review request); its {@code @PostConstruct} fires the bus subscription at init.</li>
  * </ul>
+ * These are the pieces that should be <strong>inert when nurture is not deployed</strong> (no cadence to
+ * enroll into / stop) — so they carry the both-module gate. The read surface
+ * ({@link QuoteCloserAnalyticsService} + the controllers) is wired by the quoting-only
+ * {@link QuoteCloserReadAutoConfiguration} (so the component-scanned {@link QuoteCloserController} always
+ * resolves its analytics dependency when quoting is on; the controllers still enforce the both-module
+ * requirement per-tenant via {@code requireEnabled("quoting")} AND {@code requireEnabled("nurture")}).
  *
  * <p><strong>Error band 4470-4479</strong> (the {@code GlobalErrorHandler} Javadoc table). 4470 config
  * not-found; 4471 invalid config (campaignId not a tenant campaign). 4472-4479 reserved.
@@ -98,15 +102,5 @@ public class QuoteCloserAutoConfiguration {
             ReviewRequestRepository reviewRequests,
             @Value("${kmosf.review-engine.request-delay:PT24H}") Duration requestDelay) {
         return new QuoteWonSubscriber(events, configs, enrollments, reviewRequests, requestDelay);
-    }
-
-    /** The abandonment + recovery funnel read service. */
-    @Bean
-    public QuoteCloserAnalyticsService quoteCloserAnalyticsService(
-            QuoteCloserConfigRepository configs,
-            QuoteRequestRepository quotes,
-            NurtureEnrollmentRepository enrollments,
-            ReviewRequestRepository reviewRequests) {
-        return new QuoteCloserAnalyticsService(configs, quotes, enrollments, reviewRequests);
     }
 }

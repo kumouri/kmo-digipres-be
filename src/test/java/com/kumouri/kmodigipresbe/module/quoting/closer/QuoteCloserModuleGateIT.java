@@ -46,7 +46,13 @@ class QuoteCloserModuleGateIT {
         }
     }
 
-    /** quoting ON + nurture OFF → no NurtureMessageComposer → no QuoteCloser beans (the both-module gate). */
+    /**
+     * quoting ON + nurture OFF → no {@code NurtureMessageComposer} → the ACTIVE composition glue (the
+     * {@code QUOTE_ACCEPTED} subscriber + the enrollment job) is absent (the both-module gate). The
+     * quoting-only READ surface (the analytics service + the controllers) still loads — and the controllers
+     * enforce the both-module requirement per-tenant at request time (a 1132 on the endpoint), NOT a
+     * context-load failure. The context MUST load (no unsatisfied-dependency crash).
+     */
     @SpringBootTest
     @Import(TestcontainersConfiguration.class)
     @ExtendWith(SpringExtension.class)
@@ -60,11 +66,16 @@ class QuoteCloserModuleGateIT {
         @Autowired ApplicationContext ctx;
 
         @Test
-        void quoteCloserBeansAbsent_whenNurtureOff() {
+        void activeGlueAbsent_butReadSurfaceLoads_whenNurtureOff() {
+            // The active composition glue is gated on BOTH modules → absent.
             assertThatThrownBy(() -> ctx.getBean(QuoteWonSubscriber.class))
                     .isInstanceOf(NoSuchBeanDefinitionException.class);
-            assertThatThrownBy(() -> ctx.getBean(QuoteCloserAnalyticsService.class))
+            assertThatThrownBy(() -> ctx.getBean(QuoteCloserEnrollmentJob.class))
                     .isInstanceOf(NoSuchBeanDefinitionException.class);
+            // The quoting-only read surface still loads (so the context does NOT fail to load).
+            assertThat(ctx.getBean(QuoteCloserAnalyticsService.class)).isNotNull();
+            assertThat(ctx.getBean(QuoteCloserController.class)).isNotNull();
+            assertThat(ctx.getBean(QuoteCloserConfigController.class)).isNotNull();
         }
     }
 
