@@ -1,68 +1,47 @@
-# PHASE-PROGRESS — GATE-2 fix: vertical-scope the nurture copy filter (`gate2-nurture-copyfilter-scoping`)
+# PHASE-PROGRESS — T8 Home Services "QuoteNow" (`home-quotenow`)
 
-> Fresh ledger for this branch (off `main` @ `6b93cf0`). Replaces the prior `health-rescheduleflow`
-> (T7) ledger that occupied this path — that work is already on `main`. Tracks per-sub-phase progress
-> + validation so a resume-after-crash reconstructs the frontier from git + this file, never agent
-> memory.
+Branch `home-quotenow` off `main` (811b157). Module `quoting`, error band **4430–4449**, default OFF.
+Detail plan: `~/.claude/plans/home-quotenow.md`. The first vision-COMPOSITION flagship (photo →
+price RANGE → repair-vs-replace → book), reusing the shipped vision spine (`AiVisionService.extract`,
+the `EquipmentVisionService` precedent).
 
-Detail plan: `~/.claude/plans/gate2-nurture-copyfilter-scoping.md`.
+This ledger is the authoritative per-sub-phase progress record (the `resume-interrupted-phase`
+contract). One row per sub-phase: status, the commit(s), and the validation evidence. It replaces the
+prior `gate2-nurture-copyfilter-scoping` ledger that occupied this path — that work is already on `main`.
 
-## The fix (one sentence)
+| Sub-phase | Scope | Status | Commit(s) | Validation |
+|---|---|---|---|---|
+| Q0 | detail plan + this ledger | DONE | (first commit) | n/a — docs |
+| Q1 | module + `PriceBook` + `QuoteSynthesisService` (range synthesis) + price-book CRUD + demo skeleton | PENDING | | |
+| Q2 | `QuoteVisionService` (photo→attrs) + confidence + the "estimate, final price after inspection" guardrail; vision-fail → manual path | PENDING | | |
+| Q3 | `RepairVsReplaceReasoner` (+ financing flag) + `QuoteBookingService` (booking-link SMS, no live Cal.com; optional Documenso SOW on REPLACE) | PENDING | | |
+| Q4 | public intake endpoint(s) + accept + office quote-inbox (list/detail) + token issuer + finish demo seed + openapi regen + CLAUDE.md T8 | PENDING | | |
 
-`NurtureMessageComposer` held a single last-wins `@Nullable NurtureCopyFilter`; two consumers (T1
-`FairHousingCopyFilter`, T2 `HipaaCopyFilter`) each set it at init, so a process enabling BOTH
-realestate+nurture AND frontdesk+nurture had the second clobber the first (worst case: a health
-nurture message ships without the HIPAA screen). **Fix:** make the copy filter **vertical-scoped** —
-a registry of filters dispatched by the campaign's `vertical`. **No new error codes** (reuses the
-`4360`/`4370` advisory markers). **Empty-diff** for all other nurture cores.
+## Invariants carried (the §9 / §7 contract)
+- `getMultipartData()` for the photo — never `@RequestBody MultiValueMap`.
+- Reused cores empty-diff vs `main`: `AiVisionService`, `EquipmentVisionService`, `QuoteService`,
+  `QuotePdfService`, `ServiceRequestWidgetController`, `EquipmentPhotoController`, `TwilioSmsService`,
+  `IntegrationConnection`(+repo). The `quoting` package is strictly additive (+ the `.imports` line,
+  the `GlobalErrorHandler` 4430–4449 Javadoc, the `DomainEventType` T8 block, app props, openapi regen).
+- `switchIfEmpty` only for genuine not-found; every conditional-create / status-guard is
+  explicit-boolean — never `switchIfEmpty(create/send)`.
+- The price RANGE is the product (never a single number); EVERY range carries the non-blank
+  estimate-disclaimer (the wrong-number-liability fence; asserted in an IT).
+- AI is triage, not truth — a vision budget/upstream/parse failure degrades to the manual path; the
+  quote is always produced; the photo is always stored.
+- No live external in the loop: AiVision → WireMock Anthropic; Twilio `@MockitoBean`'d; no live
+  Cal.com / Documenso.
 
-## Key investigation results
-
-- **`NurtureCampaign` had NO `vertical` field** (briefing assumed one) — ADDED additively (nullable
-  `String`, no `@Builder.Default`; legacy → null).
-- Copy-filter verticals: `FairHousingCopyFilter` → `"realestate"`, `HipaaCopyFilter` → `"health"`
-  (the briefing's stated values + existing conventions). The new `NurtureCampaign.vertical` is the
-  single dispatch source; demo seeders tag their campaigns to match.
-- Only `compose(...)` caller = `NurtureRunner` (campaign in scope). Only `setCopyFilter` callers =
-  the 2 autoconfigs. No test calls either directly.
-- **Safety invariant:** null/legacy campaign vertical → NO vertical-specific filter (today's E1
-  behavior); a correctly-tagged vertical always gets its screen, never the wrong one.
-
-## Sub-phases
-
-| # | Sub-phase | Status | Commit | Validation |
-|---|-----------|--------|--------|------------|
-| G2.1 | Detail plan + this ledger | DONE | b9d55c7 | n/a (docs) |
-| G2.2 | SPI (`NurtureCopyFilter.vertical()`/`appliesTo`) + composer registry + `compose(…,vertical)` + `NurtureRunner` thread + `NurtureCampaign.vertical` + filter `vertical()` + autoconfig `registerCopyFilter` + seeder tags | DONE | e756abb | compileJava OK |
-| G2.3 | HEADLINE both-verticals IT (`BothVerticalsNurtureCopyFilterIT`) + null-vertical case | DONE | f7a1a6e | 3/3 GREEN |
-| G2.4 | Tag the 2 pre-existing headline ITs' campaigns w/ their vertical (new-contract adaptation) + regression (E1 + T1 + T2 nurture + OpenApiEndpointIT) + CLAUDE.md E1 note + ledger finalize | DONE | (this) | full regression GREEN |
-
-## Validation results (G2.4)
-
-- **Headline `BothVerticalsNurtureCopyFilterIT` (3/3 GREEN, Docker/Testcontainers):** both-verticals-no-collision
-  (RE→Fair-Housing safe, health→HIPAA safe, neither collides, 2 ledger rows), clean-copy-verbatim
-  (no over-substitution), null-vertical-sent-unfiltered (the safe legacy invariant).
-- **Regression (all GREEN):**
-  - E1 `com.kumouri.kmodigipresbe.nurture.*` (`NurtureRunnerIT`, `NurtureSegmentationIT`,
-    `NurtureReplyBookIT`, `NurtureAnalyticsIT`, `NurtureCampaignControllerIT`, + the new
-    `BothVerticalsNurtureCopyFilterIT`).
-  - T1 `module.realestate.nurture.*` — incl. `RealEstateNurtureFairHousingIT` (headline) +
-    `FairHousingCopyFilterTest` (unit) + segmentation/analytics/reply/module-gate.
-  - T2 `module.frontdesk.nurture.*` — incl. `FrontDeskNurturePhiSafeIT` (headline) +
-    `HipaaCopyFilterTest` (unit) + segmentation/analytics/reply/module-gate/PHI-safe.
-  - `OpenApiEndpointIT` GREEN; `docs/api/openapi.json` unchanged vs `main` (the fix adds no endpoint;
-    default-OFF modules aren't in the spec — the T1–T7 precedent).
-- **Test adaptation (necessary, in-scope):** the 2 pre-existing headline ITs seeded campaigns with NO
-  `vertical` (the field didn't exist pre-fix). Under the new vertical-scoped dispatch a null-vertical
-  campaign correctly applies NO filter, so they failed (non-compliant copy sent unfiltered). Tagging
-  each IT's seeded campaign with its vertical (`realestate`/`health`) — the new contract a real
-  deployment + the demo seeders follow — restores the regression's intent (proves the screen fires).
-  A faithful new-contract adaptation, NOT a workaround; the safety behavior is independently covered by
-  `BothVerticalsNurtureCopyFilterIT.nullVerticalCampaign_...`.
-- **Reactive invariants:** no `switchIfEmpty(create/send)` in touched nurture code (only Javadoc that
-  *documents* the rule); zero `.block()` in prod nurture. **Error codes:** reused `4360` (Fair-Housing
-  advisory) + `4370` (HIPAA advisory); minted NONE.
-- **Empty-diff vs `main` (0 lines each):** `NurtureSegmentationService`, `NurtureReplyService`,
-  `NurtureAnalyticsService`, `NurtureCampaignController`, the rest of `model/nurture/*`, the nurture
-  repos.
-- **Concurrent-main check:** branch contained `origin/main` at start; no `git merge origin/main` needed.
+## Error codes (4430–4449)
+- 4430 quote-intake token widgetType mismatch (401)
+- 4431 price book not found for tenant (404, read)
+- 4432 invalid price-book body (400)
+- 4433 no image part on a photo intake (400)
+- 4434 unsupported image media type (415)
+- 4435 quote not found (accept) (404)
+- 4436 quote not in an acceptable state (409, explicit-boolean)
+- 4437 invalid intake/manual-attrs body (400)
+- 4438–4449 RESERVED
+- Reused (NOT re-allocated): 1600–1603 (widget token), 1200–1203 (AI budget/upstream/missing-key —
+  via `AiVisionService`), 1310/1311 (file storage), 2530–2532 (Twilio SMS), 2510 (Documenso-not-
+  connected if the optional SOW path is exercised), 1130/1132 (module gate), 1800 (RoleGuard ADMIN).
