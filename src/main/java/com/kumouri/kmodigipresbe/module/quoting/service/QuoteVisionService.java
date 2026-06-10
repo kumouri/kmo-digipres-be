@@ -1,6 +1,5 @@
 package com.kumouri.kmodigipresbe.module.quoting.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kumouri.kmodigipresbe.model.files.Attachment;
 import com.kumouri.kmodigipresbe.module.quoting.model.AttributeSource;
 import com.kumouri.kmodigipresbe.module.quoting.model.QuoteAttributes;
@@ -70,18 +69,15 @@ public class QuoteVisionService {
     private final FileStorageService storage;
     private final AttachmentRepository attachments;
     private final AiVisionService visionService;
-    private final ObjectMapper objectMapper;
     private final String visionModel;
 
     public QuoteVisionService(FileStorageService storage,
                               AttachmentRepository attachments,
                               AiVisionService visionService,
-                              ObjectMapper objectMapper,
                               String visionModel) {
         this.storage = storage;
         this.attachments = attachments;
         this.visionService = visionService;
-        this.objectMapper = objectMapper;
         this.visionModel = visionModel;
     }
 

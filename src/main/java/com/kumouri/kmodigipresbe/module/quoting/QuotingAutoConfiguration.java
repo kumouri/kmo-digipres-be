@@ -82,9 +82,8 @@ public class QuotingAutoConfiguration {
             FileStorageService storage,
             AttachmentRepository attachments,
             AiVisionService visionService,
-            ObjectMapper objectMapper,
             @Value("${kmosf.quoting.vision-model:claude-sonnet-4-5}") String visionModel) {
-        return new QuoteVisionService(storage, attachments, visionService, objectMapper, visionModel);
+        return new QuoteVisionService(storage, attachments, visionService, visionModel);
     }
 
     @Bean
