@@ -1190,6 +1190,51 @@ import java.util.UUID;
  *       in ITs (no live send); no live Cal.com / Documenso in the loop. Going live needs A2P 10DLC for the
  *       booking-link/QR SMS, an optional Cal.com OAuth for a live booking link, and a human-reviewed price
  *       book (separate human actions — never the loop).</li>
+ *   <li>{@code 4450-4459} — <em>Salon "StyleConsult AI" (T9)</em>: the salon's first
+ *       <strong>vision-COMPOSITION</strong> use ({@code module/styleconsult}, rides the {@code chairfill}
+ *       salon-flagship module key, default OFF). A prospect's <strong>inspiration photo</strong> becomes
+ *       service + <strong>margin-aware retail</strong> recommendations in seconds (reusing the shipped
+ *       vision spine {@code AiVisionService.extract}, the T8 {@code QuoteVisionService} precedent): a
+ *       public widget/QR submission ({@code POST /public/integrations/styleconsult/{token}/consult},
+ *       multipart via {@code getMultipartData}) → {@code StyleConsultVisionService} reads
+ *       styleCategory/length/texture/color off the photo (best-effort; a budget/upstream/parse failure
+ *       degrades to the typed manual attributes so the consult is always produced) →
+ *       {@code StyleRecommendationService} (pure) maps the style to recommended {@code ServiceMenuItem}s
+ *       and ranks the catalog's retail products <strong>margin-aware</strong>
+ *       ({@code margin = unitPrice − unitCost}; null cost ranked last) → accept
+ *       ({@code POST /public/integrations/styleconsult/{token}/consults/{consultId}/accept},
+ *       {@code @IdempotentRoute}) books a real salon {@code Booking} via the <strong>unchanged</strong>
+ *       {@code SalonBookingService.create} + texts a per-tenant booking link (reused
+ *       {@code TwilioSmsService}; <strong>no live Cal.com</strong>); the office consult-inbox +
+ *       retail-attach analytics ({@code GET /styleconsult/consults}[/{id}], {@code GET
+ *       /styleconsult/analytics}, staff) + {@code POST /styleconsult/tokens} (ADMIN).
+ *       <strong>The never-auto-charge guardrail:</strong> EVERY service + retail recommendation carries
+ *       the central {@code StyleRecommendationService.STYLIST_CONFIRM_NOTE} ("a suggestion — your stylist
+ *       will confirm; nothing is charged automatically"), set centrally so it can never be omitted
+ *       (release-blocking IT). <strong>New codes:</strong> {@code 4450} style-consult token widgetType
+ *       mismatch (401); {@code 4451} no image part on an explicitly-empty photo intake (400, defensive —
+ *       a missing photo is the manual path); {@code 4452} invalid intake/manual-attrs body (400,
+ *       defensive); {@code 4453} no bookable service to recommend/book on accept (404); {@code 4454}
+ *       unsupported image media type (415); {@code 4455} style consult not found for the tenant (404,
+ *       accept/detail); {@code 4456} consult not in an acceptable state — cannot accept (409,
+ *       explicit-boolean) — RESERVED-as-advisory. {@code 4457-4459} RESERVED. Reused (NOT re-allocated):
+ *       {@code 1600-1603} (widget token), {@code 1200-1203} (AI budget/upstream/missing-key via
+ *       {@code AiVisionService}), {@code 1310}/{@code 1311} (file storage), {@code 2530-2532} (Twilio
+ *       SMS), {@code 2900}/{@code 2901} (salon Booking/menu/availability via the unchanged
+ *       {@code SalonBookingService}/{@code BookingPolicyService}), {@code 1130}/{@code 1132} (module gate
+ *       via {@code TenantModuleRegistry.requireEnabled("chairfill")}), {@code 1800} (RoleGuard ADMIN).
+ *       Module gate: {@code @ConditionalOnProperty(kmosf.modules.chairfill)} (default OFF, no
+ *       {@code matchIfMissing}) + {@code @ConditionalOnBean(SalonBookingService.class)} (salon-spa
+ *       loaded) on the auto-config + the module {@code @ConditionalOnProperty} on every controller (the
+ *       public intake gated like the other widgets — disabled module → endpoint not registered → 404).
+ *       <strong>Reused cores stay empty-diff vs {@code main}</strong> ({@code AiVisionService},
+ *       {@code SalonBookingService}, {@code Booking}, {@code ServiceMenu}, {@code ProductService}/
+ *       {@code ProductController}, {@code PublicWidgetTokenService}, {@code TwilioSmsService},
+ *       {@code IntegrationConnection}); the {@code styleconsult} package is strictly additive (the one
+ *       justified seam is a strictly-additive nullable {@code Product.unitCost} — the margin source).
+ *       AiVision is WireMock + Twilio is {@code @MockitoBean}'d in ITs (no live send); no live Cal.com in
+ *       the loop. Going live needs A2P 10DLC for the booking-link/QR SMS + an optional Cal.com OAuth for
+ *       a live booking link (separate human actions — never the loop).</li>
  * </ul>
  */
 @Slf4j

@@ -567,6 +567,21 @@ public final class DomainEventType {
     public static final String QUOTE_REQUESTED = "quote.requested";
     public static final String QUOTE_ACCEPTED  = "quote.accepted";
 
+    // T9 (Salon "StyleConsult AI", band 4450-4459) — the salon's first vision-COMPOSITION use: an
+    // inspiration photo -> AiVisionService hair/style assessment -> margin-aware service + retail
+    // recommendations -> consult-to-booking. All advisory (RuleEngine / webhook fan-out) — they do NOT
+    // drive any core mutation; the StyleConsult persist + the accept->Booking happen synchronously +
+    // explicitly inside the styleconsult-module-gated services. Emitted only when the salon flagship
+    // (`chairfill`) module is on, for a salon-spa tenant.
+    // STYLE_CONSULT_REQUESTED: emitted by StyleConsultService after a prospect submission persists a
+    //   StyleConsult (the read style attributes + the service/retail recommendations). Payload:
+    //   {styleConsultId, contactId (nullable), styleCategory (nullable), serviceCount, retailCount}.
+    // STYLE_CONSULT_BOOKED: emitted by StyleConsultBookingService after a prospect accepts + a real
+    //   salon Booking is created + the booking link is texted. Payload: {styleConsultId, contactId
+    //   (nullable), bookingId, bookingLinkSent}.
+    public static final String STYLE_CONSULT_REQUESTED = "styleConsult.requested";
+    public static final String STYLE_CONSULT_BOOKED    = "styleConsult.booked";
+
     private DomainEventType() {
     }
 }

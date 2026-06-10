@@ -47,6 +47,17 @@ public class Product implements TenantScoped, CustomFieldHost {
 
     private BigDecimal unitPrice;
 
+    /**
+     * The unit <em>cost</em> to the business (what the salon/retailer pays), used by the T9 Salon
+     * "StyleConsult AI" {@code StyleRecommendationService} to rank retail recommendations
+     * <strong>margin-aware</strong> ({@code margin = unitPrice − unitCost}). Strictly additive +
+     * nullable (the {@code Booking.noShowRisk} additive-nullable precedent): null for legacy products,
+     * for products whose cost is unknown, and for tenants not using StyleConsult — such products are
+     * treated as zero/unknown margin and ranked last. The core catalog CRUD never requires it and is
+     * otherwise byte-identical; it is purely an advisory pricing input for the recommendation ranker.
+     */
+    private BigDecimal unitCost;
+
     @Builder.Default
     private String currency = "USD";
 
