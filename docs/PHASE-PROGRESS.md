@@ -20,7 +20,7 @@ Match a new client's **requested service/style** → the **best-fit stylist** (s
 - [x] **P5 — wiring.** `StylerMatchAutoConfiguration` (chairfill + `@ConditionalOnBean(SalonBookingService)`) + `DomainEventType` T12 block (STYLER_MATCH_REQUESTED/BOOKED) + `GlobalErrorHandler` 4480-4489 Javadoc + `AutoConfiguration.imports` + app-props doc. **`compileJava` PASS.** Empty-diff + reactive-invariant verified (below).
 - [x] **P6 — demo seed.** `StylerMatchDemoSeeder` (`@Profile("demo-salon-stylermatch")`) — "Shear Brilliance Studio" + salon-spa+chairfill + a service menu + 4 stylists (Maya balayage/curly all-eligible Tue-Sat; Jordan blonde/highlights all-eligible Wed-Sun; Sam cut/keratin NOT-color-eligible Mon-Fri; Riley no-specialty versatile Mon-Sat) + a sandbox bookingLink. `compileJava` PASS.
 - [x] **P7 — T12 ITs (all green, Docker).** `StylerMatchIntakeIT` (5), `StylerMatchAcceptIT` (5), `StylerMatchAnalyticsIT` (4), `StylerMatchModuleGateIT` (2) + the pure `StylerMatchScoringServiceTest` (11). **Regression all green:** `module.chairfill.*` (8 classes / 50 — these exercise the salon-spa `SalonBookingService`/`Booking`/`ServiceMenu`/`StaffMember` cores) + `OpenApiEndpointIT` (2). No standalone `module.salonspa.*` IT package exists (the salon-spa cores are regression-covered via `module.chairfill.*`).
-- [ ] **P8 — docs + PR.** CLAUDE.md T12 entry; PR ready.
+- [x] **P8 — docs + PR.** CLAUDE.md T12 entry added (after T11, in the Wave-4 section + the band note); PR opened ready.
 
 ## Validation log
 - `./gradlew compileJava` (P1) — PASS (clean; only pre-existing deprecation/unchecked notes).
