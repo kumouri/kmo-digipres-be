@@ -40,9 +40,15 @@ public class PortalAuthController {
     @PostMapping("/magic-link")
     public Mono<Void> requestMagicLink(@Valid @RequestBody MagicLinkRequest req,
                                        ServerWebExchange exchange) {
+        // Security fix BE-05: the emailed link base is NEVER taken from the request body.
+        // A client-controlled linkBaseUrl let an attacker have the real, branded sign-in
+        // email carry a LIVE one-time token to an attacker host (token exfiltration →
+        // account takeover). The link base is now derived server-side
+        // (MagicLinkService → portalProperties.successRedirect()). redirectTo is the
+        // already-hardened deep-link target (persisted at request-time, echoed at redeem).
         return hostTenantResolver.resolve(exchange)
                 .flatMap(tenant -> magicLinkService
-                        .request(tenant, req.email(), req.linkBaseUrl(), req.redirectTo())
+                        .request(tenant, req.email(), req.redirectTo())
                         .contextWrite(TenantContextHolder.write(
                                 new TenantContext(tenant.getId(), null, Set.of()))));
     }
@@ -95,13 +101,16 @@ public class PortalAuthController {
     /**
      * Request body for {@code POST /portal/auth/magic-link}.
      *
-     * <p>{@code linkBaseUrl} controls the URL embedded in the emailed link (unchanged).
-     * {@code redirectTo} (G.5 — additive, nullable) is an optional deep-link target that
-     * is persisted on the token and echoed back in the redeem response so the portal FE
-     * can route post-login. When absent (null) behaviour is byte-identical to pre-G.5.
+     * <p>Security fix BE-05: {@code linkBaseUrl} was REMOVED — the emailed link base is
+     * derived server-side from {@code portalProperties.successRedirect()}, never from the
+     * request, so a sign-in email can no longer be steered to carry a live token to an
+     * attacker host. {@code redirectTo} (G.5 — additive, nullable) is an optional
+     * deep-link target persisted on the token and echoed back in the redeem response so
+     * the portal FE can route post-login; it is open-redirect-safe (always the persisted
+     * value, never read from the redeem request). When absent (null) behaviour is
+     * byte-identical to pre-G.5.
      */
-    public record MagicLinkRequest(@Email @NotBlank String email, String linkBaseUrl,
-                                   String redirectTo) {}
+    public record MagicLinkRequest(@Email @NotBlank String email, String redirectTo) {}
 
     public record MagicLinkRedeem(@NotBlank String token) {}
 

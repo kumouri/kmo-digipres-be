@@ -42,7 +42,13 @@ import java.util.UUID;
  * round-trip. The echoed value is ALWAYS the one persisted at request-time — it is
  * NEVER read from the redeem request (open-redirect mitigation: §9 #5). When
  * {@code redirectTo} is {@code null} the behaviour is byte-identical to pre-G.5.
- * {@link #buildLink} is unmodified.
+ *
+ * <p><strong>Security fix BE-05:</strong> the emailed link base is no longer taken from
+ * the request — {@link #buildLink} always uses the server-configured
+ * {@code portalProperties.successRedirect()}. Previously a caller-supplied
+ * {@code linkBaseUrl} let the real, branded sign-in email carry a live one-time token to
+ * an attacker host (token exfiltration → portal account takeover). The {@code redirectTo}
+ * deep-link handling above is unchanged.
  */
 @Slf4j
 @Service
@@ -72,12 +78,15 @@ public class MagicLinkService {
      * successfully whether or not we actually sent something — we don't leak which emails
      * exist as portal users.
      *
-     * @param linkBaseUrl drives the emailed URL via {@link #buildLink} (unchanged G.5)
-     * @param redirectTo  optional deep-link target to persist on the token so the FE can
-     *                    route post-redeem; may be {@code null}
+     * <p>Security fix BE-05: the emailed link base is ALWAYS derived from server config
+     * ({@code portalProperties.successRedirect()}) — there is no caller-supplied
+     * {@code linkBaseUrl}, so the branded sign-in email can never be steered to deliver a
+     * live one-time token to an attacker-controlled host.
+     *
+     * @param redirectTo optional deep-link target to persist on the token so the FE can
+     *                   route post-redeem; may be {@code null}
      */
-    public Mono<Void> request(Tenant tenant, String email, String linkBaseUrl,
-                              String redirectTo) {
+    public Mono<Void> request(Tenant tenant, String email, String redirectTo) {
         String normalizedEmail = email == null ? null : email.toLowerCase();
         if (normalizedEmail == null || normalizedEmail.isBlank()) {
             return Mono.error(new DigiPresBeException(
@@ -97,7 +106,7 @@ public class MagicLinkService {
                 .build();
 
         return tokens.save(row)
-                .then(sendEmail(tenant, normalizedEmail, raw, linkBaseUrl))
+                .then(sendEmail(tenant, normalizedEmail, raw))
                 .onErrorResume(ex -> {
                     log.warn("Magic-link issuance failed for {} on tenant {}",
                             normalizedEmail, tenant.getSlug(), ex);
@@ -154,9 +163,8 @@ public class MagicLinkService {
                         new TenantContext(tenant.getId(), null, Set.of())));
     }
 
-    private Mono<Boolean> sendEmail(Tenant tenant, String email, String rawToken,
-                                    String linkBaseUrl) {
-        String link = buildLink(linkBaseUrl, rawToken);
+    private Mono<Boolean> sendEmail(Tenant tenant, String email, String rawToken) {
+        String link = buildLink(rawToken);
         String body = """
                 <p>Hi,</p>
                 <p>Sign in to %s with this one-time link (good for %d minutes):</p>
@@ -176,10 +184,14 @@ public class MagicLinkService {
         return emailService.sendSingleEmail(req);
     }
 
-    private String buildLink(String linkBaseUrl, String rawToken) {
-        String base = linkBaseUrl == null || linkBaseUrl.isBlank()
-                ? portalProperties.successRedirect()
-                : linkBaseUrl;
+    /**
+     * Builds the emailed sign-in link. Security fix BE-05: the base is ALWAYS the
+     * server-configured {@code portalProperties.successRedirect()} — there is no
+     * caller-supplied override — so the link can only ever point at the tenant's own
+     * configured portal origin.
+     */
+    private String buildLink(String rawToken) {
+        String base = portalProperties.successRedirect();
         String separator = base.contains("?") ? "&" : "?";
         return base + separator + "magic_token=" + rawToken;
     }

@@ -209,11 +209,25 @@ public class UserIdentityService {
                 .then();
     }
 
+    /**
+     * Merge roles granted by a redeemed invitation onto the user.
+     *
+     * <p><strong>Security fix BE-01 (defense-in-depth):</strong> an invitation may ONLY
+     * grant the {@code CLIENT} role. Even though {@code PortalInvitationController} now
+     * rejects non-CLIENT roles at creation, this is the second wall — a self-service
+     * portal sign-in redeeming an invitation must NEVER be able to escalate the user to
+     * {@code STAFF}/{@code ADMIN}, regardless of what roles a tampered or legacy
+     * invitation row carries. Any non-CLIENT role on the invitation is silently dropped.
+     */
     private static void addRoles(User user, Set<String> add) {
         if (add == null || add.isEmpty()) return;
+        Set<String> safeAdditions = add.stream()
+                .filter("CLIENT"::equals)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        if (safeAdditions.isEmpty()) return;
         Set<String> merged = new LinkedHashSet<>(user.getRoles() == null
                 ? Set.of() : user.getRoles());
-        merged.addAll(add);
+        merged.addAll(safeAdditions);
         user.setRoles(merged);
     }
 

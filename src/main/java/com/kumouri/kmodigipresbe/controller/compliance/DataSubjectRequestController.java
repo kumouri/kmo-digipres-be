@@ -27,8 +27,11 @@ import java.util.UUID;
  *       403 if the job belongs to a different tenant.</li>
  * </ul>
  *
- * <p>All endpoints are admin-only ({@code ROLE_ADMIN} enforced in
- * {@code SecurityConfig}). Cross-tenant contact access returns 403 (error 3102).
+ * <p>All endpoints are admin-only — these paths are under {@code /admin/**}, which the
+ * central {@link com.kumouri.kmodigipresbe.tenancy.StaffAuthorizationWebFilter} gates on
+ * the {@code ADMIN} role (security fix BE-02; the earlier claim that this was enforced in
+ * {@code SecurityConfig} was false — that control did not exist until the filter was
+ * added). Cross-tenant contact access returns 403 (error 3102).
  */
 @RestController
 @RequestMapping("/admin/dsr")
