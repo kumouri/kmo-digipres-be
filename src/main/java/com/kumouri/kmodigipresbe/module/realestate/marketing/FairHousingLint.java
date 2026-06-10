@@ -89,6 +89,30 @@ public final class FairHousingLint {
     }
 
     /**
+     * Channel-agnostic risk check over the same {@link #BANNED_TERMS} (security fix BE-12). Used
+     * by the SMS concierge — which has no {@link MarketingChannel} — as the deterministic output
+     * backstop before an AI answer is auto-sent: a {@code true} means the generated text contains
+     * a Fair-Housing risk term, so the caller suppresses/hands off rather than sending it. Unlike
+     * the marketing {@link #lint} (whose flags surface to a human reviewer who still approves),
+     * the concierge auto-sends, so a positive here forces a safe outcome.
+     *
+     * @return the first matched banned term (lower-case) if the text carries Fair-Housing risk,
+     *         else {@code null} (clean / blank).
+     */
+    public static String firstRiskTerm(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        String haystack = text.toLowerCase(Locale.ROOT);
+        for (String term : BANNED_TERMS) {
+            if (indexOfTerm(haystack, term) >= 0) {
+                return term;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Returns the index of {@code term} in {@code haystack} (already lower-cased), or -1. For a
      * single-word term the surrounding characters must be non-letters (word boundary) so "singles" does
      * not match inside, e.g., "shingles"; multi-word phrases match as a plain substring.

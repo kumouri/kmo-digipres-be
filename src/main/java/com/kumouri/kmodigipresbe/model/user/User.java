@@ -1,5 +1,6 @@
 package com.kumouri.kmodigipresbe.model.user;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.kumouri.kmodigipresbe.audit.Auditable;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -44,6 +45,15 @@ public class User implements Auditable {
 
     // Nullable: portal/CLIENT users authenticate via OAuth, magic-link, or passkey
     // and may never set a password.
+    //
+    // Security fix BE-13: never serialize the bcrypt hash. {@code /auth/me} returns the
+    // raw User entity, which would otherwise leak the caller's own hash (offline-crackable).
+    // {@code @JsonIgnore} suppresses BOTH directions of Jackson serialization but does NOT
+    // touch the Lombok getter, so every server-side read (login compare, seed, magic-link
+    // provisioning) still reads the field; the column is still persisted by Spring Data
+    // (which uses field access / the property descriptor, not Jackson). The login path
+    // already returns a curated LoginResponse DTO, so no API consumer needs the hash.
+    @JsonIgnore
     private String passwordHash;
 
     private String displayName;

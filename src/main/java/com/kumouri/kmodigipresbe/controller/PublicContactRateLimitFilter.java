@@ -54,6 +54,16 @@ public class PublicContactRateLimitFilter implements WebFilter {
     private static final Pattern PATH_PATTERN =
             Pattern.compile("^/public/[^/]+/(contacts|newsletter/subscribe)/?$");
 
+    /**
+     * Security fix BE-11 — also rate-limit the unauthenticated public mole-triage photo
+     * classify endpoint ({@code /public/integrations/mole-triage/{token}/classify}). Its
+     * widget token is embedded in public site HTML, so it is an abuse surface (AI-vision
+     * quota burn / spam leads / upload DoS alongside the size cap). Keyed by IP + the
+     * {@code {token}} path segment (group 1) so it throttles per public widget.
+     */
+    private static final Pattern MOLE_TRIAGE_PATTERN =
+            Pattern.compile("^/public/integrations/mole-triage/([^/]+)/classify/?$");
+
     static final int MAX_REQUESTS = 10;
     static final int WINDOW_SECONDS = 60;
 
@@ -66,17 +76,31 @@ public class PublicContactRateLimitFilter implements WebFilter {
             return chain.filter(exchange);
         }
         String path = request.getPath().pathWithinApplication().value();
-        if (!PATH_PATTERN.matcher(path).matches()) {
-            return chain.filter(exchange);
+        String key = bucketKey(request, path);
+        if (key == null) {
+            return chain.filter(exchange); // path not rate-limited
         }
-
-        String tenantSlug = extractTenantSlug(path);
-        String key = clientIp(request) + "|" + tenantSlug;
         if (!tryConsume(key)) {
             exchange.getResponse().setStatusCode(HttpStatus.TOO_MANY_REQUESTS);
             return exchange.getResponse().setComplete();
         }
         return chain.filter(exchange);
+    }
+
+    /**
+     * Returns the per-(IP, route-discriminator) bucket key for a rate-limited path, or null
+     * if {@code path} is not one we throttle. Lead-capture buckets by tenant slug; the
+     * mole-triage classify route buckets by its widget token.
+     */
+    private String bucketKey(ServerHttpRequest request, String path) {
+        if (PATH_PATTERN.matcher(path).matches()) {
+            return clientIp(request) + "|" + extractTenantSlug(path);
+        }
+        var triage = MOLE_TRIAGE_PATTERN.matcher(path);
+        if (triage.matches()) {
+            return clientIp(request) + "|mole-triage|" + triage.group(1);
+        }
+        return null;
     }
 
     private boolean tryConsume(String key) {

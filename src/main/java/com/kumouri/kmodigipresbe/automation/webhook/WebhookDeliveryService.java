@@ -3,6 +3,7 @@ package com.kumouri.kmodigipresbe.automation.webhook;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kumouri.kmodigipresbe.automation.DomainEvent;
+import com.kumouri.kmodigipresbe.security.OutboundUrlGuard;
 import io.github.resilience4j.reactor.circuitbreaker.operator.CircuitBreakerOperator;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
@@ -39,6 +40,7 @@ public class WebhookDeliveryService {
     private final WebClient.Builder webClientBuilder;
     private final CircuitBreakerRegistry breakers;
     private final ObjectMapper objectMapper;
+    private final OutboundUrlGuard outboundUrlGuard;
 
     public Mono<Void> deliver(WebhookSubscription sub, DomainEvent event) {
         return Mono.fromCallable(() -> serialize(event))
@@ -60,19 +62,25 @@ public class WebhookDeliveryService {
         String signature = sign(sub.getSecret(), body);
 
         WebClient client = webClientBuilder.build();
-        return client.post()
-                .uri(sub.getUrl())
-                .header("X-KMOSF-Signature", signature)
-                .header("X-KMOSF-Event", eventType)
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(body)
-                .retrieve()
-                .toBodilessEntity()
-                .timeout(Duration.ofSeconds(10))
-                .transformDeferred(CircuitBreakerOperator.of(breaker))
-                .retryWhen(Retry.backoff(2, Duration.ofMillis(200))
-                        .maxBackoff(Duration.ofSeconds(2))
-                        .filter(t -> !(t instanceof io.github.resilience4j.circuitbreaker.CallNotPermittedException)))
+        // Security fix BE-08: SSRF guard. Validate the tenant-set delivery URL (https +
+        // not loopback/link-local/private/ULA/metadata) immediately before the POST, so it
+        // also re-checks at delivery/retry time (DNS-rebinding). A blocked URL never issues
+        // the request. The guard resolves DNS on boundedElastic (off the event loop).
+        return outboundUrlGuard.validate(sub.getUrl())
+                .flatMap(validated -> client.post()
+                        .uri(validated)
+                        .header("X-KMOSF-Signature", signature)
+                        .header("X-KMOSF-Event", eventType)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue(body)
+                        .retrieve()
+                        .toBodilessEntity()
+                        .timeout(Duration.ofSeconds(10))
+                        .transformDeferred(CircuitBreakerOperator.of(breaker))
+                        .retryWhen(Retry.backoff(2, Duration.ofMillis(200))
+                                .maxBackoff(Duration.ofSeconds(2))
+                                .filter(t -> !(t instanceof io.github.resilience4j.circuitbreaker.CallNotPermittedException)))
+                        .then())
                 .doOnError(err -> log.warn(
                         "Webhook delivery to {} failed: {}", sub.getUrl(), err.toString()))
                 .then();

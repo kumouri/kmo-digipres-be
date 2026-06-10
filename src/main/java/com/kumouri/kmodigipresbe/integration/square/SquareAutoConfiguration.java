@@ -6,6 +6,7 @@ import com.kumouri.kmodigipresbe.integration.IntegrationConnectionRepository;
 import com.kumouri.kmodigipresbe.repository.ContactRepository;
 import com.kumouri.kmodigipresbe.repository.InvoiceRepository;
 import com.kumouri.kmodigipresbe.repository.PaymentRepository;
+import com.kumouri.kmodigipresbe.repository.SquareWebhookEventRepository;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -51,7 +52,9 @@ public class SquareAutoConfiguration {
                                                       IntegrationConnectionRepository connections,
                                                       SquarePosService posService,
                                                       SquareProperties props,
-                                                      ReactiveMongoTemplate mongo) {
-        return new SquareWebhookService(objectMapper, connections, posService, props, mongo);
+                                                      ReactiveMongoTemplate mongo,
+                                                      SquareWebhookEventRepository webhookEvents) {
+        return new SquareWebhookService(objectMapper, connections, posService, props, mongo,
+                webhookEvents);
     }
 }

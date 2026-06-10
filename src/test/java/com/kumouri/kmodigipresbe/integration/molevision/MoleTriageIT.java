@@ -414,6 +414,25 @@ class MoleTriageIT {
     }
 
     // -------------------------------------------------------------------------
+    // Security fix BE-11 — oversized image → 413 (bounded join, not OOM), zero effect
+    // -------------------------------------------------------------------------
+
+    @Test
+    void oversizedImage_413_zeroEffect() {
+        String token = issueToken(MoleTriageService.WIDGET_TYPE);
+        // One byte over the controller's MAX_IMAGE_BYTES cap (15 MB) — see
+        // MoleTriageController.MAX_IMAGE_BYTES (package-private).
+        byte[] tooBig = new byte[15 * 1024 * 1024 + 1];
+
+        postPhoto(token, tooBig, "image/jpeg", "huge.jpg", Map.of("phone", CALLER_PHONE))
+                .expectStatus().isEqualTo(413)
+                .expectBody().jsonPath("$.errorCode").isEqualTo(4011);
+
+        assertThat(mongo.findAll(Attachment.class).collectList().block()).isEmpty();
+        assertThat(wireMock.getAllServeEvents()).isEmpty();
+    }
+
+    // -------------------------------------------------------------------------
     // Unsupported media type → 415/4012
     // -------------------------------------------------------------------------
 

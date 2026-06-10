@@ -82,6 +82,7 @@ public class DocumensoClient {
     private final ObjectMapper objectMapper;
     private final DocumensoProperties properties;
     private final CircuitBreakerRegistry breakers;
+    private final com.kumouri.kmodigipresbe.security.OutboundUrlGuard outboundUrlGuard;
 
     /**
      * Result of a successful {@link #sendForSignature} call.
@@ -180,7 +181,12 @@ public class DocumensoClient {
                                 "Documenso apiToken is not configured for this tenant",
                                 3720, 412));
                     }
-                    return callDownloadUrl(apiToken, downloadUrl);
+                    // Security fix BE-09: the downloadUrl comes straight from the webhook
+                    // payload. SSRF-guard it (block internal/metadata) and only send the
+                    // apiToken if its host matches the tenant's configured Documenso host —
+                    // a presigned-S3 download lives on a different host and needs no token,
+                    // and a payload that names an attacker host must never receive the token.
+                    return callDownloadUrl(apiToken, downloadUrl, resolveBaseUrl(conn));
                 }));
     }
 
@@ -460,10 +466,14 @@ public class DocumensoClient {
 
         WebClient client = webClientBuilder.baseUrl(baseUrl).build();
 
-        return resilientCall(client.get()
+        // Security fix BE-16: validate the (possibly per-tenant-overridden) base URL before
+        // sending the apiToken to it, then run the two-hop. The presigned downloadUrl from
+        // the JSON response is SSRF-validated separately in callDownloadUrl.
+        return outboundUrlGuard.validate(baseUrl).then(
+                resilientCall(client.get()
                         .uri("/api/v1/documents/{id}/download", documensoDocumentId)
                         .header("Authorization", apiToken)
-                        .accept(MediaType.APPLICATION_JSON))
+                        .accept(MediaType.APPLICATION_JSON)))
                 .flatMap(responseBody -> {
                     String downloadUrl;
                     try {
@@ -480,8 +490,9 @@ public class DocumensoClient {
                     }
                     return Mono.just(downloadUrl);
                 })
-                // Second hop: fetch the bytes from the presigned URL.
-                .flatMap(url -> callDownloadUrl(apiToken, url))
+                // Second hop: fetch the bytes from the presigned URL (SSRF-guarded; token
+                // sent only if the presigned host matches the Documenso base host).
+                .flatMap(url -> callDownloadUrl(apiToken, url, baseUrl))
                 .onErrorMap(err -> {
                     if (err instanceof DigiPresBeException) return err;
                     return new DigiPresBeException(
@@ -490,25 +501,38 @@ public class DocumensoClient {
     }
 
     /**
-     * Downloads from a direct URL (absolute — the webhook's {@code downloadUrl}).
-     * Uses a fresh {@link WebClient} (not the base-URL-scoped one) so the URL is
-     * used as-is.
+     * Downloads from a direct URL (absolute — the webhook's {@code downloadUrl}, or the
+     * presigned URL from the {@code /download} JSON). Uses a fresh {@link WebClient} (not the
+     * base-URL-scoped one) so the URL is used as-is.
+     *
+     * <p>Security fix BE-09: the URL is SSRF-validated (https + not internal/metadata) and
+     * the {@code apiToken} is attached <em>only</em> when the URL's host matches the tenant's
+     * Documenso base host ({@code trustedBaseUrl}). A presigned download lives on a different
+     * (S3) host and needs no token; a payload that names an arbitrary host therefore never
+     * receives the token (token-exfiltration fix). The guard runs at call time so it also
+     * re-checks per retry (DNS-rebinding).
      */
-    private Mono<byte[]> callDownloadUrl(String apiToken, String downloadUrl) {
+    private Mono<byte[]> callDownloadUrl(String apiToken, String downloadUrl, String trustedBaseUrl) {
         CircuitBreaker breaker = breakers.circuitBreaker(CB_NAME);
         WebClient client = webClientBuilder.build();
+        boolean sameHostAsBase = sameHost(downloadUrl, trustedBaseUrl);
 
-        Mono<byte[]> attempt = Mono.defer(() ->
-                client.get()
-                        .uri(downloadUrl)
-                        // Documenso v1 auth: the raw API token is the Authorization
-                        // header VALUE itself (the spec's apiKey-in-header scheme).
-                        // NOT "Bearer <token>", NOT "api_<token>".
-                        .header("Authorization", apiToken)
-                        .retrieve()
-                        .bodyToMono(byte[].class)
-                        .timeout(Duration.ofSeconds(properties.getRequestTimeoutSeconds()))
-                        .cache());
+        Mono<byte[]> attempt = outboundUrlGuard.validate(downloadUrl).flatMap(validated -> {
+            WebClient.RequestHeadersSpec<?> request = client.get().uri(validated);
+            if (sameHostAsBase) {
+                // Documenso v1 auth: the raw API token is the Authorization header VALUE
+                // itself (the spec's apiKey-in-header scheme). NOT "Bearer", NOT "api_".
+                request = request.header("Authorization", apiToken);
+            } else {
+                log.debug("DocumensoClient: download host differs from base host — "
+                        + "fetching presigned URL without the apiToken");
+            }
+            return request
+                    .retrieve()
+                    .bodyToMono(byte[].class)
+                    .timeout(Duration.ofSeconds(properties.getRequestTimeoutSeconds()))
+                    .cache();
+        });
 
         return attempt
                 .transformDeferred(CircuitBreakerOperator.of(breaker))
@@ -524,6 +548,20 @@ public class DocumensoClient {
                     return new DigiPresBeException(
                             "Documenso signed-PDF download failed: " + err.getMessage(), 3721, 502);
                 });
+    }
+
+    /**
+     * True iff {@code url} and {@code baseUrl} have the same (case-insensitive) host. A
+     * malformed URL or null base yields false (fail-closed — no token is attached).
+     */
+    private static boolean sameHost(String url, String baseUrl) {
+        try {
+            String a = java.net.URI.create(url).getHost();
+            String b = baseUrl == null ? null : java.net.URI.create(baseUrl).getHost();
+            return a != null && a.equalsIgnoreCase(b);
+        } catch (IllegalArgumentException ex) {
+            return false;
+        }
     }
 
 }
