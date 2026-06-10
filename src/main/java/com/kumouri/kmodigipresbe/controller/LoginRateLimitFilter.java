@@ -1,5 +1,6 @@
 package com.kumouri.kmodigipresbe.controller;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
@@ -20,8 +21,12 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Security fix BE-06 — per-IP throttle on {@code POST /auth/login}. Caps staff-login
- * attempts from a single source IP to {@value #MAX_REQUESTS} per {@value #WINDOW_SECONDS}
- * seconds; over the cap returns {@code 429 Too Many Requests} before the handler runs.
+ * attempts from a single source IP (default {@value #DEFAULT_MAX_REQUESTS} per
+ * {@value #DEFAULT_WINDOW_SECONDS} seconds, tunable via
+ * {@code kmosf.login-rate-limit.max-requests} / {@code .window-seconds}); over the cap
+ * returns {@code 429 Too Many Requests} before the handler runs. (The test profile sets a
+ * very high cap so the shared-context IT suite — 20+ classes logging in from one loopback
+ * IP — never trips it; a dedicated limit test can override low via {@code @TestPropertySource}.)
  *
  * <p>Mirrors {@link PublicContactRateLimitFilter} exactly (in-process sliding-window
  * {@link ConcurrentHashMap}, X-Forwarded-For-aware client IP, single-instance scope — the
@@ -40,10 +45,19 @@ import java.util.concurrent.ConcurrentHashMap;
 public class LoginRateLimitFilter implements WebFilter {
 
     static final String LOGIN_PATH = "/auth/login";
-    static final int MAX_REQUESTS = 10;
-    static final int WINDOW_SECONDS = 60;
+    static final int DEFAULT_MAX_REQUESTS = 10;
+    static final int DEFAULT_WINDOW_SECONDS = 60;
 
+    private final int maxRequests;
+    private final int windowSeconds;
     private final ConcurrentHashMap<String, Deque<Instant>> buckets = new ConcurrentHashMap<>();
+
+    public LoginRateLimitFilter(
+            @Value("${kmosf.login-rate-limit.max-requests:10}") int maxRequests,
+            @Value("${kmosf.login-rate-limit.window-seconds:60}") int windowSeconds) {
+        this.maxRequests = maxRequests;
+        this.windowSeconds = windowSeconds;
+    }
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
@@ -61,7 +75,7 @@ public class LoginRateLimitFilter implements WebFilter {
 
     private boolean tryConsume(String key) {
         Instant now = Instant.now();
-        Instant windowStart = now.minus(Duration.ofSeconds(WINDOW_SECONDS));
+        Instant windowStart = now.minus(Duration.ofSeconds(windowSeconds));
         Deque<Instant> hits = buckets.computeIfAbsent(key, k -> new ArrayDeque<>());
         synchronized (hits) {
             Iterator<Instant> it = hits.iterator();
@@ -69,7 +83,7 @@ public class LoginRateLimitFilter implements WebFilter {
                 if (it.next().isBefore(windowStart)) it.remove();
                 else break;
             }
-            if (hits.size() >= MAX_REQUESTS) return false;
+            if (hits.size() >= maxRequests) return false;
             hits.addLast(now);
             return true;
         }

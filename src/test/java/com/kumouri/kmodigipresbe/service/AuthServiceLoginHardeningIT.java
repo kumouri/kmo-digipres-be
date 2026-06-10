@@ -14,6 +14,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.mongodb.core.ReactiveMongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 import java.util.Map;
@@ -32,6 +33,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient
 @Import(TestcontainersConfiguration.class)
+// This class exercises the per-IP throttle directly (repeatedFailuresFromOneIpAreThrottled),
+// so it needs the production-realistic cap of 10 — NOT the global test relaxation
+// (kmosf.login-rate-limit.max-requests=100000 in application-test.properties, which keeps the
+// 20+ shared-loopback-IP login ITs from tripping it). Every test here uses a DISTINCT
+// X-Forwarded-For, so a cap of 10 scoped to this class never cross-contaminates its own tests.
+@TestPropertySource(properties = "kmosf.login-rate-limit.max-requests=10")
 class AuthServiceLoginHardeningIT {
 
     @Autowired WebTestClient web;
