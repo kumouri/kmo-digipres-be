@@ -31,8 +31,8 @@ cadence + the unique-index enroll + the default-OFF runner + the GATE-2 vertical
 - [x] **P6 — demo seed** `QuoteCloserDemoSeeder` (`@Profile("demo-home-quote-closer")`) — "Comfort Air HVAC (QuoteCloser)" + quoting+nurture, a home-vertical QuoteCloser campaign (reminder→financing-nudge→last-call), a 0-hour-window config, + one NEW quote. `compileJava` PASS.
 - [x] **P7 — T11 ITs** (enroll 5, won 4, unfiltered-copy GATE-2 proof 1, analytics 2, module-gate 3) — all green (see Validation log).
 - [x] **P7b — wiring fix (real bug the regression batch surfaced):** the component-scanned `QuoteCloserController` (`@ConditionalOnProperty(quoting)`) depends on `QuoteCloserAnalyticsService`, but that bean was both-module-gated → context-load failure when quoting ON + nurture OFF. **Fix:** split the read surface into a quoting-only `QuoteCloserReadAutoConfiguration` (wires the analytics service); the both-module `QuoteCloserAutoConfiguration` keeps only the ACTIVE glue (job + subscriber). The both-module requirement is still enforced per-tenant by the controllers' `requireEnabled("quoting")` AND `requireEnabled("nurture")`. `QuoteCloserModuleGateIT.NurtureOff` now asserts the context LOADS (read surface present, active glue absent). All 3 gate contexts green.
-- [ ] **P8 — regression** (`module.quoting.*`, `nurture.*` incl. `BothVerticalsNurtureCopyFilterIT`, `integration.gbp.*`, `OpenApiEndpointIT`) green.
-- [ ] **P9 — docs** (CLAUDE.md T11 entry) + PR.
+- [x] **P8 — regression** green: `nurture.*` (E1 + GATE-2 `BothVerticalsNurtureCopyFilterIT`); `integration.gbp.*` (E3/ReviewBoost); the T8 quoting ITs; `OpenApiEndpointIT`. `openapi.json` UNCHANGED vs main (QuoteCloser endpoints module-gated OFF → absent; FE hand-writes `api/quote-closer.ts`).
+- [x] **P9 — docs** (CLAUDE.md T11 entry added after T10) + PR (next).
 
 ## Validation log
 
