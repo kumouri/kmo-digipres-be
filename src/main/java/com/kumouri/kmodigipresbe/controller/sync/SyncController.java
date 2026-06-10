@@ -5,6 +5,7 @@ import com.kumouri.kmodigipresbe.model.sync.SyncChange;
 import com.kumouri.kmodigipresbe.model.sync.SyncMutation;
 import com.kumouri.kmodigipresbe.model.sync.SyncPushResult;
 import com.kumouri.kmodigipresbe.service.sync.SyncService;
+import com.kumouri.kmodigipresbe.tenancy.RoleGuard;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -48,21 +49,24 @@ public class SyncController {
             return Flux.error(new DigiPresBeException(
                     "Invalid 'since' cursor — expected ISO-8601 instant (e.g., 2025-01-01T00:00:00Z)", 1501, 400));
         }
-        return TenantContextHolder.required()
+        // Security fix BE-07: explicit STAFF gate (also covered centrally by the
+        // StaffAuthorizationWebFilter baseline, but explicit-at-the-handler is the
+        // defense-in-depth pattern the flagship controllers follow).
+        return RoleGuard.requireRole("STAFF").thenMany(TenantContextHolder.required()
                 .flatMapMany(ctx -> {
                     if (ctx.userId() == null) {
                         return Flux.error(new DigiPresBeException(
                                 "Sync pull requires an authenticated user (not a system token)", 1501, 400));
                     }
                     return sync.pull(ctx.tenantId(), ctx.userId(), collection, sinceInstant);
-                });
+                }));
     }
 
     @PostMapping("/{collection}")
     public Flux<SyncPushResult> push(
             @PathVariable String collection,
             @RequestBody List<SyncMutation> mutations) {
-        return TenantContextHolder.required()
-                .flatMapMany(ctx -> sync.push(ctx.tenantId(), collection, mutations));
+        return RoleGuard.requireRole("STAFF").thenMany(TenantContextHolder.required()
+                .flatMapMany(ctx -> sync.push(ctx.tenantId(), collection, mutations)));
     }
 }

@@ -52,6 +52,39 @@ public class SyncService {
             "activities", "activities"
     );
 
+    /**
+     * Security fix BE-07 — per-collection writable-field allowlist for the mobile
+     * {@code push} path. {@code buildUpdate} previously {@code $set} every client-supplied
+     * key verbatim; a malicious client could therefore {@code $set} {@code tenantId} to a
+     * foreign UUID (moving the doc OUT of its tenant — data loss / cross-tenant write-out)
+     * or overwrite any server-managed / internal field by id. The normal CRUD path is safe
+     * (it patches scoped-loaded entities and {@code TenantStampingCallback} rejects a foreign
+     * {@code tenantId} on save); the raw {@code updateFirst} sync path bypasses both, so the
+     * allowlist is the dedicated guard.
+     *
+     * <p>Each key is the display-collection name (the {@code push} arg). Only fields a mobile
+     * client legitimately edits offline are listed. {@code tenantId}, {@code _id}, {@code id},
+     * {@code version}, {@code createdAt}, {@code updatedAt} are deliberately absent from every
+     * set (server-managed — {@code updatedAt} is stamped by {@code buildUpdate} itself). A
+     * field not in the set is dropped (logged) rather than failing the whole mutation, matching
+     * the tolerant last-write-wins push contract (a mutation whose ONLY fields are all-dropped
+     * applies nothing and returns {@code applied=false}).
+     */
+    static final Map<String, Set<String>> WRITABLE_FIELDS = Map.of(
+            "contacts", Set.of(
+                    "type", "firstName", "lastName", "displayName", "companyId",
+                    "emails", "phones", "addresses", "tags", "subscriptionTopics",
+                    "ownerId", "customFields"),
+            "work_orders", Set.of(
+                    "title", "jobSiteId", "status", "scheduledStart", "scheduledEnd",
+                    "technicianUserId", "serviceType", "recurrenceRule", "parentWorkOrderId",
+                    "notes", "completedAt", "completionSignatureRef", "completionPhotoRefs",
+                    "customFields"),
+            "activities", Set.of(
+                    "type", "direction", "subjectType", "subjectId", "summary", "body",
+                    "occurredAt", "dueAt", "completedAt", "ownerId", "payload", "customFields")
+    );
+
     static final int MAX_MUTATION_BATCH = 500;
 
     private final ReactiveMongoTemplate mongo;
@@ -111,7 +144,7 @@ public class SyncService {
         }
         String mongoCollection = resolveCollection(collection);
         return Flux.fromIterable(mutations)
-                .flatMap(m -> applyMutation(tenantId, mongoCollection, m)
+                .flatMap(m -> applyMutation(tenantId, collection, mongoCollection, m)
                         .onErrorResume(ex -> {
                             log.warn("SyncService: mutation {} in {} failed: {}",
                                     m.id(), collection, ex.toString());
@@ -138,8 +171,16 @@ public class SyncService {
 
     // --- internals ---
 
-    private Mono<SyncPushResult> applyMutation(UUID tenantId, String mongoCollection, SyncMutation mutation) {
+    private Mono<SyncPushResult> applyMutation(
+            UUID tenantId, String collection, String mongoCollection, SyncMutation mutation) {
         if (mutation.id() == null || mutation.fields() == null || mutation.fields().isEmpty()) {
+            return Mono.just(new SyncPushResult(mutation.id(), false, List.of()));
+        }
+        // Security fix BE-07: filter the client-supplied fields down to the per-collection
+        // writable allowlist BEFORE building the $set. A mutation that, after filtering, has
+        // no writable fields left applies nothing (applied=false) without touching Mongo.
+        Map<String, Object> writable = filterWritable(collection, mutation.fields(), mutation.id());
+        if (writable.isEmpty()) {
             return Mono.just(new SyncPushResult(mutation.id(), false, List.of()));
         }
         Query findQ = Query.query(
@@ -148,7 +189,7 @@ public class SyncService {
         return mongo.findOne(findQ, Document.class, mongoCollection)
                 .flatMap(existing -> {
                     List<String> conflicted = detectConflicts(existing, mutation);
-                    Update update = buildUpdate(mutation.fields());
+                    Update update = buildUpdate(writable);
                     return mongo.updateFirst(findQ, update, mongoCollection)
                             .map(r -> new SyncPushResult(mutation.id(), r.getModifiedCount() > 0, conflicted));
                 })
@@ -176,6 +217,32 @@ public class SyncService {
             }
         }
         return conflicted;
+    }
+
+    /**
+     * Security fix BE-07: keep only the keys in the collection's writable allowlist; drop
+     * (and log, once per mutation) everything else. Server-managed and unknown fields —
+     * {@code tenantId}, {@code _id}, {@code id}, {@code version}, {@code createdAt},
+     * {@code updatedAt}, and any field absent from {@link #WRITABLE_FIELDS} — are never
+     * applied. A collection with no allowlist entry (should not happen — every
+     * {@code ALLOWED_COLLECTIONS} key has one) drops all fields, failing safe.
+     */
+    static Map<String, Object> filterWritable(String collection, Map<String, Object> fields, UUID id) {
+        Set<String> allowed = WRITABLE_FIELDS.getOrDefault(collection, Set.of());
+        Map<String, Object> writable = new HashMap<>();
+        List<String> dropped = new ArrayList<>();
+        for (Map.Entry<String, Object> e : fields.entrySet()) {
+            if (allowed.contains(e.getKey())) {
+                writable.put(e.getKey(), e.getValue());
+            } else {
+                dropped.add(e.getKey());
+            }
+        }
+        if (!dropped.isEmpty()) {
+            log.warn("SyncService: dropped non-writable field(s) {} on {} push for id={}",
+                    dropped, collection, id);
+        }
+        return writable;
     }
 
     private static Update buildUpdate(Map<String, Object> fields) {

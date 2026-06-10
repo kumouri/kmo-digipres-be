@@ -16,6 +16,9 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Mono;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+
 @RestController
 @RequestMapping("/tenants")
 @RequiredArgsConstructor
@@ -35,7 +38,15 @@ public class TenantBootstrapController {
             return Mono.error(new DigiPresBeException(
                     "Bootstrap token is not configured on the server", 1501, 503));
         }
-        if (!bootstrapToken.equals(headerToken)) {
+        // Security fix BE-18: constant-time compare to avoid a remote timing side-channel
+        // on the high-entropy bootstrap token. MessageDigest.isEqual short-circuits only on
+        // length, not content. A null/blank header fails closed (the configured token is
+        // already asserted non-blank above; a null headerToken → empty byte[] → mismatch).
+        byte[] configured = bootstrapToken.getBytes(StandardCharsets.UTF_8);
+        byte[] presented = headerToken == null
+                ? new byte[0]
+                : headerToken.getBytes(StandardCharsets.UTF_8);
+        if (!MessageDigest.isEqual(configured, presented)) {
             return Mono.error(new DigiPresBeException(
                     "Invalid bootstrap token", 1502, 401));
         }
