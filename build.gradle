@@ -1,6 +1,6 @@
 plugins {
     id 'java'
-    id 'org.springframework.boot' version '3.5.6'
+    id 'org.springframework.boot' version '3.5.14'
     id 'io.spring.dependency-management' version '1.1.7'
     id 'org.asciidoctor.jvm.convert' version '3.3.2'
     id 'org.springdoc.openapi-gradle-plugin' version '1.9.0'
@@ -29,9 +29,22 @@ repositories {
 ext {
     set('snippetsDir', file("build/generated-snippets"))
     set('springCloudVersion', "2025.0.0")
+    // Security (OSV scan 2026-06-10): override Spring Boot 3.5.14's managed versions up to the
+    // patched releases where the BOM still lags. Boot 3.5.14 pins netty 4.1.132 / commons-lang3
+    // 3.17.0 — both still carry advisories. (jackson 2.21.2, logback 1.5.32, spring-framework
+    // 6.2.18, spring-security 6.5.10 are already patched by the 3.5.14 BOM, so no override needed.)
+    set('netty.version', '4.1.135.Final')   // HTTP request-smuggling + DoS + DNS-poisoning cluster
+    set('commons-lang3.version', '3.18.0')  // CVE-2025-48924 uncontrolled-recursion DoS
 }
 
 dependencies {
+    // Security (OSV scan 2026-06-10): force the patched Bouncy Castle — transitive via the
+    // zipkin/brave AWS-tracing chain, NOT Spring-Boot-BOM-managed, so pin via a constraint.
+    // CVE-2026-0636 (LDAP injection) + CVE-2026-5598 (covert timing channel); fixed in 1.84.
+    constraints {
+        implementation('org.bouncycastle:bcprov-jdk18on:1.84')
+    }
+
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.boot:spring-boot-starter-data-mongodb-reactive'
 //    implementation 'org.springframework.boot:spring-boot-starter-integration'
