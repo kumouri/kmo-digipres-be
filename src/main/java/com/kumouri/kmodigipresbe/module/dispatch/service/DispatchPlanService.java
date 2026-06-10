@@ -12,6 +12,7 @@ import com.kumouri.kmodigipresbe.module.fieldservice.model.JobSite;
 import com.kumouri.kmodigipresbe.module.fieldservice.model.LatLng;
 import com.kumouri.kmodigipresbe.module.fieldservice.model.WorkOrder;
 import com.kumouri.kmodigipresbe.module.fieldservice.model.WorkOrderStatus;
+import com.kumouri.kmodigipresbe.module.fieldservice.repository.WorkOrderRepository;
 import com.kumouri.kmodigipresbe.module.fieldservice.service.WorkOrderService;
 import com.kumouri.kmodigipresbe.repository.UserRepository;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
@@ -67,6 +68,7 @@ public class DispatchPlanService {
 
     private final DispatchOptimizerService optimizer;
     private final WorkOrderService workOrders;
+    private final WorkOrderRepository workOrderRepository;
     private final UserRepository users;
     private final ReactiveMongoOperations mongo;
     private final DomainEventPublisher events;
@@ -125,7 +127,9 @@ public class DispatchPlanService {
             return Mono.error(new DigiPresBeException(
                     "Each decision needs a workOrderId", 4522, 400));
         }
-        return workOrders.findById(d.workOrderId())
+        // Tenant-scoped load via the repository (returns empty, not a throw) so the dispatch-local 4520 is
+        // the not-found code (the reused WorkOrderService.findById would surface its own 1330 first).
+        return workOrderRepository.findById(d.workOrderId())
                 .switchIfEmpty(Mono.error(() -> new DigiPresBeException(
                         "Work order not found: " + d.workOrderId(), 4520, 404)))
                 .flatMap(wo -> {

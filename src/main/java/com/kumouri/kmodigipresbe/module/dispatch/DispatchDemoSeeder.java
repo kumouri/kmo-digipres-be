@@ -140,6 +140,10 @@ public class DispatchDemoSeeder implements CommandLineRunner {
                 .displayName("Comfort Crew Dispatch")
                 .roles(Set.of("STAFF", "ADMIN"))
                 .status(User.UserStatus.ACTIVE)
+                // An office dispatcher, not a field tech — a declared non-field skill keeps the
+                // admin out of the optimizer's field-tech candidate pool (so the demo board shows
+                // exactly the three field techs below).
+                .skills(List.of("DISPATCH"))
                 .build();
     }
 

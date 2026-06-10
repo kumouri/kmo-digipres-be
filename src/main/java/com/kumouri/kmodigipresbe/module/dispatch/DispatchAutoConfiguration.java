@@ -65,10 +65,11 @@ public class DispatchAutoConfiguration {
     public DispatchPlanService dispatchPlanService(
             DispatchOptimizerService optimizer,
             WorkOrderService workOrders,
+            com.kumouri.kmodigipresbe.module.fieldservice.repository.WorkOrderRepository workOrderRepository,
             UserRepository users,
             ReactiveMongoOperations mongo,
             DomainEventPublisher events) {
-        return new DispatchPlanService(optimizer, workOrders, users, mongo, events);
+        return new DispatchPlanService(optimizer, workOrders, workOrderRepository, users, mongo, events);
     }
 
     @Bean

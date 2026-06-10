@@ -32,11 +32,21 @@ scoring precedent — NOT an LLM). Demo collateral, default-OFF. The last of the
 
 | # | Sub-phase | Status | Notes |
 |---|---|---|---|
-| 1 | Detail plan + this ledger | ⬜ pending | commit 1 |
-| 2 | Model + scorer: `User.skills` additive field, `module/dispatch/model/*` records, the pure `DispatchOptimizerService` (+ no-Docker unit test), `DomainEventType` T14 block | ⬜ pending | `DispatchOptimizerServiceTest` |
-| 3 | Orchestrator + surface: `DispatchPlanService` (optimize + apply via reused `WorkOrderService.update`), `DispatchAnalyticsService`, `DispatchController`+DTOs, `DispatchAutoConfiguration`, `AutoConfiguration.imports`, `GlobalErrorHandler` 4520-4559 Javadoc, `DispatchDemoSeeder` | ⬜ pending | |
-| 4 | Tests + docs: `DispatchOptimizeIT`/`DispatchApplyIT`/`DispatchAnalyticsIT`/`DispatchModuleGateIT`, `CLAUDE.md` T14 entry (final-tool note), app-props doc; run + record regression | ⬜ pending | |
+| 1 | Detail plan + this ledger | ✅ done | commit 1 (1b2c352) |
+| 2 | Model + scorer: `User.skills` additive field, `module/dispatch/model/*` records, the pure `DispatchOptimizerService` (+ no-Docker unit test), `DomainEventType` T14 block | ✅ done | commit 2 (85e85e8); `DispatchOptimizerServiceTest` 9/9 |
+| 3 | Orchestrator + surface: `DispatchPlanService` (optimize + apply via reused `WorkOrderService.update`), `DispatchAnalyticsService`, `DispatchController`+DTOs, `DispatchAutoConfiguration`, `AutoConfiguration.imports`, `GlobalErrorHandler` 4520-4559 Javadoc, `DispatchDemoSeeder` | ✅ done | commit 3 (61385ad) |
+| 4 | Tests + docs: `DispatchOptimizeIT`/`DispatchApplyIT`/`DispatchAnalyticsIT`/`DispatchModuleGateIT`, `CLAUDE.md` T14 entry (final-tool note), app-props doc; run + record regression | ✅ done | commit 4 |
 | 5 | Push + ready PR | ⬜ pending | |
+
+## Result — T14 tests (validated via clean local IT re-run; full-ci OOM-impaired)
+- New T14 (21 tests, 0 failures): `DispatchOptimizerServiceTest` 9 (no-Docker — the optimizer/assignment math proof) · `DispatchOptimizeIT` 2 (skill-matched + priority-first + unstaffable→unassigned) · `DispatchApplyIT` 5 (apply commits + **re-apply idempotent no double-assign** + 4523/4520/4522/3100) · `DispatchAnalyticsIT` 2 · `DispatchModuleGateIT` 3 (beans absent + authed routes 401 when OFF).
+- Regression (all green): `module.homeservices.*` (29 classes / 85 — incl. `DispatchBoardIT`, the board T14 rides on) · `contractor.*` (7 classes / 56 — `ProjectAssignmentService`/Phase-J empty-diff) · `openapi.OpenApiEndpointIT` 2 (boot guard + **`openapi.json` unchanged** = default-OFF dispatch endpoints absent from the spec, the T1-T13 precedent).
+- Reused cores empty-diff verified vs `main` (0 lines each): `DispatchBoardService`, `DispatchBoardController`, `DispatchBoardResponseDTO`, `WorkOrder`, `JobSite`, `WorkOrderService`, `WorkOrderRepository`, `ProjectAssignmentService`, `ServiceAgreementSchedulerService`. The lone reused-model edit is the additive `User.skills`.
+- Reactive invariant: `switchIfEmpty` only for genuine not-found (4520) + the idempotent seed-defer; the apply already-assigned seam is the explicit-boolean `Objects.equals` skip (NO `switchIfEmpty(create/assign)`); the optimizer compute + the apply batch run on `Schedulers.boundedElastic()`.
+
+## Fixture/code adjustments during sub-phase 4 (recorded)
+- **Apply not-found code:** the reused `WorkOrderService.findById` throws its own `1330` before an outer `switchIfEmpty(4520)` could fire, so the apply load now uses the tenant-scoped `WorkOrderRepository.findById` (returns empty, not a throw) → the dispatch-local `4520` is the apply-decision not-found code. `WorkOrderService.update` is still the reused assignment path (empty-diff preserved).
+- **Dispatcher ≠ field tech:** a no-declared-skills STAFF user is a valid generalist fallback candidate (proven by `noDeclaredSkillsTech_isEligibleFallback`), so the office dispatcher/admin account is given a declared non-field skill (`"DISPATCH"`) in the ITs + the demo seed → it stays out of the field-tech candidate pool, making the "unstaffable job → unassigned" property deterministic.
 
 ## Decisions / deviations
 
