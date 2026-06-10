@@ -100,9 +100,15 @@ public class S3FileStorageService implements FileStorageService, Closeable {
             throw new DigiPresBeException(
                     "Refusing to presign a download for a foreign-tenant key", 1311, 403);
         }
+        // Security fix BE-10: force the response to download (never render inline) and a
+        // benign content type, so a stored object whose content-type slipped past the upload
+        // allowlist (or an old object) cannot drive a stored-XSS when the presigned URL is
+        // navigated to / embedded. S3 honours these response-* overrides on the presigned GET.
         GetObjectRequest get = GetObjectRequest.builder()
                 .bucket(props.bucket())
                 .key(storageRef)
+                .responseContentDisposition("attachment")
+                .responseContentType("application/octet-stream")
                 .build();
         GetObjectPresignRequest req = GetObjectPresignRequest.builder()
                 .signatureDuration(ttl)

@@ -56,6 +56,16 @@ public class MoleTriageController {
     /** The multipart part name the FE uses for the photo. */
     public static final String IMAGE_PART = "image";
 
+    /**
+     * Security fix BE-11 — hard cap on the joined image bytes (15 MB; ample for a phone
+     * photo). {@link DataBufferUtils#join(org.reactivestreams.Publisher, int)} aborts with a
+     * {@link org.springframework.core.io.buffer.DataBufferLimitException} once the accumulated
+     * size would exceed this, BEFORE the whole body is materialized in heap — so an oversized /
+     * chunked upload is a bounded 413, not an OOM. Backstops the
+     * {@code spring.webflux.multipart.*} / {@code spring.codec.max-in-memory-size} caps.
+     */
+    static final int MAX_IMAGE_BYTES = 15 * 1024 * 1024;
+
     private final MoleTriageService triage;
 
     /**
@@ -89,10 +99,21 @@ public class MoleTriageController {
         });
     }
 
-    /** Joins a {@link FilePart}'s content into a single {@code byte[]} (releases the buffer). */
+    /**
+     * Joins a {@link FilePart}'s content into a single {@code byte[]} (releases the buffer),
+     * capped at {@link #MAX_IMAGE_BYTES} (security fix BE-11). The bounded
+     * {@link DataBufferUtils#join(org.reactivestreams.Publisher, int)} aborts early on
+     * oversize; we map its {@link org.springframework.core.io.buffer.DataBufferLimitException}
+     * to a {@code 413} ({@code 4011} reused — the same image-rejection code family).
+     */
     private static Mono<byte[]> readBytes(FilePart filePart) {
-        return DataBufferUtils.join(filePart.content())
-                .map(MoleTriageController::toByteArray);
+        return DataBufferUtils.join(filePart.content(), MAX_IMAGE_BYTES)
+                .map(MoleTriageController::toByteArray)
+                .onErrorMap(
+                        org.springframework.core.io.buffer.DataBufferLimitException.class,
+                        ex -> new DigiPresBeException(
+                                "Uploaded image exceeds the " + (MAX_IMAGE_BYTES / (1024 * 1024))
+                                        + " MB limit", 4011, 413));
     }
 
     private static byte[] toByteArray(DataBuffer buffer) {
