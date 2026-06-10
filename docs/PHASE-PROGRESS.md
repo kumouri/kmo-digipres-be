@@ -18,8 +18,8 @@ Match a new client's **requested service/style** → the **best-fit stylist** (s
 - [x] **P3 — match→booking funnel.** `StylerMatchBookingService.accept` (explicit-boolean idempotent `bookingId != null`; UNCHANGED `SalonBookingService.create`; `BookingPolicyService` enforces the hard eligibility/availability at book time; stamps `selectedRank`) + `StylerMatchAcceptController` (public, no `@IdempotentRoute`).
 - [x] **P4 — match analytics.** `StylerMatchAnalyticsService` accept-rate-**by-rank** funnel (which rank got booked) + `StylerMatchAnalytics` DTO + `GET /stylermatch/analytics`.
 - [x] **P5 — wiring.** `StylerMatchAutoConfiguration` (chairfill + `@ConditionalOnBean(SalonBookingService)`) + `DomainEventType` T12 block (STYLER_MATCH_REQUESTED/BOOKED) + `GlobalErrorHandler` 4480-4489 Javadoc + `AutoConfiguration.imports` + app-props doc. **`compileJava` PASS.** Empty-diff + reactive-invariant verified (below).
-- [ ] **P6 — demo seed.** `StylerMatchDemoSeeder` (`@Profile("demo-salon-stylermatch")`) — "Shear Brilliance Studio" + stylists w/ varied specialties/availability/eligibility + a service menu + bookingLink.
-- [ ] **P7 — T12 ITs.** intake/accept/analytics/module-gate ITs. Regression: `module.salonspa.*` + `module.chairfill.*` + `OpenApiEndpointIT`.
+- [x] **P6 — demo seed.** `StylerMatchDemoSeeder` (`@Profile("demo-salon-stylermatch")`) — "Shear Brilliance Studio" + salon-spa+chairfill + a service menu + 4 stylists (Maya balayage/curly all-eligible Tue-Sat; Jordan blonde/highlights all-eligible Wed-Sun; Sam cut/keratin NOT-color-eligible Mon-Fri; Riley no-specialty versatile Mon-Sat) + a sandbox bookingLink. `compileJava` PASS.
+- [x] **P7 — T12 ITs (all green, Docker).** `StylerMatchIntakeIT` (5), `StylerMatchAcceptIT` (5), `StylerMatchAnalyticsIT` (4), `StylerMatchModuleGateIT` (2) + the pure `StylerMatchScoringServiceTest` (11). **Regression all green:** `module.chairfill.*` (8 classes / 50 — these exercise the salon-spa `SalonBookingService`/`Booking`/`ServiceMenu`/`StaffMember` cores) + `OpenApiEndpointIT` (2). No standalone `module.salonspa.*` IT package exists (the salon-spa cores are regression-covered via `module.chairfill.*`).
 - [ ] **P8 — docs + PR.** CLAUDE.md T12 entry; PR ready.
 
 ## Validation log
@@ -28,6 +28,21 @@ Match a new client's **requested service/style** → the **best-fit stylist** (s
 - `./gradlew compileJava` (P2-P5) — PASS (clean).
 - **Empty-diff (reused cores) — VERIFIED EMPTY** vs `main`: `SalonBookingService`, `BookingPolicyService`, `Booking`, `ServiceMenu`, `ServiceMenuItem`, `SalonMenuService`, `StaffMemberService`, `PublicWidgetTokenService`, all `module/chairfill/*`, all `module/styleconsult/*`. Only reused-model edit = `StaffMember.java` (+16, the additive `specialties` seam).
 - **Reactive-invariant — VERIFIED**: the only `switchIfEmpty` code in `module/stylermatch` is 2× genuine not-found (`Mono.error` 4485) + 1× find-fallback (`byPhone.switchIfEmpty(byEmail)`). Find-or-create create branch is explicit-boolean (`Optional`); accept idempotency is explicit-boolean (`bookingId != null`). **Zero `switchIfEmpty(create/book)`.**
+- `./gradlew test --tests "…stylermatch.StylerMatchModuleGateIT" --tests "…StylerMatchIntakeIT"` — **PASS** (ModuleGate 2/2, Intake 5/5).
+- `./gradlew test --tests "…stylermatch.StylerMatchAcceptIT" --tests "…StylerMatchAnalyticsIT"` — **PASS** (Accept 5/5 incl. the hard-eligibility-reject-at-book-time 2900 proof + idempotent re-accept; Analytics 4/4 incl. the accept-rate-by-rank funnel).
+- `./gradlew test --tests "…chairfill.NoShowRiskScoringIT" "…RiskTieredPreventionIT" "…GapFillWaitlistIT" "…WaitlistBoardIT"` (regression batch 1) — **PASS** (8/5/11/6 = 30).
+- `./gradlew test --tests "…chairfill.OfferExpirySweepIT" "…SalonReviewBoostConfigIT" "…SalonReviewBoostInsightsIT" "…SalonReviewReplyIT" "…openapi.OpenApiEndpointIT"` (regression batch 2) — **PASS** (3/4/5/8 + OpenApi 2/2).
+- **`openapi.json` UNCHANGED vs `main`** (verified empty-diff; T12 endpoints module-gated OFF → absent → the FE hand-writes ALL `stylermatch` `api/*.ts`, the T1-T11 precedent).
+- ITs run in small batches per the shared-Mongo Testcontainers-lifecycle note (single-fork large batches are Mongo-flaky); the authoritative gate is the sharded `full-ci.yml`.
+
+## New endpoints (for the FE leg — all default-OFF, absent from openapi.json)
+- `POST /public/integrations/stylermatch/{token}/match` (public widget, JSON `StylerMatchRequestBody`, token `styler-match`) → `StylerMatchResponse` (ranked board).
+- `POST /public/integrations/stylermatch/{token}/matches/{matchId}/accept?staffMemberId=` (public, no `@IdempotentRoute`) → `StylerMatchResponse` (BOOKED).
+- `POST /stylermatch/matches` (staff, 201, `StylerMatchRequestBody`) → `StylerMatchResponse`.
+- `GET /stylermatch/matches` (staff) → `StylerMatchResponse[]` (inbox, newest first).
+- `GET /stylermatch/matches/{id}` (staff) → `StylerMatchResponse` (4485 if absent).
+- `GET /stylermatch/analytics` (staff) → `StylerMatchAnalytics` (accept-rate-by-rank funnel).
+- `POST /stylermatch/tokens` (ADMIN, 201) → `{"token": "..."}` (mints the `styler-match` widget token).
 
 ## Reactive-invariant check
 `grep switchIfEmpty module/stylermatch` MUST show only genuine not-found (`switchIfEmpty(Mono.error(...))`, codes 4480/4485) + the idempotent demo-seeder `switchIfEmpty(seedFresh)`. **Zero `switchIfEmpty(create/book)`** — the accept idempotency seam is explicit-boolean (`bookingId != null`).
