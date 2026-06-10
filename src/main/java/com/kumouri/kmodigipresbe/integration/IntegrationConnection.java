@@ -25,8 +25,15 @@ import java.util.UUID;
  * <p>{@code secrets} is a free-form map for provider-specific credentials:
  * Stripe's {@code apiKey} + {@code webhookSigningSecret}, Twilio's
  * {@code accountSid} + {@code authToken} + {@code fromNumber}, OAuth2 access
- * + refresh tokens for Google/QuickBooks. Stored plaintext in Phase 8;
- * encrypt-at-rest is a hardening pass before any non-KMOSF tenant.
+ * + refresh tokens for Google/QuickBooks.
+ *
+ * <p><strong>Security (BE-03):</strong> {@code secrets}/{@code config} are NEVER
+ * serialized to API clients — read endpoints return the redacted
+ * {@code IntegrationConnectionController.ConnectionView}, and the routes are ADMIN-gated
+ * by {@code StaffAuthorizationWebFilter}. The maps are still stored plaintext at rest.
+ * // TODO(security BE-03): encrypt secrets at rest (an env-keyed field converter/codec)
+ * // before onboarding any non-KMOSF tenant. Deferred from the P0 redaction+gate PR to
+ * // avoid shipping a half-working crypto layer; redaction + ADMIN gate are in place.
  */
 @Document("integration_connections")
 @CompoundIndex(name = "tenant_provider_idx",

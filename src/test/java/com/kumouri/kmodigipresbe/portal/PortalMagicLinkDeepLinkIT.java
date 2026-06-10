@@ -46,9 +46,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <ul>
  *   <li>A token issued with redirectTo="/portal/contracts/&lt;id&gt;" → redeem
  *       returns {@code RedemptionResult.redirectTo == "/portal/contracts/&lt;id&gt;"}</li>
- *   <li>{@code MagicLinkService.buildLink(linkBaseUrl, raw)} appends
- *       {@code ?magic_token=&lt;raw&gt;} to the base URL (the existing buildLink shape,
- *       unchanged per §9 #5)</li>
+ *   <li>{@code MagicLinkService.buildLink(raw)} appends {@code ?magic_token=&lt;raw&gt;}
+ *       to the server-configured base URL (security fix BE-05: the base is no longer
+ *       caller-supplied; the {@code redirectTo} deep-link round-trip below is unchanged)</li>
  *   <li>The redeemed session (JWT minted for the resolved user) can
  *       GET /portal/me/contracts/&lt;id&gt; for an owned contract → 200</li>
  *   <li>Expired token → 1244 (unchanged security)</li>

@@ -44,10 +44,17 @@ import java.util.UUID;
  *   <li>{@code 1700-1799} — <em>Phase 9c</em>: transactional email + Postmark webhook
  *       (1700 send failure, 1701 no token, 1702 not connected, 1703 secret missing,
  *       1704 auth invalid, 1705 body not JSON, 1706 path tenant invalid)</li>
- *   <li>{@code 1800-1899} — <em>Phase 9a</em>: audit/compliance (RoleGuard 1800,
- *       audit query param validation 1801). The original plan §8 listed 1400-1499 for
- *       audit/compliance, but {@code DealCrudService} ships 1400/1401 since Phase 1 —
- *       audit codes were shifted to 1800-1899 to avoid renumbering merged code.</li>
+ *   <li>{@code 1800-1899} — <em>Phase 9a</em>: audit/compliance + authorization
+ *       (RoleGuard 1800, audit query param validation 1801). The original plan §8 listed
+ *       1400-1499 for audit/compliance, but {@code DealCrudService} ships 1400/1401 since
+ *       Phase 1 — audit codes were shifted to 1800-1899 to avoid renumbering merged code.
+ *       <em>Security fix BE-02/BE-04 — central {@code StaffAuthorizationWebFilter}:</em>
+ *       {@code 1802} portal {@code CLIENT} token rejected on the staff chain (403);
+ *       {@code 1803} STAFF baseline role required on the staff chain (403; ADMIN also
+ *       satisfies it); {@code 1804} ADMIN required for {@code /admin/**} or
+ *       {@code /integrations/connections/**} (403). <em>Security fix BE-01:</em>
+ *       {@code 1820} a portal invitation may only grant the CLIENT role (400,
+ *       {@code PortalInvitationController}).</li>
  *   <li>{@code 1900-1999} — Phase 6 automation (WorkflowRule 1900, WebhookSubscription
  *       1910). The plan's original AI slot would have collided here too.</li>
  *   <li>{@code 2200-2399} — <em>Phase 7</em>: Quotes + Invoices (core billing).

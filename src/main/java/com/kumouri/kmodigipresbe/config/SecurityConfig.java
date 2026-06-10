@@ -41,6 +41,16 @@ public class SecurityConfig {
      * Staff chain — everything not under {@code /portal/**}. The portal chain in
      * {@link PortalSecurityConfig} runs at a higher precedence and claims those
      * paths first; this chain handles the rest of the API.
+     *
+     * <p><strong>Authorization (security fix BE-02/BE-04):</strong> this chain only
+     * establishes <em>authentication</em> ({@code .anyExchange().authenticated()}).
+     * The default-deny <em>authorization</em> baseline — reject portal {@code CLIENT}
+     * tokens, require {@code STAFF} for every staff-chain request, and require
+     * {@code ADMIN} for {@code /admin/**} and {@code /integrations/connections/**} — is
+     * enforced centrally by
+     * {@link com.kumouri.kmodigipresbe.tenancy.StaffAuthorizationWebFilter}, which runs
+     * after {@code TenantWebFilter} has populated the tenant/role context. Per-handler
+     * {@code RoleGuard} calls remain as defense-in-depth.
      */
     @Bean
     @Order(Ordered.LOWEST_PRECEDENCE)
