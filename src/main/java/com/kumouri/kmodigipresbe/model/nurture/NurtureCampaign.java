@@ -46,6 +46,17 @@ public class NurtureCampaign implements Auditable {
     private String name;
     private String description;
 
+    /**
+     * The vertical this campaign belongs to (the GATE-2 vertical-scoped copy-filter dispatch key, e.g.
+     * {@code "realestate"} / {@code "health"}). Nullable + no {@code @Builder.Default} so legacy campaigns
+     * deserialize {@code vertical=null} ⇒ unchanged E1 behavior: the runner applies NO vertical-specific
+     * copy filter (see {@code NurtureMessageComposer}). Set it to a vertical that has a registered
+     * {@code NurtureCopyFilter} (Fair-Housing for {@code "realestate"}, HIPAA for {@code "health"}) to have
+     * every outbound message for this campaign screened by that filter — even when other verticals' filters
+     * are also registered in the same process.
+     */
+    private String vertical;
+
     /** When false the runner exits any in-flight enrollment ("campaign inactive") and segmentation 4302s. */
     @Builder.Default
     private boolean active = true;

@@ -238,6 +238,10 @@ public class NurtureRunner {
      * Ledger-insert-FIRST → compose → send → log Activity → advance. A concurrent tick loses the insert
      * (DuplicateKeyException → empty) = zero duplicate. A transport failure compensating-deletes the
      * row and does NOT advance (retry next tick). NEVER {@code switchIfEmpty(send)}.
+     *
+     * <p>Composition passes the campaign's {@code vertical} to the composer (the GATE-2 vertical-scoped
+     * copy-filter dispatch) so an RE campaign is screened by the Fair-Housing filter and a health campaign
+     * by the HIPAA filter even when both are registered in one process.
      */
     private Mono<Void> ledgerFirstThenSend(NurtureCampaign campaign, NurtureEnrollment enr,
                                            NurtureCadenceStep step, Contact contact, String channelTarget) {
@@ -255,7 +259,7 @@ public class NurtureRunner {
                             + "— zero duplicate", enr.getId(), step.stepIndex());
                     return Mono.empty();
                 })
-                .flatMap(savedLog -> composer.compose(step, contact)
+                .flatMap(savedLog -> composer.compose(step, contact, campaign.getVertical())
                         .flatMap(msg -> dispatch(step.channel(), channelTarget, msg)
                                 .then(persistLedgerAiFlag(savedLog, msg.aiApplied()))
                                 .then(logTouchActivity(enr, contact, step, msg))

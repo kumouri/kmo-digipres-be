@@ -248,6 +248,8 @@ public class FrontDeskNurtureDemoSeeder implements CommandLineRunner {
                 .name(CAMPAIGN_NAME)
                 .description("Reactivate lapsed patients with tiered, PHI-free cadences (logistics-only "
                         + "segmentation).")
+                // GATE-2: tag the vertical so the composer dispatches the HIPAA copy filter.
+                .vertical(HipaaCopyFilter.VERTICAL)
                 .active(true)
                 .segments(List.of(
                         // A — recently-lapsed + high lifetime value (90-180d lapsed, >= $1,500 prior WON spend).
