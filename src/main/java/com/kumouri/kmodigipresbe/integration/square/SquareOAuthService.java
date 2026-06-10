@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
 import com.kumouri.kmodigipresbe.integration.IntegrationConnection;
 import com.kumouri.kmodigipresbe.integration.IntegrationConnectionRepository;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -16,6 +15,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Map;
@@ -32,7 +32,6 @@ import java.util.UUID;
  * {@link IntegrationConnection#getConfig()} (key {@code merchantId}).
  */
 @Slf4j
-@RequiredArgsConstructor
 public class SquareOAuthService {
 
     static final String PROVIDER = "square";
@@ -41,6 +40,38 @@ public class SquareOAuthService {
     private final IntegrationConnectionRepository connections;
     private final WebClient.Builder webClientBuilder;
     private final ObjectMapper objectMapper;
+
+    /**
+     * Security fix BE-15 — the OAuth {@code state} HMAC key, resolved ONCE at construction.
+     * On a blank {@code stateSigningSecret} a fresh random 32-byte key is generated + a WARN is
+     * logged (mirrors {@code QuickBooksOAuthService}); the old behavior fell back to the static
+     * literal {@code "dev-square-state-key"}, which let an attacker forge a validly-signed,
+     * in-TTL state and complete an OAuth-callback CSRF (bind their Square merchant to a victim
+     * tenant). A random per-boot key means issued states invalidate on restart (acceptable for
+     * dev) and can never be forged.
+     */
+    private final byte[] stateSecret;
+
+    public SquareOAuthService(SquareProperties props,
+                              IntegrationConnectionRepository connections,
+                              WebClient.Builder webClientBuilder,
+                              ObjectMapper objectMapper) {
+        this.props = props;
+        this.connections = connections;
+        this.webClientBuilder = webClientBuilder;
+        this.objectMapper = objectMapper;
+        String secret = props.getStateSigningSecret();
+        if (secret == null || secret.isBlank()) {
+            byte[] generated = new byte[32];
+            new SecureRandom().nextBytes(generated);
+            this.stateSecret = generated;
+            log.warn("kmosf.integrations.square.state-signing-secret is unset; using a fresh "
+                    + "random secret. OAuth state tokens invalidate on restart. Set the env var "
+                    + "for production.");
+        } else {
+            this.stateSecret = secret.getBytes(StandardCharsets.UTF_8);
+        }
+    }
 
     public Mono<String> buildAuthorizationUrl(UUID tenantId) {
         return Mono.fromCallable(() -> {
@@ -133,7 +164,7 @@ public class SquareOAuthService {
     private String buildSignedState(UUID tenantId) {
         long expiry = System.currentTimeMillis() / 1000L + props.getStateTtlSeconds();
         String payload = tenantId + ":" + expiry;
-        String sig = hmacHex(signingKey(), payload);
+        String sig = hmacHex(stateSecret, payload);
         return payload + ":" + sig;
     }
 
@@ -151,7 +182,7 @@ public class SquareOAuthService {
             throw new DigiPresBeException("State parameter expired", 3001, 400);
         }
         String payload = parts[0] + ":" + parts[1];
-        String expected = hmacHex(signingKey(), payload);
+        String expected = hmacHex(stateSecret, payload);
         if (!constantTimeEquals(expected, parts[2])) {
             throw new DigiPresBeException("State parameter signature invalid", 3001, 401);
         }
@@ -162,18 +193,10 @@ public class SquareOAuthService {
         }
     }
 
-    private String signingKey() {
-        String s = props.getStateSigningSecret();
-        if (s == null || s.isBlank()) {
-            s = "dev-square-state-key";
-        }
-        return s;
-    }
-
-    private static String hmacHex(String key, String data) {
+    private static String hmacHex(byte[] key, String data) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(key.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            mac.init(new SecretKeySpec(key, "HmacSHA256"));
             return HexFormat.of().formatHex(mac.doFinal(data.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception ex) {
             throw new IllegalStateException("HMAC failed", ex);

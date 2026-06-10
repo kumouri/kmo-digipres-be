@@ -1235,6 +1235,21 @@ import java.util.UUID;
  *       AiVision is WireMock + Twilio is {@code @MockitoBean}'d in ITs (no live send); no live Cal.com in
  *       the loop. Going live needs A2P 10DLC for the booking-link/QR SMS + an optional Cal.com OAuth for
  *       a live booking link (separate human actions — never the loop).</li>
+ *   <li>{@code 4700-4719} — <em>Security hardening (PR B — BE-08/09/16, BE-10)</em>. A clean band above
+ *       the flagship blocks for the cross-cutting security fixes. {@code 4700} outbound request blocked by
+ *       the shared {@link com.kumouri.kmodigipresbe.security.OutboundUrlGuard} (400 — the URL is non-https,
+ *       unparseable, or resolves to a loopback / link-local / private / ULA / multicast / wildcard / cloud-
+ *       metadata (169.254.169.254) address; raised at the webhook-delivery, Documenso-download/base-url, and
+ *       GBP-base-url egress sinks, BE-08/09/16); {@code 4701} attachment-presign request rejected (400 — a
+ *       {@code contentType} outside the {image/jpeg|png|webp|gif, application/pdf} allowlist, or a
+ *       {@code subjectType}/{@code suffix} containing {@code / \ ..} / a non-{@code [A-Za-z0-9_-]} char,
+ *       BE-10, {@code AttachmentService.presignUpload}). {@code 4702-4719} RESERVED for future security
+ *       hardening. Reused (NOT re-allocated): BE-06 login throttle/lockout returns the existing generic
+ *       {@code 1020} (no new code — the de-enumeration fix is that inactive/nonexistent/wrong-password all
+ *       share it) + a 429 from {@code LoginRateLimitFilter} (a raw status, not a DigiPresBeException);
+ *       BE-11 oversized upload reuses {@code 4011} at 413; BE-07 sync mass-assignment is a silent
+ *       allowlist drop (no error code); BE-12 forces a HANDOFF (no error); BE-13/14/15/17/18 change
+ *       behavior without new HTTP error codes.</li>
  * </ul>
  */
 @Slf4j

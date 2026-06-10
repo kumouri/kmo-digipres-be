@@ -22,8 +22,15 @@ public final class SquareSignatureVerifier {
 
     public static boolean verify(String signatureHeader, String notificationUrl,
                                  String rawBody, String signatureKey) {
-        if (signatureHeader == null || notificationUrl == null
-                || rawBody == null || signatureKey == null) {
+        // Security fix BE-14: fail closed on a BLANK key/URL, not just null. A blank
+        // signatureKey (the default when Square is half-configured) would otherwise HMAC with
+        // an empty key and could "verify" a forged event — the fail-open the other verifiers
+        // already guard against. rawBody/signatureHeader may legitimately differ but must be
+        // present.
+        if (signatureHeader == null || signatureHeader.isBlank()
+                || notificationUrl == null || notificationUrl.isBlank()
+                || rawBody == null
+                || signatureKey == null || signatureKey.isBlank()) {
             return false;
         }
         String expected = hmacBase64(signatureKey, notificationUrl + rawBody);

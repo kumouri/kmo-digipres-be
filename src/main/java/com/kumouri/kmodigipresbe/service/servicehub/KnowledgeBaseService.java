@@ -95,13 +95,45 @@ public class KnowledgeBaseService {
 
     public Flux<KnowledgeBaseArticle> search(String query) {
         return TenantContextHolder.required().flatMapMany(ctx -> {
-            TextCriteria text = TextCriteria.forDefaultLanguage().matching(query);
+            // Security fix BE-17: neutralize MongoDB $text search operators in the raw user query.
+            // A leading "-" means term-exclusion and double-quotes mean exact-phrase; stripping them
+            // makes the query a plain term match so a user cannot manipulate result ranking/scope with
+            // operator syntax. (Within-tenant only — the TextCriteria is AND-ed with tenantId, so this
+            // was never a cross-tenant or injection risk; this is search-relevance hardening.)
+            TextCriteria text = TextCriteria.forDefaultLanguage().matching(sanitizeTextQuery(query));
             Query q = Query.query(
                     Criteria.where("tenantId").is(ctx.tenantId())
                             .and("publishedAt").ne(null)
             ).addCriteria(text);
             return mongo.find(q, KnowledgeBaseArticle.class);
         });
+    }
+
+    /**
+     * Security fix BE-17: strip {@code $text} operator syntax — double quotes (exact-phrase) and
+     * leading {@code -} on each token (term-exclusion) — leaving plain search terms. Null/blank in →
+     * "" out (TextCriteria treats an empty string as match-all within the other criteria).
+     */
+    static String sanitizeTextQuery(String query) {
+        if (query == null || query.isBlank()) {
+            return "";
+        }
+        String noQuotes = query.replace("\"", " ");
+        StringBuilder sb = new StringBuilder();
+        for (String token : noQuotes.trim().split("\\s+")) {
+            String cleaned = token;
+            // Drop any leading '-' (and '+') operator prefixes on the token.
+            while (!cleaned.isEmpty() && (cleaned.charAt(0) == '-' || cleaned.charAt(0) == '+')) {
+                cleaned = cleaned.substring(1);
+            }
+            if (!cleaned.isEmpty()) {
+                if (sb.length() > 0) {
+                    sb.append(' ');
+                }
+                sb.append(cleaned);
+            }
+        }
+        return sb.toString();
     }
 
     public Mono<KnowledgeBaseArticle> findPublishedBySlug(UUID tenantId, String slug) {
