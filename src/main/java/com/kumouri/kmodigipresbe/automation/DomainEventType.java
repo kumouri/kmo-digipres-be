@@ -598,6 +598,27 @@ public final class DomainEventType {
     public static final String STYLE_CONSULT_REQUESTED = "styleConsult.requested";
     public static final String STYLE_CONSULT_BOOKED    = "styleConsult.booked";
 
+    // T11 (Home "QuoteCloser", band 4470-4479) — the first Wave-4 COMPOSITION tool: it composes the
+    // shipped T8 QuoteNow quoting + E1 Nurture + E3 review-request. All three are advisory (RuleEngine /
+    // webhook fan-out) — they do NOT drive any core mutation; the enroll, the cadence stop, and the
+    // review-request create are synchronous + explicit inside the quoting+nurture-gated QuoteCloser glue
+    // (the default-OFF QuoteCloserEnrollmentJob + the QuoteWonSubscriber), gated by explicit-boolean probes
+    // over the E1 tenant_campaign_contact_idx + the E3 tenant_subject_contact_idx unique indexes (never
+    // switchIfEmpty). Emitted only when BOTH the `quoting` AND `nurture` modules are on, for a home-services
+    // tenant. The actual sends are the E1 NurtureRunner + the E3 ReviewRequestSenderJob (both default-OFF).
+    // QUOTE_CLOSER_ENROLLED: emitted by QuoteCloserEnrollmentJob after a NEW (un-accepted) quote sitting past
+    //   the window auto-enrolls its contact in the QuoteCloser nurture cadence. Payload:
+    //   {quoteRequestId, contactId, campaignId}.
+    // QUOTE_CLOSER_RECOVERED: emitted by QuoteWonSubscriber when a QUOTE_ACCEPTED exits a still-active
+    //   QuoteCloser enrollment (a quote won while/after a nudge — the recovery). Payload:
+    //   {quoteRequestId, contactId, campaignId}.
+    // QUOTE_CLOSER_REVIEW_REQUESTED: emitted by QuoteWonSubscriber after a won quote yields a fresh PENDING
+    //   E3 ReviewRequest (the won-job review leg, delivered by the default-OFF sender). Payload:
+    //   {quoteRequestId, contactId, reviewRequestId}.
+    public static final String QUOTE_CLOSER_ENROLLED         = "quoteCloser.enrolled";
+    public static final String QUOTE_CLOSER_RECOVERED        = "quoteCloser.recovered";
+    public static final String QUOTE_CLOSER_REVIEW_REQUESTED = "quoteCloser.reviewRequested";
+
     private DomainEventType() {
     }
 }

@@ -1275,6 +1275,44 @@ import java.util.UUID;
  *       beans). AiVision + the calendar caller are WireMock in ITs (no live Anthropic); no SMS in T10. Going
  *       live needs per-tenant module enablement + an Anthropic vision/text budget; the actual MLS/social/email
  *       posting is out of scope (copy-ready paste-out — separate human actions, never the loop).</li>
+ *   <li>{@code 4470-4479} — <em>Home "QuoteCloser" (T11)</em>: the <strong>first Wave-4 COMPOSITION
+ *       tool</strong> — automated follow-up that <strong>closes un-accepted quotes</strong> (an E1 nurture
+ *       cadence — reminder → financing-nudge → last-call — on a T8 QuoteNow quote that sits {@code NEW}) and
+ *       <strong>requests a review on a won job</strong> (an E3 review-request). It <strong>composes three
+ *       shipped pieces</strong> (T8 quoting + E1 nurture + E3 gbp-reviews) and builds only the triggers/glue
+ *       in {@code module/quoting/closer/}. <strong>What each reused piece provides:</strong> T8 the
+ *       un-accepted ({@code NEW}) {@code QuoteRequest} signal + the {@code QUOTE_ACCEPTED} event (the
+ *       UNCHANGED {@code QuoteBookingService}); E1 the cadence + the unique-index explicit-boolean enroll +
+ *       the {@code EXITED} terminal stop + the default-OFF {@code NurtureRunner} that sends the touches +
+ *       the GATE-2 vertical-scoped copy filter; E3 the {@code ReviewRequest} + the default-OFF
+ *       {@code ReviewRequestSenderJob} delivery. <strong>T11's net-new glue is thin:</strong> the default-OFF
+ *       {@code QuoteCloserEnrollmentJob} (ages {@code NEW} quotes past the per-tenant window → explicit-boolean
+ *       enroll into the tenant's QuoteCloser {@code NurtureCampaign} (tagged {@code vertical="home"} ⇒ copy
+ *       sent UNFILTERED — the GATE-2 third-vertical proof); exits enrollments whose quote went non-{@code NEW}),
+ *       the {@code QuoteWonSubscriber} (a {@code QUOTE_ACCEPTED} subscriber — stop the cadence ({@code EXITED})
+ *       + create exactly one E3 {@code ReviewRequest(OTHER, quoteId, contactId)}), and a
+ *       {@code QuoteCloserAnalyticsService}/{@code QuoteCloserController} recovery-funnel read.
+ *       <strong>Both exactly-once seams are explicit-boolean / ledger-first</strong> (the E1
+ *       {@code tenant_campaign_contact_idx} enroll + the E3 {@code tenant_subject_contact_idx} create) — NEVER
+ *       {@code switchIfEmpty(create/enroll/send)}. <strong>New codes:</strong> {@code 4470} QuoteCloser config
+ *       not found for the tenant (404, read); {@code 4471} invalid QuoteCloser config — {@code campaignId} does
+ *       not resolve to one of the tenant's {@code NurtureCampaign}s (400). {@code 4472-4479} RESERVED. Reused
+ *       (NOT re-allocated): {@code 1130}/{@code 1132} module gate (via {@code requireEnabled("quoting")} AND
+ *       {@code requireEnabled("nurture")}), {@code 1800} RoleGuard ADMIN (the config surface), + the E1 enroll
+ *       / E3 review-request codes on the reused paths. <strong>Module gate</strong> (the T3 both-module
+ *       posture): {@code @ConditionalOnProperty(kmosf.modules.quoting)} + {@code @ConditionalOnBean(
+ *       NurtureMessageComposer)} on {@code QuoteCloserAutoConfiguration} (default-OFF; either module OFF ⇒
+ *       absent) + the per-tenant both-module {@code requireEnabled} in the controllers; the enrollment job is
+ *       additionally default-OFF on {@code kmosf.modules.quote-closer-job}. <strong>Reused cores stay
+ *       empty-diff vs {@code main}</strong> ({@code QuoteBookingService}, {@code QuoteRequest}/repo,
+ *       {@code NurtureRunner}/{@code NurtureMessageComposer}/{@code NurtureSegmentationService}/
+ *       {@code NurtureReplyService}, {@code ReviewRequestService}/{@code ReviewRequest}/repo/
+ *       {@code ReviewRequestSenderJob}, {@code TwilioSmsService}); the {@code closer} package is strictly
+ *       additive (+ the {@code DomainEventType} T11 block, this Javadoc, the {@code AutoConfiguration.imports}
+ *       line). No live external in the loop — the enroll + the review-request never send; the senders (the
+ *       E1 runner + the E3 sender) are default-OFF and mocked/OFF in tests. Going live needs per-tenant module
+ *       enablement (quoting + nurture + gbp-reviews) + A2P 10DLC for the cadence + review-request caller-facing
+ *       SMS (separate human actions, never the loop).</li>
  *   <li>{@code 4700-4719} — <em>Security hardening (PR B — BE-08/09/16, BE-10)</em>. A clean band above
  *       the flagship blocks for the cross-cutting security fixes. {@code 4700} outbound request blocked by
  *       the shared {@link com.kumouri.kmodigipresbe.security.OutboundUrlGuard} (400 — the URL is non-https,
