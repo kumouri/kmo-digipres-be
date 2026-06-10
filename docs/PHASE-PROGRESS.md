@@ -1,75 +1,80 @@
-# PHASE-PROGRESS — T6 Salon "ReviewBoost" (BE leg) (`salon-reviewboost`)
+# PHASE-PROGRESS — T7 Health "RescheduleFlow" (BE leg) (`health-rescheduleflow`)
 
-> Fresh ledger for this branch (off `main` @ `b345d27`). Replaces the prior `home-instant-callback`
-> (T5) ledger that occupied this path — that work is already on `main`. Tracks per-sub-phase progress
+> Fresh ledger for this branch (off `main` @ `053e465`). Replaces the prior `salon-reviewboost`
+> (T6) ledger that occupied this path — that work is already on `main`. Tracks per-sub-phase progress
 > + validation status so a resume-after-crash reconstructs the frontier from git + this file, never
 > agent memory.
 
-Detail plan: `~/.claude/plans/salon-reviewboost.md`. Error band **4410–4419** (reuse E3's 4340-4349;
-mint only the genuinely-new). Deploys engine **E3** (Review engine: requests + insights, PR #104) to the
-salon vertical. Module gate: `kmosf.modules.chairfill` (the salon flagship's key) + `@ConditionalOnBean
-(SalonBookingService)` (salon-spa loaded) + per-tenant `requireEnabled(chairfill)` & `requireEnabled
-(salon-spa)`. Wave-2 vertical AI tool over E1–E4.
+Detail plan: `~/.claude/plans/health-rescheduleflow.md`. Error band **4420–4429** (`GlobalErrorHandler`
+Javadoc `<li>` after T6's reserved 4410-4419). Deploys engine **E4** (Gap-Fill Waitlist engine, PR #106)
+to the **frontdesk (health) vertical, PHI-free** — E4's first + only consumer (the engine was built FOR
+this). Module gate: requires `kmosf.modules.frontdesk` AND `kmosf.modules.waitlist` (compose conditions +
+per-tenant `requireEnabled` both — the T2/T4 pattern). **The last Wave-2 tool before GATE 2.**
 
-## Framing (investigation result — what already ships)
-Most of ReviewBoost ALREADY SHIPS via E3 + ChairFill (CF-1..CF-5). T6's genuine net-new is a
-**per-stylist insights LIST** read surface + a demo seed.
+## Framing (investigation result)
 
-- **Per-stylist attribution already works** — `SalonBookingService.complete()` emits `BOOKING_COMPLETED`
-  carrying `staffMemberId`; `ReviewRequestService.handleBookingCompleted` maps it to
-  `ReviewSubjectType.STAFF` + `staffMemberId`. T6 asserts it, does not change it.
-- **No-incentive review-request SMS** — `ReviewRequestSenderJob` (default-OFF; per-tenant `reviewLink`).
-- **Sentiment triage + negative manager alert** — `ReviewSentimentService` + `ReviewNegativeAlertService`.
-- **1-click AI reply drafts + approval queue** — `GbpReplyDraftService` + CF-4 `SalonReviewReplyService`
-  + `GbpReviewReplyAdminController`.
-- **Per-(subjectType,subjectId) insights** — `ReviewInsightsService` + `ReviewInsightsController`.
+E4 already ships the vertical-agnostic engine + the `SlotMaterializer` SPI (consumer creates its real
+domain booking on claim). T7 is the health consumer:
+1. A frontdesk `SlotMaterializer` (`key="health-appt"`) creates the real PHI-free `Appointment` on a winning claim.
+2. On a frontdesk `Appointment` CANCELLED, build a `WaitlistSlot` + call `GapFillEngine.gapFill`.
+3. Patients join the health waitlist (logistics-only prefs) — reuse the generic `WaitlistEntry`.
+4. Inbound YES → `WaitlistClaimEngine.claim(...)` via an E2 responder `IntentHandler` (the cleanest reuse).
+5. Fill-rate analytics + a read endpoint.
 
-The shipped insights API answers one subject at a time (or whole-tenant). The salon dashboard needs every
-stylist's funnel side-by-side — that LIST is T6's only real net-new BE code.
+### Cancel signal — investigation result
+**There is NO `cancel()` on `AppointmentService`** (status moves via `update(id, patch)` with
+`patch.status=CANCELLED`) and **NO `APPOINTMENT_CANCELLED` `DomainEventType`** (only `APPOINTMENT_RISK_SCORED`).
+**Decision: ADD it additively** — a new `DomainEventType.APPOINTMENT_CANCELLED` constant + emit from
+`AppointmentService.update()` ONLY on a real `SCHEDULED|CONFIRMED → CANCELLED` transition (the additive
+`SalonBookingService.cancel()` emit precedent). `AppointmentService` gains a `DomainEventPublisher` dep +
+the minimal emit; otherwise empty-diff; all frontdesk ITs stay green.
+
+### Inbound YES — investigation result
+**Decision: an E2 responder `IntentHandler`** (`FrontDeskNurtureReplyHandler`/`LogisticsIntentHandler`
+precedent) so `InboundSmsService` + the E2 router cores stay empty-diff. Frontdesk-only tenant → chairfill
+OFF → `InboundSmsService.claimService==null` → a YES falls through to the E2 `intentRouter` → the T7 handler
+→ `WaitlistClaimEngine.claim`. STOP/opt-out honored upstream + the router's `isOptedOut` gate.
 
 ## Sub-phases
 
 | # | Sub-phase | Status | Commit | Validation |
 |---|-----------|--------|--------|------------|
-| T6.1 | Detail plan + this ledger | DONE | ebc295e | n/a (docs) |
-| T6.2 | `module/chairfill/reviewboost/` — DTOs + `SalonReviewInsightsService` (reuses `ReviewInsightsService` + `StaffMemberRepository`) + `ReviewBoostController` + `ReviewBoostAutoConfiguration`; register in AutoConfiguration.imports; app-props doc; `GlobalErrorHandler` 4410-4419 Javadoc | DONE | (this) | compileJava OK |
-| T6.3 | `SalonReviewBoostDemoSeeder` (`@Profile("demo-salon-reviewboost")`) | DONE | (this) | compileJava OK |
-| T6.4 | ITs: `SalonReviewBoostInsightsIT` (5), `SalonReviewBoostConfigIT` (4) | DONE | (this) | 9/9 GREEN (Docker); end-to-end real complete()->engine attribution proven |
-| T6.5 | openapi regen + CLAUDE.md T6 entry + ledger finalize | DONE | (this) | openapi no-diff (default-OFF; committed cp1252 spec unchanged, verifyOpenApi green) |
+| T7.1 | Detail plan + this ledger | DONE | 0e821a3 | n/a (docs) |
+| T7.2 | `DomainEventType.APPOINTMENT_CANCELLED` (+ T7 advisory events) + minimal additive `AppointmentService` cancel-event emit | DONE | (T7.2 commit) | compileJava OK |
+| T7.3 | `module/frontdesk/reschedule/` package — `FrontDeskSlotMaterializer`, `RescheduleGapFillSubscriber`, `RescheduleWaitlistIntentHandler`, `RescheduleAnalyticsService`/`RescheduleFillLog`/repo/`RescheduleFillStats`, `RescheduleController`, `RescheduleFlowAutoConfiguration`; `AutoConfiguration.imports` line; `GlobalErrorHandler` 4420-4429 Javadoc; app-props doc | DONE | (this) | compileJava OK |
+| T7.4 | `RescheduleFlowDemoSeeder` (`@Profile("demo-health-reschedule")`) | DONE | (T7.4 commit) | compileJava OK |
+| T7.5 | ITs (21, all green) + regression + openapi regen (no-diff) + CLAUDE.md T7 entry + ledger finalize | DONE | (this) | 21/21 T7 green; regression green; empty-diff verified |
+
+## Validation results (T7.5)
+
+- **T7 ITs (21/21 GREEN, Docker/Testcontainers):** `RescheduleGapFillIT` (6), `RescheduleWaitlistInboundYesIT`
+  (2), `RescheduleFlowModuleGateIT` (3 nested), `RescheduleFlowPhiFreeIT` (2), `RescheduleControllerIT` (5),
+  `AppointmentCancelEmitIT` (3).
+- **Regression (all GREEN):** `module.waitlist.*` (E4 engine — `WaitlistEngineIT` + `WaitlistRankingServiceTest`),
+  `module.chairfill.GapFillWaitlistIT` + `WaitlistBoardIT` (CF-3 — E4-deploy didn't disturb chairfill),
+  `module.frontdesk.*` + `OpenApiEndpointIT` (90 tests, 0 failures — incl. NoShow/voicemail/switchboard/nurture).
+- **openapi:** `verifyOpenApi` → "already matches the generated spec. OK." (default-OFF endpoints not in the
+  spec; `docs/api/openapi.json` unchanged — the flagship-5b/AR/T1-T6 precedent).
+- **Empty-diff verified vs `main` (0 lines each):** `service/waitlist/*`, `model/waitlist/*`,
+  `repository/waitlist/*`, `controller/waitlist/*`, `module/waitlist/*`, `TwilioSmsService`,
+  `InboundSmsService`, `service/responder/*`, `model/responder/*`, `module/chairfill/gapfill/*`,
+  `Appointment`, `AppointmentRepository`, `AppointmentController`. The ONLY additive frontdesk-core edit is
+  `AppointmentService` (+ `DomainEventType.APPOINTMENT_CANCELLED` + the `FrontDeskAutoConfiguration` bean
+  factory passing the publisher).
+- **Reactive invariants:** no `switchIfEmpty(create/send/claim)` in T7 business logic (the lone `switchIfEmpty`
+  is the demo seeder's idempotent `switchIfEmpty(Mono.defer(seedFresh))` — the `SwitchboardDemoSeeder` idiom);
+  the claim is E4's atomic `findAndModify`; no `.block()` in production paths.
+- **Error codes:** 4421 minted (waitlist-join no contactId, 400); 4420 + 4422-4429 RESERVED;
+  `GlobalErrorHandler` Javadoc `<li>` added after T6's 4410-4419.
+
+## Reused-cores empty-diff watchlist (verify `git diff main --stat` at the end)
+`service/waitlist/*` (GapFillEngine, WaitlistClaimEngine, WaitlistRankingService, SlotMaterializer,
+NoOpSlotMaterializer, WaitlistOfferExpiryService), `model/waitlist/*`, `repository/waitlist/*`,
+`controller/waitlist/WaitlistEngineController`, `module/waitlist/WaitlistAutoConfiguration`,
+`integration/twilio/{TwilioSmsService,InboundSmsService}`, `service/responder/*`, `model/responder/*`,
+`module/chairfill/gapfill/*` (DO NOT TOUCH), `module/frontdesk/model/Appointment`,
+`module/frontdesk/model/AppointmentRepository`, `module/frontdesk/controller/AppointmentController`.
+ONLY additive frontdesk-core edit: `AppointmentService` (cancel-event emit) + `DomainEventType`.
 
 ## Validation log
-- T6.4: `SalonReviewBoostInsightsIT` 5/5 + `SalonReviewBoostConfigIT` 4/4 GREEN (Testcontainers, Docker
-  29.4.3). The headline `completingABooking_createsStylistAttributedReviewRequest_viaTheShippedEngine`
-  drives the REAL `SalonBookingService.complete()` → the unchanged `ReviewRequestService` subscriber →
-  asserts a `ReviewRequest(STAFF, staffMemberId)` — proving per-stylist attribution works end-to-end with
-  zero T6 change to the create path.
-- T6.5 regression (all GREEN, 91 tests / 0 failures / 0 errors): `integration.gbp.*` (E3 —
-  GbpReplyDraftServiceIT 4, GbpReviewPollerIT 2, GbpReviewReplyAdminIT 6, GbpReviewSentimentAlertIT 1,
-  GbpTokenRefreshIT 3, GbpTokenServiceTest 5, ReviewInsightsIT 5, ReviewRequestCreationIT 6,
-  ReviewRequestSenderIT 4, ReviewSentimentServiceIT 3), `module.chairfill.*` (CF — GapFillWaitlistIT 11,
-  NoShowRiskScoringIT 8, OfferExpirySweepIT 3, RiskTieredPreventionIT 5, SalonReviewReplyIT 8,
-  WaitlistBoardIT 6, + the 2 T6 ITs), `OpenApiEndpointIT` 2.
-- Empty-diff verified (`git diff main -- <file>` = 0 lines each): ReviewRequestService,
-  ReviewSentimentService, ReviewNegativeAlertService, ReviewInsightsService, ReviewRequestSenderJob,
-  GbpReplyDraftService, ReviewInsightsController, ReviewInsights, ReviewRequest, SalonBookingService,
-  Booking, StaffMember, SalonReviewReplyService, ChairFillAutoConfiguration.
-- openapi: ReviewBoost endpoints are default-OFF → absent from the spec (the flagship-5b/AR/T1-T5
-  precedent). The committed cp1252 `docs/api/openapi.json` is unchanged (the only test-gen delta was a
-  cp1252→UTF-8 em-dash re-encoding, reverted); `verifyOpenApi` green.
-
-## T6 net-new endpoints (FE leg types to these)
-- `GET /api/v1/chairfill/reviewboost/insights` → `Mono<SalonReviewBoardDTO>` (ADMIN)
-  - `SalonReviewBoardDTO(long reviewCount, double averageRating, long positiveCount, long neutralCount,
-    long negativeCount, long unclassifiedCount, long totalRequestsSent, long totalRequestsResponded,
-    double overallResponseRate, List<StylistReviewStatsDTO> stylists)`
-  - `StylistReviewStatsDTO(UUID staffMemberId, String displayName, long requestsSent,
-    long requestsResponded, double responseRate)`
-- `GET /api/v1/chairfill/reviewboost/config` → `Mono<ReviewBoostConfigDTO>` (ADMIN)
-  - `ReviewBoostConfigDTO(boolean reviewLinkConfigured, String reviewLink, boolean senderEnabled,
-    boolean sentimentRefineEnabled, boolean negativeAlertEnabled)`
-
-## Reused cores — MUST stay empty-diff vs `main`
-`ReviewRequestService`, `ReviewSentimentService`, `ReviewNegativeAlertService`, `ReviewInsightsService`,
-`ReviewRequestSenderJob`, `GbpReplyDraftService`, `GbpReviewReplyAdminController`/`Service`,
-`SalonReviewReplyService`, `TwilioSmsService`, `SalonBookingService`, `Booking`, `StaffMember`,
-`ReviewInsightsController`, `ReviewInsights`, `ReviewRequest`(+repo). No seam needed.
+- T7.1: detail plan + ledger committed.

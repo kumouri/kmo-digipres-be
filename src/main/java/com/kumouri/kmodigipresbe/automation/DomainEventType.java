@@ -408,6 +408,18 @@ public final class DomainEventType {
     // {appointmentId, contactId, providerId, riskTier, riskScore, source}.
     public static final String APPOINTMENT_RISK_SCORED = "appointment.riskScored";
 
+    // FrontDesk IQ — emitted by AppointmentService.update() ONLY on a real SCHEDULED|CONFIRMED ->
+    // CANCELLED transition (the additive SalonBookingService.cancel() emit precedent). Advisory only
+    // (RuleEngine / webhook fan-out) — it does NOT drive any core mutation here; it is the reliable
+    // freed-slot trigger the T7 (Health "RescheduleFlow", band 4420-4429) RescheduleGapFillSubscriber
+    // consumes to build a WaitlistSlot + call the E4 GapFillEngine.gapFill (gap-fill the cancelled slot
+    // from the waitlist). Purely advisory + NMM-irrelevant: no subscriber runs for a tenant without BOTH
+    // the `frontdesk` AND `waitlist` modules, so this is a harmless no-op there. The pre-existing
+    // already-terminal / no-status-change update paths emit nothing, exactly as before. PHI-free payload
+    // (logistics only — no clinical field exists on Appointment to leak, fence F1):
+    // {appointmentId, contactId, providerId, scheduledStart, scheduledEnd, visitTypeBucket}.
+    public static final String APPOINTMENT_CANCELLED = "appointment.cancelled";
+
     // E1 (Nurture / Cadence Engine) — the keystone shared reactivation engine. All four are advisory
     // (RuleEngine / webhook fan-out) — they do NOT drive any core mutation; segmentation/enroll, the
     // per-step ledger-insert-FIRST send, and the reply→exit→book are all synchronous + explicit in the
@@ -525,6 +537,21 @@ public final class DomainEventType {
     // responder modules are on, for a HOT-tier-excluded (WARM/COLD) concierge-sourced realestate lead that
     // got enrolled. Payload: {contactId, dealId, tier, campaignId, enrolled}.
     public static final String CONCIERGE_TIER_ROUTED = "realestate.conciergeTierRouted";
+
+    // T7 (Health "RescheduleFlow", band 4420-4429) — the health deployment of the E4 Gap-Fill Waitlist
+    // engine, PHI-free. These are T7's own analytics breadcrumbs; the E4 engine's own
+    // WAITLIST_ENGINE_OFFER_SENT / WAITLIST_ENGINE_SLOT_CLAIMED (above) still fire for the offer + claim.
+    // All advisory (RuleEngine / webhook fan-out) — they do NOT drive any core mutation. Emitted only when
+    // BOTH the `frontdesk` AND `waitlist` modules are on, for a frontdesk/health tenant. PHI-free: no
+    // clinical field exists to leak (fence F1) and these carry logistics only.
+    // RESCHEDULE_GAP_FILL_STARTED: emitted by RescheduleGapFillSubscriber after a cancelled health
+    //   Appointment kicks off a gap-fill (the freed-slot trigger fired). Payload:
+    //   {appointmentId, slotKey, providerId, offersSent}.
+    // RESCHEDULE_SLOT_FILLED: emitted by FrontDeskSlotMaterializer after a winning YES materialized a real
+    //   PHI-free replacement Appointment for the freed slot. Payload:
+    //   {slotKey, appointmentId, contactId}.
+    public static final String RESCHEDULE_GAP_FILL_STARTED = "reschedule.gapFillStarted";
+    public static final String RESCHEDULE_SLOT_FILLED      = "reschedule.slotFilled";
 
     private DomainEventType() {
     }

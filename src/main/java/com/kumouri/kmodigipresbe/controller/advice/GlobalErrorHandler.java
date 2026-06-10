@@ -1105,6 +1105,42 @@ import java.util.UUID;
  *       demo seed); the actual sends remain E3's default-OFF jobs/services. Going live needs A2P 10DLC for
  *       the no-incentive request SMS + live GBP OAuth for posting reply drafts (separate human actions —
  *       never the loop).</li>
+ *   <li>{@code 4420-4429} — <em>Health "RescheduleFlow" (T7)</em>: deploys the shipped E4 Gap-Fill Waitlist
+ *       engine (PR #106) to the frontdesk (health) vertical, <strong>PHI-free</strong> — E4's first + only
+ *       consumer ({@code module/frontdesk/reschedule}). On a frontdesk {@code Appointment} cancel, a
+ *       {@code RescheduleGapFillSubscriber} (an {@code APPOINTMENT_CANCELLED} subscriber — the additive
+ *       {@code AppointmentService.update()} emit on a real SCHEDULED|CONFIRMED -> CANCELLED transition, the
+ *       {@code SalonBookingService.cancel()} precedent) projects the freed slot into a {@code WaitlistSlot}
+ *       ({@code slotType="health-appt"}, {@code slotKey=<appointmentId>}) and calls the <strong>unchanged</strong>
+ *       {@code GapFillEngine.gapFill} (rank → top-N time-boxed offers → generic PHI-free SMS). An inbound YES
+ *       claims the slot through the <strong>unchanged</strong> {@code WaitlistClaimEngine.claim} (the atomic
+ *       first-YES findAndModify — exactly-one-winner), wired via an E2 responder {@code IntentHandler}
+ *       ({@code RescheduleWaitlistIntentHandler}, vertical {@code health-reschedule}) so {@code InboundSmsService}
+ *       + the E2 router stay byte-equivalent; the winner's {@code FrontDeskSlotMaterializer} (a
+ *       {@code SlotMaterializer} SPI bean auto-discovered by the engine) creates the real
+ *       <strong>PHI-free</strong> replacement {@code Appointment} (logistics only — there is no clinical field
+ *       on {@code Appointment} to set, fence F1; offer/confirm SMS is generic, never a procedure/provider).
+ *       A PHI-free fill-funnel ledger ({@code RescheduleFillLog} — only {@code tenantId/event/occurredAt})
+ *       backs {@code GET /frontdesk/reschedule/fill-stats}. <strong>New code:</strong> {@code 4421} (the
+ *       waitlist-join body has no contactId, 400) is the lone minted HTTP code; the rest of the flow reuses
+ *       the engine's codes + the module-gate {@code 1130}/{@code 1132} (both {@code frontdesk} AND
+ *       {@code waitlist} per-tenant via {@code TenantModuleRegistry.requireEnabled}) + {@code 1800} (RoleGuard
+ *       ADMIN). {@code 4420} + {@code 4422-4429} RESERVED for RescheduleFlow growth. Module gate:
+ *       {@code @ConditionalOnProperty(kmosf.modules.frontdesk)} + {@code @ConditionalOnBean(WaitlistClaimEngine)}
+ *       (the T2/T4 both-module posture — waitlist must be loaded). <strong>The reused cores
+ *       ({@code GapFillEngine}, {@code WaitlistClaimEngine}, {@code WaitlistRankingService},
+ *       {@code SlotMaterializer}/{@code NoOpSlotMaterializer}, {@code WaitlistOfferExpiryService}, the
+ *       {@code model/waitlist/*}, the {@code WaitlistEngine*Repository}s, {@code WaitlistEngineController},
+ *       {@code WaitlistAutoConfiguration}, {@code TwilioSmsService}, the E2 responder cores including
+ *       {@code InboundSmsService}/{@code InboundIntentRouter}, the chairfill CF-3 {@code module/chairfill/gapfill/*},
+ *       and {@code Appointment}/{@code AppointmentRepository}/{@code AppointmentController}) stay empty-diff vs
+ *       {@code main}</strong>; the ONLY additive frontdesk-core edit is the minimal {@code AppointmentService}
+ *       cancel-event emit (+ the {@code DomainEventType.APPOINTMENT_CANCELLED} constant). The T7 package is
+ *       otherwise strictly additive. Twilio is {@code @MockitoBean}'d / the AI classifier is WireMock'd; no
+ *       live external in the loop. Going live needs A2P 10DLC for the patient-facing offer/confirm SMS; a live
+ *       RescheduleFlow on real patient appointment data implies PHI/BA status — the separately-priced,
+ *       BAA-gated compliance tier applies (demo on fictional data only) — separate human steps, never the
+ *       loop.</li>
  * </ul>
  */
 @Slf4j

@@ -1,14 +1,19 @@
 package com.kumouri.kmodigipresbe.module.frontdesk.service;
 
+import com.kumouri.kmodigipresbe.automation.DomainEvent;
+import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
+import com.kumouri.kmodigipresbe.automation.DomainEventType;
 import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
 import com.kumouri.kmodigipresbe.module.frontdesk.model.Appointment;
 import com.kumouri.kmodigipresbe.module.frontdesk.model.AppointmentRepository;
+import com.kumouri.kmodigipresbe.module.frontdesk.model.AppointmentStatus;
 import com.kumouri.kmodigipresbe.module.frontdesk.model.VisitTypeBucket;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
-import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -23,11 +28,26 @@ import java.util.UUID;
  * <p><strong>PHI boundary (fence F1):</strong> the only fields accepted are scheduling logistics. There is
  * no clinical field on {@link Appointment} to set, so a caller cannot smuggle PHI in through create/update.
  * {@code visitTypeBucket} is normalized through the closed {@link VisitTypeBucket} enum (no free text).
+ *
+ * <p><strong>T7 (Health "RescheduleFlow") additive cancel-event emit (the only T7 frontdesk-core edit):</strong>
+ * there is no dedicated {@code cancel()} method — a cancel happens through {@link #update} with
+ * {@code status=CANCELLED}. So {@code update} emits {@link DomainEventType#APPOINTMENT_CANCELLED} ONLY on a
+ * real {@code SCHEDULED|CONFIRMED -> CANCELLED} transition (the additive {@code SalonBookingService.cancel()}
+ * emit precedent — a no-op when the status did not actually move to CANCELLED). The emit is the reliable
+ * freed-slot trigger for the T7 {@code RescheduleGapFillSubscriber} (gap-fill the freed slot from the
+ * waitlist). It is purely advisory + PHI-free (logistics-only payload — no clinical field exists, fence F1)
+ * and a harmless no-op for a tenant without the T7 modules (no subscriber runs). Every other {@code update}
+ * outcome is byte-identical to before (no event).
  */
-@RequiredArgsConstructor
 public class AppointmentService {
 
     private final AppointmentRepository appointments;
+    private final DomainEventPublisher events;
+
+    public AppointmentService(AppointmentRepository appointments, DomainEventPublisher events) {
+        this.appointments = appointments;
+        this.events = events;
+    }
 
     /**
      * Creates an appointment scoped to the caller's tenant. Server-side validation: a {@code contactId} and
@@ -67,6 +87,7 @@ public class AppointmentService {
      */
     public Mono<Appointment> update(UUID id, Appointment patch) {
         return get(id).flatMap(existing -> {
+            AppointmentStatus priorStatus = existing.getStatus();
             Appointment updated = existing.toBuilder()
                     .contactId(patch.getContactId() != null ? patch.getContactId() : existing.getContactId())
                     .providerId(patch.getProviderId() != null ? patch.getProviderId() : existing.getProviderId())
@@ -83,8 +104,37 @@ public class AppointmentService {
                     .calComBookingUid(patch.getCalComBookingUid() != null
                             ? patch.getCalComBookingUid() : existing.getCalComBookingUid())
                     .build();
-            return appointments.save(updated);
+            return appointments.save(updated)
+                    .doOnNext(saved -> maybeEmitCancelled(priorStatus, saved));
         });
+    }
+
+    /**
+     * T7 additive emit: fire {@link DomainEventType#APPOINTMENT_CANCELLED} ONLY on a real
+     * {@code SCHEDULED|CONFIRMED -> CANCELLED} transition (the {@code SalonBookingService.cancel()}
+     * precedent). A status that was already CANCELLED / terminal, or an update that did not move to
+     * CANCELLED, emits nothing — byte-identical to before T7. PHI-free payload (logistics only — there is
+     * no clinical field on {@link Appointment} to leak, fence F1).
+     */
+    private void maybeEmitCancelled(AppointmentStatus priorStatus, Appointment saved) {
+        boolean transitionedToCancelled = saved.getStatus() == AppointmentStatus.CANCELLED
+                && (priorStatus == AppointmentStatus.SCHEDULED
+                        || priorStatus == AppointmentStatus.CONFIRMED);
+        if (!transitionedToCancelled) {
+            return;
+        }
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("appointmentId", saved.getId());
+        payload.put("contactId", saved.getContactId());
+        payload.put("providerId", saved.getProviderId());
+        payload.put("scheduledStart", saved.getScheduledStart());
+        payload.put("scheduledEnd", saved.getScheduledEnd());
+        payload.put("visitTypeBucket", saved.getVisitTypeBucket());
+        events.publish(DomainEvent.of(
+                DomainEventType.APPOINTMENT_CANCELLED,
+                saved.getTenantId(),
+                saved.getId(),
+                payload));
     }
 
     private Mono<Void> validate(Appointment appointment) {
