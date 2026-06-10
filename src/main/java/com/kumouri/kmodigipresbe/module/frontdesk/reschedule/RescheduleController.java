@@ -23,6 +23,12 @@ import reactor.core.publisher.Mono;
 
 import java.time.Instant;
 import java.util.UUID;
+// NOTE: this controller depends ONLY on always-present beans (the WaitlistEngineEntryRepository +
+// RescheduleFillLogRepository Spring Data repos + TenantModuleRegistry) — never the both-module-gated
+// RescheduleAnalyticsService. That is deliberate: the controller is component-scanned + gated on the
+// frontdesk property alone, so when frontdesk is ON but waitlist is OFF (no RescheduleFlowAutoConfiguration
+// beans) the controller still loads and the per-tenant requireEnabled(waitlist) returns 1132 at request
+// time (the SwitchboardController posture — depend only on always-present repos, gate per-request).
 
 /**
  * T7 (Health "RescheduleFlow") — the admin surface for the health waitlist + the fill-funnel analytics. The
@@ -65,7 +71,7 @@ import java.util.UUID;
 public class RescheduleController {
 
     private final WaitlistEngineEntryRepository entries;
-    private final RescheduleAnalyticsService analytics;
+    private final RescheduleFillLogRepository fillLogs;
     private final TenantModuleRegistry modules;
 
     /**
@@ -108,11 +114,25 @@ public class RescheduleController {
                         .filter(e -> FrontDeskSlotMaterializer.SLOT_TYPE.equals(e.getSlotType()))));
     }
 
-    /** The PHI-free fill-funnel analytics (cancellations → offers → claims → filled + the fill rate). */
+    /**
+     * The PHI-free fill-funnel analytics (cancellations → offers → claims → filled + the fill rate).
+     * Computed directly off the always-present {@link RescheduleFillLogRepository} (the
+     * {@code SwitchboardController.deflectionStats} pattern) so the controller carries no both-module-gated
+     * dependency.
+     */
     @GetMapping("/fill-stats")
     public Mono<RescheduleFillStats> fillStats() {
         return guard().then(TenantContextHolder.required())
-                .flatMap(ctx -> analytics.stats(ctx.tenantId()));
+                .flatMap(ctx -> Mono.zip(
+                                fillLogs.countByTenantIdAndEvent(ctx.tenantId(),
+                                        RescheduleFillEvent.CANCELLATION).defaultIfEmpty(0L),
+                                fillLogs.countByTenantIdAndEvent(ctx.tenantId(),
+                                        RescheduleFillEvent.OFFER).defaultIfEmpty(0L),
+                                fillLogs.countByTenantIdAndEvent(ctx.tenantId(),
+                                        RescheduleFillEvent.CLAIM).defaultIfEmpty(0L),
+                                fillLogs.countByTenantIdAndEvent(ctx.tenantId(),
+                                        RescheduleFillEvent.FILLED).defaultIfEmpty(0L))
+                        .map(t -> RescheduleFillStats.of(t.getT1(), t.getT2(), t.getT3(), t.getT4())));
     }
 
     /** Both modules (frontdesk AND waitlist) loaded + enabled for the tenant, then ADMIN. */
