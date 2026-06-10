@@ -1,7 +1,6 @@
 package com.kumouri.kmodigipresbe.module.quoting.controller;
 
 import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
-import com.kumouri.kmodigipresbe.model.idempotency.IdempotentRoute;
 import com.kumouri.kmodigipresbe.module.quoting.controller.dto.QuoteResponse;
 import com.kumouri.kmodigipresbe.module.quoting.service.QuoteBookingService;
 import com.kumouri.kmodigipresbe.module.quoting.service.QuoteIntakeService;
@@ -30,10 +29,14 @@ import java.util.UUID;
  * {@link QuoteBookingService#accept} runs the booking under the synthetic widget context. So the
  * homeowner can only accept a quote in the tenant their token was issued for.
  *
- * <h2>Idempotent</h2>
- * {@code @IdempotentRoute} (replays the same response for a repeated {@code Idempotency-Key}); the
- * booking-service accept is itself explicit-boolean idempotent (a re-accept re-confirms with no second
- * SMS). {@code 4435} if the quote doesn't exist for the tenant; {@code 4436} if it's DECLINED.
+ * <h2>Idempotent (service-level — NOT {@code @IdempotentRoute})</h2>
+ * This is a <strong>public token route</strong>: it carries no JWT, so the {@code TenantContext} is set
+ * by this handler from the token, AFTER the {@code IdempotencyWebFilter} runs. That filter does
+ * {@code TenantContextHolder.required()} up front, so {@code @IdempotentRoute} here would fail before the
+ * handler ever resolves the tenant (the StyleConsult accept hit + documents the same trap). Idempotency
+ * is therefore the booking-service's own explicit-boolean guard: a re-accept re-confirms the existing
+ * booking with no second SMS (proven by {@code QuoteAcceptIT}). {@code 4435} if the quote doesn't exist
+ * for the tenant; {@code 4436} if it's DECLINED.
  *
  * <h2>Module gate</h2>
  * {@code @ConditionalOnProperty(prefix="kmosf.modules.quoting", name="enabled")} — default OFF; this
@@ -53,7 +56,6 @@ public class QuoteAcceptController {
     }
 
     @PostMapping("/{token}/quotes/{quoteId}/accept")
-    @IdempotentRoute
     public Mono<QuoteResponse> accept(@PathVariable String token, @PathVariable UUID quoteId) {
         return Mono.fromCallable(() -> tokens.verify(token))
                 .flatMap(claims -> {
