@@ -1235,6 +1235,46 @@ import java.util.UUID;
  *       AiVision is WireMock + Twilio is {@code @MockitoBean}'d in ITs (no live send); no live Cal.com in
  *       the loop. Going live needs A2P 10DLC for the booking-link/QR SMS + an optional Cal.com OAuth for
  *       a live booking link (separate human actions — never the loop).</li>
+ *   <li>{@code 4460-4469} — <em>Real Estate "Listing Prep Studio" (T10)</em>: the <strong>last
+ *       vision-COMPOSITION flagship</strong> — an agent's listing photos → a cohesive prep pack: a
+ *       Fair-Housing-safe MLS description + a <strong>4-week dated social calendar</strong> + an email
+ *       campaign, in a draft → approve queue (NEVER auto-published). New {@code module/realestate/listingprep/}
+ *       under the shipped {@code realestate} flagship module key. <strong>Most already ships via RE-4
+ *       Marketing Studio</strong> ({@code ListingMarketingService}/{@code MarketingGenerationService}/
+ *       {@code FairHousingLint}/{@code AiVisionService}) — photo intake, vision feature/condition extraction,
+ *       MLS description + social captions + email, the Fair-Housing lint, and the draft→approve posture; the
+ *       listing already feeds the Midnight Responder/concierge via the RAG path. <strong>T10's genuine
+ *       net-new</strong> is (1) the {@code SocialCalendarGenerationService} 4-week <em>dated, scheduled</em>
+ *       calendar (vs RE-4's ad-hoc per-channel captions) and (2) packaging description + calendar + email into
+ *       one {@code ListingPrepPack} with one lifecycle ({@code ListingPrepService}). <strong>Fair-Housing is
+ *       mandatory on ALL generated copy:</strong> the {@code FairHousingLint} runs over the description, every
+ *       calendar post, and the email; a flagged <em>calendar post</em> is <strong>held + safe-substituted</strong>
+ *       ({@code fairHousingSafe=false}, {@code calendarHeldCount++}) so a non-compliant post is <strong>never
+ *       emitted</strong>; a flagged description/email is surfaced for the agent (the RE-4 review posture).
+ *       <strong>New codes:</strong> {@code 4460} prep pack not found / not owned (404, tenant-scoped by-id,
+ *       the RE-1 {@code 4253} not-found posture); {@code 4461} prep pack not DRAFTED — cannot approve/skip
+ *       (409, explicit-boolean, the RE-4 same-status guard); {@code 4462} no listing photos to caption
+ *       (advisory log — text-only generation proceeds, never thrown, the RE-4 {@code 4266} analogue);
+ *       {@code 4463} prep generation degraded/blank — a Claude budget/upstream/parse failure (the pack is
+ *       saved DRAFTED with {@code generationDegraded=true}, never thrown, the RE-4 {@code 4268} analogue);
+ *       {@code 4464-4469} RESERVED for T10 growth. Reused (NOT re-allocated): {@code 4253} listing not found /
+ *       not owned (the reused RE-1 {@code ListingService} code, for the listing load); {@code 1200-1203} AI
+ *       budget/upstream/missing-key (via {@code AiVisionService} + the new {@code SocialCalendarGenerationService});
+ *       {@code 1310}/{@code 1311} file storage (reading the listing-photo bytes back); {@code 1130}/{@code 1132}
+ *       module gate (via {@code TenantModuleRegistry.requireEnabled("realestate")}); {@code 1800} RoleGuard
+ *       STAFF. <strong>No photo-upload endpoint</strong> — photos are uploaded via the shipped RE-4
+ *       {@code POST /realestate/listings/{listingId}/marketing/photos}; the pack reads the same
+ *       {@code ListingPhoto}s (so no {@code getMultipartData} in T10). <strong>No {@code @IdempotentRoute}</strong>
+ *       (generate produces a fresh DRAFTED artifact — the RE-4 generate posture). Module gate:
+ *       {@code @ConditionalOnProperty(kmosf.modules.realestate)} on {@code ListingPrepController} (absent from
+ *       the spec when off) + per-tenant {@code requireEnabled("realestate")} + STAFF {@code RoleGuard}.
+ *       <strong>Reused cores stay empty-diff vs {@code main}</strong> ({@code ListingMarketingService},
+ *       {@code MarketingGenerationService}, {@code FairHousingLint}, {@code AiVisionService}, {@code Listing},
+ *       {@code ListingPhoto}, {@code ListingMarketingDraft}); the {@code listingprep} package is strictly
+ *       additive (+ the {@code DomainEventType} T10 block, this Javadoc, the two {@code RealEstateAutoConfiguration}
+ *       beans). AiVision + the calendar caller are WireMock in ITs (no live Anthropic); no SMS in T10. Going
+ *       live needs per-tenant module enablement + an Anthropic vision/text budget; the actual MLS/social/email
+ *       posting is out of scope (copy-ready paste-out — separate human actions, never the loop).</li>
  *   <li>{@code 4700-4719} — <em>Security hardening (PR B — BE-08/09/16, BE-10)</em>. A clean band above
  *       the flagship blocks for the cross-cutting security fixes. {@code 4700} outbound request blocked by
  *       the shared {@link com.kumouri.kmodigipresbe.security.OutboundUrlGuard} (400 — the URL is non-https,

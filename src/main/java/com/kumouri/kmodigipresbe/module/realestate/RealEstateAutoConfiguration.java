@@ -14,6 +14,9 @@ import com.kumouri.kmodigipresbe.module.realestate.concierge.ListingConciergeSer
 import com.kumouri.kmodigipresbe.module.realestate.concierge.QualificationExtractionService;
 import com.kumouri.kmodigipresbe.module.realestate.concierge.QualificationService;
 import com.kumouri.kmodigipresbe.module.realestate.concierge.ShowingBookingService;
+import com.kumouri.kmodigipresbe.module.realestate.listingprep.ListingPrepService;
+import com.kumouri.kmodigipresbe.module.realestate.listingprep.SocialCalendarGenerationService;
+import com.kumouri.kmodigipresbe.module.realestate.listingprep.model.ListingPrepPackRepository;
 import com.kumouri.kmodigipresbe.module.realestate.marketing.ListingMarketingService;
 import com.kumouri.kmodigipresbe.module.realestate.marketing.MarketingGenerationService;
 import com.kumouri.kmodigipresbe.module.realestate.model.ConciergeConversationRepository;
@@ -284,6 +287,54 @@ public class RealEstateAutoConfiguration {
             @Value("${kmosf.realestate.marketing-vision-model:claude-sonnet-4-5}") String visionModel) {
         return new ListingMarketingService(listings, photos, drafts, attachments, storage, visionService,
                 generationService, events, visionModel);
+    }
+
+    // ── T10 Listing Prep Studio (reuse RE-4 description+email+vision + the net-new 4-week calendar) ──
+
+    /**
+     * T10 — the Anthropic 4-week social-calendar generator (the genuine net-new over RE-4 — a dated,
+     * scheduled post sequence vs RE-4's ad-hoc captions). A sibling of {@link MarketingGenerationService};
+     * hand-built so the {@code @Value}-resolved key/base-url/model land on the factory params. Defaults to
+     * Sonnet ({@code kmosf.realestate.calendar-model}).
+     */
+    @Bean
+    public SocialCalendarGenerationService socialCalendarGenerationService(
+            WebClient.Builder webClientBuilder,
+            IntegrationConnectionRepository connections,
+            AiUsageRecorder usageRecorder,
+            ObjectMapper objectMapper,
+            @Value("${kmosf.ai.anthropic.base-url:https://api.anthropic.com/v1/messages}") String baseUrl,
+            @Value("${kmosf.ai.anthropic.house-key:}") String houseKey,
+            @Value("${kmosf.realestate.calendar-model:claude-sonnet-4-6}") String calendarModel,
+            @Value("${kmosf.realestate.calendar-system-prompt:}") String systemPromptOverride) {
+        return new SocialCalendarGenerationService(webClientBuilder, connections, usageRecorder, objectMapper,
+                baseUrl, houseKey, calendarModel, systemPromptOverride);
+    }
+
+    /**
+     * T10 — the Listing Prep Studio orchestrator: it packages a cohesive prep pack (the reused RE-4 MLS
+     * description + email via the UNCHANGED {@link MarketingGenerationService}, the reused RE-4 per-photo
+     * vision feature read via the UNCHANGED {@link AiVisionService#extract}, and the net-new 4-week dated
+     * social calendar via {@link SocialCalendarGenerationService}), runs the UNCHANGED {@code FairHousingLint}
+     * over every piece (a flagged calendar post is held + safe-substituted), and parks it in a DRAFTED →
+     * approve / skip queue (NEVER auto-published). Vision uses Sonnet by default
+     * ({@code kmosf.realestate.calendar-vision-model}); the calendar targets
+     * {@code kmosf.realestate.calendar-posts-per-week} posts per week.
+     */
+    @Bean
+    public ListingPrepService listingPrepService(
+            ListingRepository listings,
+            ListingPhotoRepository photos,
+            ListingPrepPackRepository packs,
+            FileStorageService storage,
+            AiVisionService visionService,
+            MarketingGenerationService marketingGenerationService,
+            SocialCalendarGenerationService calendarGenerationService,
+            DomainEventPublisher events,
+            @Value("${kmosf.realestate.calendar-vision-model:claude-sonnet-4-5}") String visionModel,
+            @Value("${kmosf.realestate.calendar-posts-per-week:3}") int postsPerWeek) {
+        return new ListingPrepService(listings, photos, packs, storage, visionService,
+                marketingGenerationService, calendarGenerationService, events, visionModel, postsPerWeek);
     }
 
     // ── RE-2 hot-handoff (LEAD_SCORE_UPDATED subscriber) ─────────────────────────
