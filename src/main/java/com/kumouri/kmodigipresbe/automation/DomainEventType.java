@@ -553,6 +553,20 @@ public final class DomainEventType {
     public static final String RESCHEDULE_GAP_FILL_STARTED = "reschedule.gapFillStarted";
     public static final String RESCHEDULE_SLOT_FILLED      = "reschedule.slotFilled";
 
+    // T8 (Home Services "QuoteNow", band 4430-4449) — the homeowner-facing instant quote +
+    // repair-vs-replace advisor (the first vision-COMPOSITION flagship). All advisory (RuleEngine /
+    // webhook fan-out) — they do NOT drive any core mutation; the QuoteRequest persist + the accept
+    // status transition happen synchronously + explicitly inside the quoting-module-gated services.
+    // Emitted only when the `quoting` module is on, for a home-services tenant.
+    // QUOTE_REQUESTED: emitted by QuoteIntakeService after a homeowner submission persists a
+    //   QuoteRequest (the synthesized range + the repair-vs-replace recommendation). Payload:
+    //   {quoteRequestId, contactId (nullable), equipmentType (nullable), recommendation, diagnosticOnly}.
+    // QUOTE_ACCEPTED: emitted by QuoteBookingService after a homeowner accepts + the booking link is
+    //   texted. Payload: {quoteRequestId, contactId (nullable), recommendation (nullable),
+    //   bookingLinkSent}.
+    public static final String QUOTE_REQUESTED = "quote.requested";
+    public static final String QUOTE_ACCEPTED  = "quote.accepted";
+
     private DomainEventType() {
     }
 }
