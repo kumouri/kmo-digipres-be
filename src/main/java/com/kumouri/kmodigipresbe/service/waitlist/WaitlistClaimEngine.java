@@ -148,19 +148,32 @@ public class WaitlistClaimEngine {
         FindAndModifyOptions opts = FindAndModifyOptions.options().returnNew(true).upsert(true);
 
         return mongo.findAndModify(query, update, opts, Map.class, CLAIMS_COLLECTION)
-                .flatMap(doc -> {
-                    Object claimer = doc.get("claimedByContactId");
-                    // Defensive: with the null-guard query a returned doc is always claimed by us, but
-                    // re-check — if somehow claimed by another, treat as lost (never double-materialize).
-                    if (claimer != null && contactId != null
-                            && claimer.toString().equals(contactId.toString())) {
-                        return onWin(tenantId, offer);
-                    }
-                    return onLose(tenantId, offer);
-                })
-                // upsert tried to insert a duplicate _id because the null-guard didn't match (slot already
-                // claimed by someone else) OR a concurrent insert lost the unique-_id race → the loser.
-                .onErrorResume(DuplicateKeyException.class, e -> onLose(tenantId, offer));
+                .flatMap(doc -> resolveClaimer(doc, tenantId, contactId, offer))
+                // A DuplicateKey is NOT automatically a loss. MongoDB's findAndModify+upsert on a unique
+                // _id can surface E11000 to BOTH concurrent racers under tight timing (SERVER-14322) — so
+                // treating it as an unconditional loss let two simultaneous YES BOTH lose, leaving the
+                // freed slot unfilled (won=0; caught by WaitlistEngineIT.concurrentDoubleYes in CI). The
+                // claim doc now exists and its claimedByContactId is the single source of truth: re-read
+                // it and let whoever's id actually landed win — everyone else loses deterministically.
+                .onErrorResume(DuplicateKeyException.class, e ->
+                        mongo.findById(slotKey, Map.class, CLAIMS_COLLECTION)
+                                .flatMap(doc -> resolveClaimer(doc, tenantId, contactId, offer))
+                                .switchIfEmpty(Mono.defer(() -> onLose(tenantId, offer))));
+    }
+
+    /**
+     * Decide the single outcome from the authoritative claim doc: WON iff its {@code claimedByContactId}
+     * is this claimer's id, else LOST. Shared by the findAndModify success path and the DuplicateKey
+     * re-read path so both converge on the doc's one true winner (never a double-win, never a double-lose).
+     */
+    @SuppressWarnings("rawtypes")
+    private Mono<ClaimOutcome> resolveClaimer(Map doc, UUID tenantId, UUID contactId, WaitlistOffer offer) {
+        Object claimer = doc.get("claimedByContactId");
+        if (claimer != null && contactId != null
+                && claimer.toString().equals(contactId.toString())) {
+            return onWin(tenantId, offer);
+        }
+        return onLose(tenantId, offer);
     }
 
     /**
