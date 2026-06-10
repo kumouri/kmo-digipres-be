@@ -514,6 +514,12 @@ class RealEstateShowingBookingIT {
         }
 
         @Override
+        public Mono<Void> delete(UUID tenantId, String sourceType, UUID sourceId) {
+            store.remove(new Key(tenantId, sourceType, sourceId));
+            return Mono.empty();
+        }
+
+        @Override
         public Flux<VectorSearchHit> search(UUID tenantId, float[] queryVector, int topK,
                                             @Nullable String keywordFilter) {
             return Flux.fromIterable(store.entrySet().stream()

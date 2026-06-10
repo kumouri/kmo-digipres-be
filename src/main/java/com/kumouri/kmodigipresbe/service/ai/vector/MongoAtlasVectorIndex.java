@@ -68,6 +68,13 @@ public class MongoAtlasVectorIndex implements VectorIndex {
     }
 
     @Override
+    public Mono<Void> delete(UUID tenantId, String sourceType, UUID sourceId) {
+        return repository.findByTenantIdAndSourceTypeAndSourceId(tenantId, sourceType, sourceId)
+                .flatMap(repository::delete)
+                .doOnSuccess(v -> log.debug("Deleted vector for {}/{}/{}", tenantId, sourceType, sourceId));
+    }
+
+    @Override
     public Flux<VectorSearchHit> search(UUID tenantId, float[] queryVector, int topK,
                                         @Nullable String keywordFilter) {
         List<Double> vectorList = toDoubleList(queryVector);

@@ -22,4 +22,5 @@ com.kumouri.kmodigipresbe.module.quoting.closer.QuoteCloserReadAutoConfiguration
 com.kumouri.kmodigipresbe.module.quoting.closer.QuoteCloserAutoConfiguration
 com.kumouri.kmodigipresbe.module.styleconsult.StyleConsultAutoConfiguration
 com.kumouri.kmodigipresbe.module.stylermatch.StylerMatchAutoConfiguration
+com.kumouri.kmodigipresbe.module.techcopilot.TechCopilotAutoConfiguration
 com.kumouri.kmodigipresbe.integration.square.SquareAutoConfiguration
