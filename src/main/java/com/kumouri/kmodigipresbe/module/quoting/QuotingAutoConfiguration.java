@@ -10,12 +10,15 @@ import com.kumouri.kmodigipresbe.module.quoting.repository.PriceBookRepository;
 import com.kumouri.kmodigipresbe.module.quoting.repository.QuoteRequestRepository;
 import com.kumouri.kmodigipresbe.module.quoting.service.PriceBookService;
 import com.kumouri.kmodigipresbe.module.quoting.service.QuoteBookingService;
+import com.kumouri.kmodigipresbe.module.quoting.service.QuoteIntakeService;
 import com.kumouri.kmodigipresbe.module.quoting.service.QuoteSynthesisService;
 import com.kumouri.kmodigipresbe.module.quoting.service.QuoteVisionService;
 import com.kumouri.kmodigipresbe.module.quoting.service.RepairVsReplaceReasoner;
 import com.kumouri.kmodigipresbe.repository.AttachmentRepository;
+import com.kumouri.kmodigipresbe.repository.ContactRepository;
 import com.kumouri.kmodigipresbe.service.ai.vision.AiVisionService;
 import com.kumouri.kmodigipresbe.service.storage.FileStorageService;
+import com.kumouri.kmodigipresbe.service.widget.PublicWidgetTokenService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -96,5 +99,19 @@ public class QuotingAutoConfiguration {
             TwilioSmsService twilioSmsService,
             DomainEventPublisher events) {
         return new QuoteBookingService(quotes, connections, twilioSmsService, events);
+    }
+
+    @Bean
+    public QuoteIntakeService quoteIntakeService(
+            PublicWidgetTokenService tokens,
+            PriceBookRepository priceBooks,
+            QuoteRequestRepository quotes,
+            ContactRepository contacts,
+            QuoteVisionService quoteVisionService,
+            QuoteSynthesisService quoteSynthesisService,
+            RepairVsReplaceReasoner repairVsReplaceReasoner,
+            DomainEventPublisher events) {
+        return new QuoteIntakeService(tokens, priceBooks, quotes, contacts, quoteVisionService,
+                quoteSynthesisService, repairVsReplaceReasoner, events);
     }
 }
