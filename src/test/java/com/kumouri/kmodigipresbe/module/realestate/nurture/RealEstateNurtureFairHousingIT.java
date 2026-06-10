@@ -187,7 +187,8 @@ class RealEstateNurtureFairHousingIT {
     private NurtureCampaign seedCampaign(String smsTemplate, boolean aiPersonalize) {
         return mongo.save(NurtureCampaign.builder()
                 .id(UUID.randomUUID()).tenantId(tenantId)
-                .name("RE Reactivation").active(true)
+                // GATE-2: campaigns are vertical-tagged so the composer dispatches the Fair-Housing filter.
+                .name("RE Reactivation").vertical(FairHousingCopyFilter.VERTICAL).active(true)
                 .segments(List.of(new NurtureSegmentDefinition(DormancyBucket.A, 0, null, null, null)))
                 .steps(List.of(new NurtureCadenceStep(0, NurtureChannel.SMS, 0,
                         smsTemplate, null, null, aiPersonalize, 0)))
