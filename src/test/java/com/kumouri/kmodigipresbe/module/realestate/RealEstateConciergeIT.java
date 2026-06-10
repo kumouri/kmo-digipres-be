@@ -282,6 +282,33 @@ class RealEstateConciergeIT {
         assertThat(sentSms.get(0).body().toLowerCase()).contains("agent");
     }
 
+    // ── (BE-12) Fair-Housing-flagged AI answer is suppressed + handed off ─────────
+
+    @Test
+    void fairHousingFlaggedAnswer_isSuppressed_andHandedOff() {
+        Listing listingA = createListing(TRACKED_NUMBER_A, "123 Oak St");
+        // A chunk exists so the model IS called; the model (e.g. steered by a crafted buyer text)
+        // returns an answer containing Fair-Housing steering language.
+        createDisclosure(listingA.getId(), DisclosureType.GENERAL,
+                "The neighborhood has a community pool and is close to several schools.");
+        stubGroundedAnswer("This is a safe neighborhood, perfect for families and great for kids.");
+
+        ConciergeConversation conv = inboundQuestion(TRACKED_NUMBER_A,
+                "tell me about the area for my family");
+
+        ConciergeTurn assistant = lastAssistantTurn(conv);
+        // The steering answer must NOT be sent — the turn is forced to a safe HANDOFF.
+        assertThat(assistant.isHandoff()).as("Fair-Housing-flagged answer → HANDOFF").isTrue();
+        assertThat(assistant.getBody().toLowerCase()).contains("agent");
+        assertThat(assistant.getBody().toLowerCase()).doesNotContain("safe neighborhood");
+        assertThat(assistant.getBody().toLowerCase()).doesNotContain("perfect for families");
+
+        // The buyer received the handoff line, never the steering text.
+        assertThat(sentSms).hasSize(1);
+        assertThat(sentSms.get(0).body().toLowerCase()).contains("agent");
+        assertThat(sentSms.get(0).body().toLowerCase()).doesNotContain("safe neighborhood");
+    }
+
     // ── inbound: bad signature → 401/4000, zero effect ───────────────────────────
 
     @Test

@@ -206,10 +206,12 @@ public class RealEstateAutoConfiguration {
             @Value("${kmosf.realestate.handoff-sms:Good question — I've looped in your agent, who'll "
                     + "follow up with you shortly.}") String handoffSmsBody,
             @Value("${kmosf.realestate.disambiguation-sms:Thanks for reaching out! Which property are you "
-                    + "asking about? Reply with the address or MLS#.}") String disambiguationSmsBody) {
+                    + "asking about? Reply with the address or MLS#.}") String disambiguationSmsBody,
+            // Security fix BE-12 — default ON: a Fair-Housing-flagged AI answer is suppressed + handed off.
+            @Value("${kmosf.realestate.fair-housing-block:true}") boolean fairHousingBlock) {
         return new ConciergeInboundRouter(listings, disclosures, conversations, conciergeService,
                 qualificationExtraction, qualificationService, showingBookingService, twilioSmsService, events,
-                correlationTtlMinutes, handoffNotify, handoffSmsBody, disambiguationSmsBody);
+                correlationTtlMinutes, handoffNotify, handoffSmsBody, disambiguationSmsBody, fairHousingBlock);
     }
 
     // ── RE-3 showing booking (offer slots over SMS → write a Meeting projection) ──

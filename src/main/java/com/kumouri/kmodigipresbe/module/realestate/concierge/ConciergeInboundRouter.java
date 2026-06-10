@@ -83,6 +83,14 @@ public class ConciergeInboundRouter {
     private final boolean handoffNotify;
     private final String handoffSmsBody;
     private final String disambiguationSmsBody;
+    /**
+     * Security fix BE-12 — when true (default), an AI concierge answer that trips the deterministic
+     * {@code FairHousingLint} is NOT auto-sent: the turn is forced to a safe HANDOFF (the handoff
+     * template + {@code HANDED_OFF} state + agent notify) instead. This is the output backstop the
+     * RE-4 marketing path already has; the concierge auto-sends so it must force a safe outcome
+     * rather than merely flag for a human.
+     */
+    private final boolean fairHousingBlock;
 
     /**
      * T3 (Midnight Responder) — the off-listing / unknown-intent handoff delegate (the E2 responder
@@ -107,7 +115,8 @@ public class ConciergeInboundRouter {
                                   long correlationTtlMinutes,
                                   boolean handoffNotify,
                                   String handoffSmsBody,
-                                  String disambiguationSmsBody) {
+                                  String disambiguationSmsBody,
+                                  boolean fairHousingBlock) {
         this.listings = listings;
         this.disclosures = disclosures;
         this.conversations = conversations;
@@ -121,6 +130,7 @@ public class ConciergeInboundRouter {
         this.handoffNotify = handoffNotify;
         this.handoffSmsBody = handoffSmsBody;
         this.disambiguationSmsBody = disambiguationSmsBody;
+        this.fairHousingBlock = fairHousingBlock;
     }
 
     /**
@@ -235,19 +245,22 @@ public class ConciergeInboundRouter {
         return conciergeService.answer(tenantId, listing.getId(), question)
                 .flatMap(answer -> {
                     if (answer.handoff()) {
-                        return reply(from, handoffSmsBody)
-                                .then(appendAssistant(conv, handoffSmsBody, true, List.of(),
-                                        ConversationState.HANDED_OFF))
-                                // RE-2: still qualify on a handoff turn (the buyer may have revealed budget
-                                // in the same text that we couldn't answer) — but keep the HANDED_OFF state.
-                                .flatMap(savedConv -> notifyAgent(listing, from, question)
-                                        .then(qualifyAndPersist(tenantId, listing, savedConv, true)))
-                                // T3 (Midnight Responder) additive: a strict HANDOFF additionally delegates
-                                // to the E2 responder default-handoff iff the per-tenant flag is set (the
-                                // delegate owns that policy check). Best-effort; never changes the outcome.
-                                // Null delegate / flag off ⇒ byte-identical RE-1 handoff.
-                                .flatMap(c -> delegateHandoff(tenantId, from, question).thenReturn(c))
-                                .thenReturn(Outcome.HANDED_OFF);
+                        return handoffReply(tenantId, from, listing, conv, question);
+                    }
+                    // Security fix BE-12: deterministic Fair-Housing backstop on the OUTBOUND answer
+                    // (the buyer text is attacker-controlled, so a crafted prompt could steer the model
+                    // into steering/protected-class language). Unlike the marketing path — which flags
+                    // for a human who still approves — the concierge AUTO-SENDS, so a flagged answer is
+                    // suppressed and the turn is forced to a safe HANDOFF rather than being texted back.
+                    String riskTerm = fairHousingBlock
+                            ? com.kumouri.kmodigipresbe.module.realestate.marketing.FairHousingLint
+                                    .firstRiskTerm(answer.answer())
+                            : null;
+                    if (riskTerm != null) {
+                        log.warn("RE-1 concierge: Fair-Housing lint flagged the AI answer (term='{}') for "
+                                + "listing {} — suppressing the answer and forcing HANDOFF (BE-12)",
+                                riskTerm, listing.getId());
+                        return handoffReply(tenantId, from, listing, conv, question);
                     }
                     return resolveCitations(tenantId, answer.citations())
                             .flatMap(turnCitations -> reply(from, answer.answer())
@@ -257,6 +270,24 @@ public class ConciergeInboundRouter {
                                             false))
                                     .thenReturn(Outcome.ANSWERED));
                 });
+    }
+
+    /**
+     * The shared HANDOFF outcome (security fix BE-12 reuses this for a Fair-Housing-flagged answer):
+     * reply the handoff template, append the HANDED_OFF assistant turn, still run RE-2 qualification
+     * (keeping HANDED_OFF), and best-effort agent-notify + T3 responder delegation. Identical to the
+     * original {@code answer.handoff()} branch — extracted so a model-handoff and a lint-forced handoff
+     * take exactly the same safe path.
+     */
+    private Mono<Outcome> handoffReply(UUID tenantId, String from, Listing listing,
+                                       ConciergeConversation conv, String question) {
+        return reply(from, handoffSmsBody)
+                .then(appendAssistant(conv, handoffSmsBody, true, List.of(),
+                        ConversationState.HANDED_OFF))
+                .flatMap(savedConv -> notifyAgent(listing, from, question)
+                        .then(qualifyAndPersist(tenantId, listing, savedConv, true)))
+                .flatMap(c -> delegateHandoff(tenantId, from, question).thenReturn(c))
+                .thenReturn(Outcome.HANDED_OFF);
     }
 
     /**
