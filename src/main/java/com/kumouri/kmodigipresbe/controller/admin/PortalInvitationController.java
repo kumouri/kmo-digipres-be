@@ -50,12 +50,21 @@ public class PortalInvitationController {
     @PostMapping
     public Mono<IssuedInvitation> create(@Valid @RequestBody NewInvitation req) {
         return TenantContextHolder.required().flatMap(ctx -> {
+            // Security fix BE-01: a portal invitation may ONLY grant the CLIENT role.
+            // The roles set is client-settable and is merged onto the user at
+            // sign-in (UserIdentityService.redeemMatchingInvitations), so accepting
+            // ADMIN/STAFF here would be a self-service privilege escalation to tenant
+            // admin. Reject any non-CLIENT role outright (defense-in-depth alongside
+            // the same guard in UserIdentityService.addRoles).
+            if (hasNonClientRole(req.roles())) {
+                return Mono.error(new DigiPresBeException(
+                        "Portal invitations may only grant the CLIENT role", 1820, 400));
+            }
             String raw = generateRawToken();
             PortalInvitation inv = PortalInvitation.builder()
                     .id(UUID.randomUUID())
                     .email(req.email().toLowerCase())
-                    .roles(req.roles() == null || req.roles().isEmpty()
-                            ? Set.of("CLIENT") : req.roles())
+                    .roles(Set.of("CLIENT"))
                     .tokenHash(sha256Hex(raw))
                     .expiresAt(Instant.now().plus(Duration.ofHours(
                             portalProperties.invitationTtlHours())))
@@ -90,6 +99,18 @@ public class PortalInvitationController {
                 inv.getStatus().name(),
                 inv.getExpiresAt(),
                 inv.getRedeemedAt());
+    }
+
+    /**
+     * True if {@code roles} contains any role other than {@code CLIENT} (security fix
+     * BE-01). A {@code null}/empty set defaults to CLIENT-only at creation, so it is not
+     * a violation.
+     */
+    private static boolean hasNonClientRole(Set<String> roles) {
+        if (roles == null || roles.isEmpty()) {
+            return false;
+        }
+        return roles.stream().anyMatch(role -> !"CLIENT".equals(role));
     }
 
     private static String generateRawToken() {
