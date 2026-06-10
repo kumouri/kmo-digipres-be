@@ -22,12 +22,12 @@ cadence + the unique-index enroll + the default-OFF runner + the GATE-2 vertical
 
 ## Sub-phase ledger
 
-- [ ] **P0 — detail plan** (`~/.claude/plans/home-quotecloser.md`) + fresh `docs/PHASE-PROGRESS.md` (this commit).
-- [ ] **P1 — config** `QuoteCloserConfig` + repo + `QuoteCloserConfigController` (ADMIN, both-module). 4470/4471.
-- [ ] **P2 — enrollment job** `QuoteCloserEnrollmentJob` (default-OFF `@Scheduled`): age NEW quotes → explicit-boolean enroll into the campaign; exit enrollments whose quote went non-NEW.
-- [ ] **P3 — accept subscriber** `QuoteWonSubscriber` (`@PostConstruct` on `QUOTE_ACCEPTED`): stop the cadence (EXITED) + create exactly one `ReviewRequest` (explicit-boolean).
-- [ ] **P4 — analytics** `QuoteCloserAnalyticsService` + `QuoteCloserController` (`GET .../analytics`).
-- [ ] **P5 — wiring** `QuoteCloserAutoConfiguration` (both-module gate) + `DomainEventType` T11 block + `GlobalErrorHandler` 4470-4479 Javadoc + app-props doc + `AutoConfiguration.imports`.
+- [x] **P0 — detail plan** (`~/.claude/plans/home-quotecloser.md`) + fresh `docs/PHASE-PROGRESS.md`. Commit `6b096ee`.
+- [x] **P1 — config** `QuoteCloserConfig` + repo + `QuoteCloserConfigDTO` + `QuoteCloserConfigController` (ADMIN, both-module). 4470/4471.
+- [x] **P2 — enrollment job** `QuoteCloserEnrollmentJob` (default-OFF `@Scheduled`): age NEW quotes → explicit-boolean enroll into the campaign; exit enrollments whose quote went non-NEW.
+- [x] **P3 — accept subscriber** `QuoteWonSubscriber` (`@PostConstruct` on `QUOTE_ACCEPTED`): stop the cadence (EXITED) + create exactly one `ReviewRequest` (explicit-boolean).
+- [x] **P4 — analytics** `QuoteCloserAnalytics` + `QuoteCloserAnalyticsService` + `QuoteCloserController` (`GET .../analytics`).
+- [x] **P5 — wiring** `QuoteCloserAutoConfiguration` (both-module gate) + `DomainEventType` T11 block + `GlobalErrorHandler` 4470-4479 Javadoc + app-props doc + `AutoConfiguration.imports`. **`compileJava` PASS.**
 - [ ] **P6 — demo seed** `QuoteCloserDemoSeeder` (`@Profile("demo-home-quote-closer")`).
 - [ ] **P7 — T11 ITs** (enroll, stop, review, unfiltered-copy GATE-2 proof, analytics, module gate).
 - [ ] **P8 — regression** (`module.quoting.*`, `nurture.*` incl. `BothVerticalsNurtureCopyFilterIT`, `integration.gbp.*`, `OpenApiEndpointIT`) green.

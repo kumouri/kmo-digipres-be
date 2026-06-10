@@ -18,5 +18,6 @@ com.kumouri.kmodigipresbe.module.ar.ArAutoConfiguration
 com.kumouri.kmodigipresbe.module.waitlist.WaitlistAutoConfiguration
 com.kumouri.kmodigipresbe.module.proposals.ProposalsAutoConfiguration
 com.kumouri.kmodigipresbe.module.quoting.QuotingAutoConfiguration
+com.kumouri.kmodigipresbe.module.quoting.closer.QuoteCloserAutoConfiguration
 com.kumouri.kmodigipresbe.module.styleconsult.StyleConsultAutoConfiguration
 com.kumouri.kmodigipresbe.integration.square.SquareAutoConfiguration
