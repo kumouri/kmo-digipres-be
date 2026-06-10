@@ -398,6 +398,22 @@ public final class DomainEventType {
     public static final String LISTING_MARKETING_DRAFTED  = "realestate.listingMarketingDrafted";
     public static final String LISTING_MARKETING_APPROVED = "realestate.listingMarketingApproved";
 
+    // Real Estate Concierge T10 (Listing Prep Studio) — advisory, drive no core mutation. The prep pack
+    // (the reused RE-4 MLS description + the net-new 4-week dated social calendar + the reused RE-4 email)
+    // is generated synchronously + explicitly inside the realestate-module-gated ListingPrepService; the
+    // Fair-Housing lint + the draft lifecycle happen there too. Emitted only when the realestate module is
+    // on. NEVER auto-published — a pack requires a staff approve. Best-effort: a vision/Claude failure
+    // degrades to a partial/empty DRAFTED pack, never an error; a flagged calendar post is held +
+    // safe-substituted (never emitted).
+    // LISTING_PREP_GENERATED: emitted by ListingPrepService after a generate call persists a DRAFTED
+    //   ListingPrepPack (description + 4-week calendar + email + per-photo callouts). Payload:
+    //   {packId, listingId, calendarPostCount, calendarHeldCount, photoCaptionCount, fairHousingFlagCount,
+    //   generationDegraded}.
+    // LISTING_PREP_APPROVED: emitted after a staff approve marks a pack APPROVED (copy-ready paste-out;
+    //   actual MLS/social/email posting is out of scope). Payload: {packId, listingId}.
+    public static final String LISTING_PREP_GENERATED = "realestate.listingPrepGenerated";
+    public static final String LISTING_PREP_APPROVED  = "realestate.listingPrepApproved";
+
     // FrontDesk IQ FD-1 (Health-practices flagship) — nightly PHI-free no-show risk scoring. Emitted by the
     // frontdesk-module-gated FrontDeskNoShowScoringService once per UPCOMING Appointment that gets a
     // NoShowRisk stamped (terminal appointments are never re-stamped, so never emit). Advisory (RuleEngine /
