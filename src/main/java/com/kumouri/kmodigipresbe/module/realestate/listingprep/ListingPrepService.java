@@ -82,7 +82,7 @@ import java.util.UUID;
 public class ListingPrepService {
 
     /** The vetted neutral substitute for a calendar post whose generated copy the lint flagged. */
-    static final String SAFE_POST_SUBSTITUTE =
+    public static final String SAFE_POST_SUBSTITUTE =
             "Now available — come see this property for yourself. Contact us today to schedule a tour.";
 
     private static final String VISION_SYSTEM_PROMPT =
@@ -225,30 +225,32 @@ public class ListingPrepService {
     /**
      * Runs the reused RE-4 generator (description + email) and the new calendar generator (both best-effort),
      * assigns dates, lints everything, and persists the DRAFTED pack + emits the event.
+     *
+     * <p><strong>Sequential (not concurrent) on purpose:</strong> both AI calls go through
+     * {@code AiUsageRecorder.record}, which read-modify-writes the per-tenant AI-spend document. Running them
+     * concurrently ({@code Mono.zip}) raced that write → an optimistic-lock failure that best-effort-swallowed
+     * one leg to empty. Chaining them serializes the spend record (and the RE-4 {@code ListingMarketingService}
+     * already makes its AI calls sequentially — this matches that posture).
      */
     private Mono<ListingPrepPack> draftAndPersist(UUID tenantId, Listing listing, List<PhotoNote> notes,
                                                   LocalDate startDate, int perWeek) {
         String listingFacts = buildListingFacts(listing);
         String photoNotes = buildPhotoNotes(notes);
 
-        Mono<Map<MarketingChannel, String>> marketingMono = marketingGeneration
-                .generate(listingFacts, photoNotes)
+        return marketingGeneration.generate(listingFacts, photoNotes)
                 .onErrorResume(e -> {
                     log.warn("T10: description/email generation failed for listing {} (best-effort, "
                             + "degraded, 4463): {}", listing.getId(), e.toString());
                     return Mono.just(Map.of());
-                });
-        Mono<List<CalendarPost>> calendarMono = calendarGeneration
-                .generate(listingFacts, photoNotes, perWeek)
-                .onErrorResume(e -> {
-                    log.warn("T10: social-calendar generation failed for listing {} (best-effort, empty "
-                            + "calendar, 4463): {}", listing.getId(), e.toString());
-                    return Mono.just(List.of());
-                });
-
-        return Mono.zip(marketingMono, calendarMono)
-                .flatMap(tuple -> persistPack(
-                        tenantId, listing, notes, tuple.getT1(), tuple.getT2(), startDate));
+                })
+                .flatMap(marketing -> calendarGeneration.generate(listingFacts, photoNotes, perWeek)
+                        .onErrorResume(e -> {
+                            log.warn("T10: social-calendar generation failed for listing {} (best-effort, "
+                                    + "empty calendar, 4463): {}", listing.getId(), e.toString());
+                            return Mono.just(List.of());
+                        })
+                        .flatMap(calendar -> persistPack(
+                                tenantId, listing, notes, marketing, calendar, startDate)));
     }
 
     private Mono<ListingPrepPack> persistPack(UUID tenantId, Listing listing, List<PhotoNote> notes,
