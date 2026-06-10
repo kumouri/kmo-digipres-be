@@ -12,7 +12,7 @@ prior `gate2-nurture-copyfilter-scoping` ledger that occupied this path — that
 | Sub-phase | Scope | Status | Commit(s) | Validation |
 |---|---|---|---|---|
 | Q0 | detail plan + this ledger | DONE | (first commit) | n/a — docs |
-| Q1 | module + `PriceBook` + `QuoteSynthesisService` (range synthesis) + price-book CRUD + demo skeleton | PENDING | | |
+| Q1 | module + `PriceBook` + `QuoteSynthesisService` (range synthesis) + price-book CRUD + demo skeleton | DONE | (Q1 commit) | `QuoteSynthesisServiceTest` 11/0 green; `compileJava` clean |
 | Q2 | `QuoteVisionService` (photo→attrs) + confidence + the "estimate, final price after inspection" guardrail; vision-fail → manual path | PENDING | | |
 | Q3 | `RepairVsReplaceReasoner` (+ financing flag) + `QuoteBookingService` (booking-link SMS, no live Cal.com; optional Documenso SOW on REPLACE) | PENDING | | |
 | Q4 | public intake endpoint(s) + accept + office quote-inbox (list/detail) + token issuer + finish demo seed + openapi regen + CLAUDE.md T8 | PENDING | | |

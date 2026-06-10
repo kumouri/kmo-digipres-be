@@ -1142,6 +1142,48 @@ import java.util.UUID;
  *       BAA-gated compliance tier applies (demo on fictional data only) — separate human steps, never the
  *       loop.</li>
  * </ul>
+ *
+ * <ul>
+ *   <li>{@code 4430-4449} — <em>Home Services "QuoteNow" (T8)</em>: a homeowner-facing instant quote +
+ *       repair-vs-replace advisor — the first <strong>vision-COMPOSITION</strong> flagship
+ *       ({@code module/quoting}, default OFF). A photo/description becomes a defensible price RANGE in
+ *       minutes (the range is the product — never a single number), reusing the shipped vision spine
+ *       ({@code AiVisionService.extract}, the {@code EquipmentVisionService} precedent): a public
+ *       widget/QR submission ({@code POST /public/integrations/quoting/{token}/quote}, multipart via
+ *       {@code getMultipartData}) → {@code QuoteVisionService} reads equipment type/brand/age/failure off
+ *       the photo (best-effort; a budget/upstream/parse failure degrades to the typed manual attributes
+ *       so the quote is always produced) → {@code QuoteSynthesisService} synthesizes a {@code QuoteRange}
+ *       from the per-tenant {@code PriceBook} (age + severe-failure modifiers; nothing priceable → a flat
+ *       diagnostic-visit range) → {@code RepairVsReplaceReasoner} returns an explained REPAIR / REPLACE /
+ *       DIAGNOSTIC_VISIT recommendation with the financing flag surfaced on REPLACE. Accept
+ *       ({@code POST /public/integrations/quoting/{token}/quotes/{quoteId}/accept}, {@code @IdempotentRoute})
+ *       texts a per-tenant booking link (reused {@code TwilioSmsService}; <strong>no live Cal.com</strong>);
+ *       the office quote-inbox ({@code GET /quoting/quotes}[/{id}], staff) lists submitted quotes with
+ *       attributes/range/recommendation/status; {@code GET/PUT /quoting/price-book} + {@code POST
+ *       /quoting/tokens} are ADMIN. <strong>The wrong-number-liability fence:</strong> EVERY synthesized
+ *       range carries the mandatory {@code QuoteSynthesisService.ESTIMATE_DISCLAIMER} ("this is an
+ *       estimate; final price after an on-site inspection"), set centrally so it can never be omitted
+ *       (release-blocking IT). <strong>New codes:</strong> {@code 4430} quote-intake token widgetType
+ *       mismatch (401); {@code 4431} price book not found for the tenant (404, read); {@code 4432} invalid
+ *       price-book body (400); {@code 4433} no image part on a photo intake (400); {@code 4434}
+ *       unsupported image media type (415); {@code 4435} quote not found on accept (404); {@code 4436}
+ *       quote not in an acceptable state — cannot accept (409, explicit-boolean); {@code 4437} invalid
+ *       intake/manual-attrs body (400). {@code 4438-4449} RESERVED. Reused (NOT re-allocated): {@code
+ *       1600-1603} (widget token), {@code 1200-1203} (AI budget/upstream/missing-key via
+ *       {@code AiVisionService}), {@code 1310}/{@code 1311} (file storage), {@code 2530-2532} (Twilio SMS),
+ *       {@code 2510} (Documenso-not-connected if the optional REPLACE-SOW path is exercised), {@code
+ *       1130}/{@code 1132} (module gate via {@code TenantModuleRegistry.requireEnabled("quoting")}),
+ *       {@code 1800} (RoleGuard ADMIN). Module gate: {@code @ConditionalOnProperty(kmosf.modules.quoting)}
+ *       (default OFF, no {@code matchIfMissing}) on the auto-config + every controller (the public intake
+ *       gated like the other widgets — disabled module → endpoint not registered → 404). <strong>Reused
+ *       cores stay empty-diff vs {@code main}</strong> ({@code AiVisionService}, {@code EquipmentVisionService},
+ *       {@code QuoteService}, {@code QuotePdfService}, {@code ServiceRequestWidgetController},
+ *       {@code EquipmentPhotoController}, {@code TwilioSmsService}, {@code IntegrationConnection}); the
+ *       {@code quoting} package is strictly additive. AiVision is WireMock + Twilio is {@code @MockitoBean}'d
+ *       in ITs (no live send); no live Cal.com / Documenso in the loop. Going live needs A2P 10DLC for the
+ *       booking-link/QR SMS, an optional Cal.com OAuth for a live booking link, and a human-reviewed price
+ *       book (separate human actions — never the loop).</li>
+ * </ul>
  */
 @Slf4j
 @Component
