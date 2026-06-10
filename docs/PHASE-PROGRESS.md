@@ -1,44 +1,84 @@
-# PHASE-PROGRESS — T13 Home "Tech Copilot" (BE leg)
+# PHASE-PROGRESS — T14 Home "DispatchIQ" (BE leg) — the FINAL flagship tool
 
-Branch: `home-tech-copilot` (off `main` @ `909f8da`)
-Plan: `~/.claude/plans/home-tech-copilot.md`
-Module: `module/techcopilot/` · gate `kmosf.modules.techcopilot` (default OFF) · error band **4490-4519**
+Branch: `home-dispatchiq` (off `main` @ `4435704`)
+Plan: `~/.claude/plans/home-dispatchiq.md`
+Module: `module/dispatch/` · gate `kmosf.modules.dispatch` (default OFF) · error band **4520-4559**
 
-A **RAG-grounded, cited Q&A assistant for field technicians** over a per-tenant corpus of equipment
-manuals / SOPs / spec sheets. Deploys the shipped RAG spine (the RE-1 concierge precedent) — the net-new
-is the **corpus model + chunking ingest** and the **tech-Q&A surface**. Demo collateral, default-OFF.
+An **intelligent dispatch optimizer** that proposes the best-fit technician for each open home-services
+work order (skill + availability + location/priority) on top of the **EXISTING manual dispatch board** —
+a dispatcher reviews the optimized assignments + a rationale + a score, then applies them via the existing
+assignment path. **The net-new is the OPTIMIZER, not a new board.** Deterministic/explainable (the T9/T12
+scoring precedent — NOT an LLM). Demo collateral, default-OFF. The last of the Wave-2 tools (T1-T14).
+
+## What the shipped code provides vs the T14 net-new
+
+- **Reused (empty-diff):** `DispatchBoardService`/`DispatchBoardController`/`DispatchBoardResponseDTO` (the
+  manual board T14 rides on); `WorkOrder` (already has `technicianUserId` — the assignment seam — +
+  `serviceType`/`scheduledStart`/`customFields`); `JobSite`+`LatLng` (the stored-coords travel signal);
+  `WorkOrderService.update` (the apply path — sets `technicianUserId`); `WorkOrderRepository`;
+  `ProjectAssignmentService` + `ServiceAgreementSchedulerService` (read end-to-end; T14 touches neither);
+  `UserRepository.findAllByTenantIdAndPortal` (the tech directory).
+- **Net-new (`module/dispatch/`):** the deterministic `DispatchOptimizerService` (skill + availability +
+  proximity + priority composite → greedy priority-first assignment with rationale/score), the
+  `DispatchPlanService` orchestrator (optimize on `boundedElastic` + apply via the reused
+  `WorkOrderService.update`), `DispatchAnalyticsService`, the `DispatchController`
+  (`GET /dispatch/optimize`, `POST /dispatch/apply` `@IdempotentRoute`, `GET /dispatch/analytics`), the
+  model records, the `DispatchAutoConfiguration`, the `DispatchDemoSeeder`.
+- **The lone reused-model seam:** additive-nullable **`User.skills` (`List<String>`)** — the soft
+  skill-fit signal (the T12 `StaffMember.specialties` precedent; `UserService`/`TeamController`
+  byte-identical; legacy users deserialize empty = no declared skills = neutral, never excluded).
 
 ## Sub-phase ledger
 
 | # | Sub-phase | Status | Notes |
 |---|---|---|---|
-| 1 | Detail plan + this ledger | ✅ done | commit 1 |
-| 2 | Model + ingest: `EquipmentType`, `TechDoc`+repo, `TechQuery`+repo, `TechDocChunker`(+unit test), `TechDocService`, `RagRetrievalService.retrieveForCorpus` additive overload, `DomainEventType` T13 block | ✅ done | commit 2; TechDocChunkerTest 6/6 |
-| 3 | Answer + Q&A: `TechCopilotAnswerService`, `TechCopilotService`, controllers+DTOs, `TechCopilotAutoConfiguration`, `AutoConfiguration.imports`, `GlobalErrorHandler` Javadoc, demo seeder | ✅ done | commit 3 |
-| 4 | Tests + docs: 4 new ITs, `CLAUDE.md` T13 entry, app-props doc; run + record regression | ✅ done | commit 4; added `VectorIndex.delete` seam for shrunk-reindex cleanup |
+| 1 | Detail plan + this ledger | ⬜ pending | commit 1 |
+| 2 | Model + scorer: `User.skills` additive field, `module/dispatch/model/*` records, the pure `DispatchOptimizerService` (+ no-Docker unit test), `DomainEventType` T14 block | ⬜ pending | `DispatchOptimizerServiceTest` |
+| 3 | Orchestrator + surface: `DispatchPlanService` (optimize + apply via reused `WorkOrderService.update`), `DispatchAnalyticsService`, `DispatchController`+DTOs, `DispatchAutoConfiguration`, `AutoConfiguration.imports`, `GlobalErrorHandler` 4520-4559 Javadoc, `DispatchDemoSeeder` | ⬜ pending | |
+| 4 | Tests + docs: `DispatchOptimizeIT`/`DispatchApplyIT`/`DispatchAnalyticsIT`/`DispatchModuleGateIT`, `CLAUDE.md` T14 entry (final-tool note), app-props doc; run + record regression | ⬜ pending | |
 | 5 | Push + ready PR | ⬜ pending | |
 
-## Result — T13 tests (validated via clean local IT re-run; full-ci OOM-impaired)
-- New T13 (17 tests, 0 failures): `TechDocChunkerTest` 6 (unit) · `TechDocIngestIT` 3 · `TechCopilotAnswerIT` 2 (cited-answer proof) · `TechCopilotNoContextIT` 3 (no-hallucination guardrail) · `TechCopilotModuleGateIT` 3.
-- Regression (all green): `RagRetrievalServiceTest`, `EmbeddingPipelineIT`, `RealEstateConciergeIT`, `RealEstateQualificationIT`, `RealEstateShowingBookingIT`, `MidnightResponderLatencyIT`, `OpenApiEndpointIT`.
-- Reused cores empty-diff verified (AskAiService / Embedding* / ConciergeAnswerService / ListingConciergeService / ListingDisclosureService / AiUsageRecorder). Additive shared-core seams: `RagRetrievalService.retrieveForCorpus`(+`CorpusChunk`+`TECH_DOC_SOURCE_TYPE`), `VectorIndex.delete`(+`MongoAtlasVectorIndex` impl + 4 RE test-double no-ops).
+## Decisions / deviations
 
-## Reuse contract (must stay empty-diff vs `main`)
-`AskAiService`, `EmbeddingService`, `OpenAiEmbeddingService`, `EmbeddingPipeline`, `VectorIndex`,
-`MongoAtlasVectorIndex`, `AiUsageRecorder`, `ConciergeAnswerService`, `ListingConciergeService`,
-`ListingDisclosureService`. **The lone additive seam in a shared core** is
-`RagRetrievalService.retrieveForCorpus(...)` (+ the `TECH_DOC_SOURCE_TYPE` constant) — a near-verbatim
-clone of the existing `retrieveForListing` minus the `matchesListing` filter, so the RE concierge path is
-byte-unchanged (its ITs re-run green as the gate).
-
-## Reactive invariant
-`switchIfEmpty` only for genuine not-found (4490/4493). No-context + idempotency seams are explicit
-list-empty / boolean branches — **NEVER `switchIfEmpty(create/index/answer)`**.
+- **D1 — reuse the board, optimize on top.** T14 is NOT a new board. The optimizer proposes
+  `technicianUserId` assignments; apply commits them through the **unchanged** `WorkOrderService.update`;
+  the **unchanged** `DispatchBoardService` re-renders them. Zero board/board-DTO change.
+- **D2 — `User.skills` is the one justified seam.** Skill-fit is the optimizer's headline signal and
+  `User` had no skills field. Additive-nullable `List<String>` (the T12 `StaffMember.specialties`
+  precedent). `UserService`/`TeamController` empty-diff (skill editing is an out-of-scope additive
+  follow-up — the T12 posture). No additive field on `WorkOrder` (it already has `technicianUserId` +
+  `serviceType`).
+- **D3 — availability = load, no new field.** A tech's availability component is `1 - load/cap` over their
+  current same-day assigned-work-order count (read from the loaded set) — load-balancing without inventing
+  an availability/shift model on `User`.
+- **D4 — deterministic, not an LLM.** The composite (skillFit 0.45 + availability 0.30 + proximity 0.15 +
+  priority 0.10) + the greedy priority-first assigner is pure/total/stateless (the
+  `StylerMatchScoringService` / `StyleRecommendationService` precedent). No AI budget, no vision, no SMS.
+- **D5 — apply idempotency = explicit-boolean already-assigned skip + `@IdempotentRoute`.** Re-applying the
+  same decisions sets each `WorkOrder.technicianUserId` to its target; a work order already at the target is
+  **skipped** (no save/event) → no double-assign. `switchIfEmpty` only for genuine not-found (4520). The
+  optimizer compute + the apply batch run on `boundedElastic`.
+- **D6 — error band 4520-4559.** 4520 WO-not-found (apply); 4521 invalid optimize req; 4522 invalid apply
+  req; 4523 WO not in assignable state (terminal); **4524-4559 RESERVED** (the wide band — multi-day,
+  hard time-windows, skill-cert gates, real routing-API travel). Reused: 1130/1132, 1800, 1330, 3100/3101.
+- **D7 — default-OFF; not in openapi.** `@ConditionalOnProperty(kmosf.modules.dispatch)` (no
+  `matchIfMissing`) + `@ConditionalOnBean(WorkOrderService.class)` (the apply path needs the field-service
+  WorkOrder spine). `OpenApiEndpointIT` runs with it OFF → no `dispatch` paths in `openapi.json` → the FE
+  hand-writes all `dispatch` `api/*.ts` (the T1-T13 precedent).
+- **D8 — go-live: a real routing/maps API** for true drive-time travel (T14 uses the board's
+  `JobSite.location` haversine straight-line proxy; the proximity component is one method to swap). No live
+  maps/routing API in the loop.
 
 ## Validation gate
-`ci.yml` = unit/arch only (no ITs). full-ci OOM-impaired → validate ITs locally via targeted
-`./gradlew test --tests` batches; report the clean local IT re-run as the gate.
 
-## Test plan (status filled in sub-phase 4)
-- New: `TechDocIngestIT`, `TechCopilotAnswerIT`, `TechCopilotNoContextIT`, `TechCopilotModuleGateIT`, `TechDocChunkerTest` (unit).
-- Regression: `module.realestate.*` (esp. `RealEstateConciergeIT`), `service.ai.*` (`RagRetrievalServiceTest`, `EmbeddingPipelineIT`), `OpenApiEndpointIT`.
+Per the briefing, full-ci is OOM-impaired pending larger runners → the gate is a **clean local IT re-run**
+of the new T14 ITs + the regression groups (`module.homeservices.*`, `service.contractor.*`,
+`OpenApiEndpointIT`), recorded in the final report. The PR opens READY; the orchestrator validates
+independently + merges.
+
+## Reactive invariant
+
+`switchIfEmpty` only for genuine not-found (4520 / the reused `WorkOrderService.findById` 1330). The apply
+already-assigned seam is an explicit-boolean skip — **NEVER `switchIfEmpty(assign)`**. The optimizer compute
++ the apply batch run on `Schedulers.boundedElastic()` (never the Netty event loop). No live external in the
+build loop.
