@@ -31,6 +31,21 @@ public interface VectorIndex {
                       float[] vector, Map<String, Object> metadata);
 
     /**
+     * Removes the stored embedding for a source entity, if present (idempotent — a no-op when absent).
+     *
+     * <p>Added for re-indexable corpora (Tech Copilot T13): when a chunked document is re-edited to fewer
+     * chunks, the stale trailing chunk vectors must be removed. Routing the delete through the same
+     * abstraction as {@link #upsert} keeps a consumer on one store contract (rather than upserting via the
+     * index and deleting via the underlying repository). Existing single-document consumers (the RE
+     * disclosure path) never call it, so behaviour is byte-unchanged for them.
+     *
+     * @param tenantId   the owning tenant — never {@code null}
+     * @param sourceType the entity type label used at {@link #upsert}
+     * @param sourceId   the entity's id
+     */
+    Mono<Void> delete(UUID tenantId, String sourceType, UUID sourceId);
+
+    /**
      * Nearest-neighbour search within a single tenant's vectors.
      *
      * @param tenantId      the tenant scope — never {@code null}

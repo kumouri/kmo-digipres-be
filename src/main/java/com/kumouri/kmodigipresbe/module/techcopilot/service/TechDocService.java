@@ -7,7 +7,6 @@ import com.kumouri.kmodigipresbe.exceptions.DigiPresBeException;
 import com.kumouri.kmodigipresbe.module.techcopilot.ingest.TechDocChunker;
 import com.kumouri.kmodigipresbe.module.techcopilot.model.TechDoc;
 import com.kumouri.kmodigipresbe.module.techcopilot.model.TechDocRepository;
-import com.kumouri.kmodigipresbe.repository.VectorDocumentRepository;
 import com.kumouri.kmodigipresbe.service.ai.embedding.EmbeddingService;
 import com.kumouri.kmodigipresbe.service.ai.rag.RagRetrievalService;
 import com.kumouri.kmodigipresbe.service.ai.vector.VectorIndex;
@@ -63,7 +62,6 @@ public class TechDocService {
     private final TechDocRepository docs;
     private final EmbeddingService embeddingService;
     private final VectorIndex vectorIndex;
-    private final VectorDocumentRepository vectors;
     private final DomainEventPublisher events;
     private final int chunkSize;
     private final int chunkOverlap;
@@ -71,14 +69,12 @@ public class TechDocService {
     public TechDocService(TechDocRepository docs,
                           EmbeddingService embeddingService,
                           VectorIndex vectorIndex,
-                          VectorDocumentRepository vectors,
                           DomainEventPublisher events,
                           int chunkSize,
                           int chunkOverlap) {
         this.docs = docs;
         this.embeddingService = embeddingService;
         this.vectorIndex = vectorIndex;
-        this.vectors = vectors;
         this.events = events;
         this.chunkSize = chunkSize;
         this.chunkOverlap = chunkOverlap;
@@ -197,8 +193,8 @@ public class TechDocService {
 
     /**
      * Removes the stale trailing chunk vectors {@code [newChunkCount, priorChunkCount)} left behind when a
-     * re-edited doc shrank. Uses only the existing repo finder + the inherited {@code delete} (no shared
-     * vector-index/repo change). A no-op when the doc grew or stayed the same size.
+     * re-edited doc shrank, through the {@link VectorIndex#delete} seam (the same abstraction the upsert
+     * uses — idempotent, a no-op when a vector is absent). A no-op when the doc grew or stayed the same size.
      */
     private Mono<Void> deleteStaleChunks(UUID tenantId, UUID techDocId, int newChunkCount, int priorChunkCount) {
         if (priorChunkCount <= newChunkCount) {
@@ -209,10 +205,8 @@ public class TechDocService {
             staleIndices.add(i);
         }
         return Flux.fromIterable(staleIndices)
-                .concatMap(i -> vectors.findByTenantIdAndSourceTypeAndSourceId(
-                                tenantId, RagRetrievalService.TECH_DOC_SOURCE_TYPE,
-                                chunkVectorId(techDocId, i))
-                        .flatMap(vectors::delete))
+                .concatMap(i -> vectorIndex.delete(tenantId,
+                        RagRetrievalService.TECH_DOC_SOURCE_TYPE, chunkVectorId(techDocId, i)))
                 .then();
     }
 

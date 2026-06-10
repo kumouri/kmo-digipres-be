@@ -13,10 +13,15 @@ is the **corpus model + chunking ingest** and the **tech-Q&A surface**. Demo col
 | # | Sub-phase | Status | Notes |
 |---|---|---|---|
 | 1 | Detail plan + this ledger | ✅ done | commit 1 |
-| 2 | Model + ingest: `EquipmentType`, `TechDoc`+repo, `TechQuery`+repo, `TechDocChunker`(+unit test), `TechDocService`, `RagRetrievalService.retrieveForCorpus` additive overload, `DomainEventType` T13 block | ⬜ pending | |
-| 3 | Answer + Q&A: `TechCopilotAnswerService`, `TechCopilotService`, controllers+DTOs, `TechCopilotAutoConfiguration`, `AutoConfiguration.imports`, `GlobalErrorHandler` Javadoc, demo seeder | ⬜ pending | |
-| 4 | Tests + docs: 4 new ITs, `CLAUDE.md` T13 entry, app-props doc; run + record regression | ⬜ pending | |
+| 2 | Model + ingest: `EquipmentType`, `TechDoc`+repo, `TechQuery`+repo, `TechDocChunker`(+unit test), `TechDocService`, `RagRetrievalService.retrieveForCorpus` additive overload, `DomainEventType` T13 block | ✅ done | commit 2; TechDocChunkerTest 6/6 |
+| 3 | Answer + Q&A: `TechCopilotAnswerService`, `TechCopilotService`, controllers+DTOs, `TechCopilotAutoConfiguration`, `AutoConfiguration.imports`, `GlobalErrorHandler` Javadoc, demo seeder | ✅ done | commit 3 |
+| 4 | Tests + docs: 4 new ITs, `CLAUDE.md` T13 entry, app-props doc; run + record regression | ✅ done | commit 4; added `VectorIndex.delete` seam for shrunk-reindex cleanup |
 | 5 | Push + ready PR | ⬜ pending | |
+
+## Result — T13 tests (validated via clean local IT re-run; full-ci OOM-impaired)
+- New T13 (17 tests, 0 failures): `TechDocChunkerTest` 6 (unit) · `TechDocIngestIT` 3 · `TechCopilotAnswerIT` 2 (cited-answer proof) · `TechCopilotNoContextIT` 3 (no-hallucination guardrail) · `TechCopilotModuleGateIT` 3.
+- Regression (all green): `RagRetrievalServiceTest`, `EmbeddingPipelineIT`, `RealEstateConciergeIT`, `RealEstateQualificationIT`, `RealEstateShowingBookingIT`, `MidnightResponderLatencyIT`, `OpenApiEndpointIT`.
+- Reused cores empty-diff verified (AskAiService / Embedding* / ConciergeAnswerService / ListingConciergeService / ListingDisclosureService / AiUsageRecorder). Additive shared-core seams: `RagRetrievalService.retrieveForCorpus`(+`CorpusChunk`+`TECH_DOC_SOURCE_TYPE`), `VectorIndex.delete`(+`MongoAtlasVectorIndex` impl + 4 RE test-double no-ops).
 
 ## Reuse contract (must stay empty-diff vs `main`)
 `AskAiService`, `EmbeddingService`, `OpenAiEmbeddingService`, `EmbeddingPipeline`, `VectorIndex`,

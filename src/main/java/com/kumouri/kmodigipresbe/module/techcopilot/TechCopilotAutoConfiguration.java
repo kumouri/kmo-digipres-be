@@ -10,7 +10,6 @@ import com.kumouri.kmodigipresbe.module.techcopilot.model.TechQueryRepository;
 import com.kumouri.kmodigipresbe.module.techcopilot.service.TechCopilotAnswerService;
 import com.kumouri.kmodigipresbe.module.techcopilot.service.TechCopilotService;
 import com.kumouri.kmodigipresbe.module.techcopilot.service.TechDocService;
-import com.kumouri.kmodigipresbe.repository.VectorDocumentRepository;
 import com.kumouri.kmodigipresbe.service.ai.AiUsageRecorder;
 import com.kumouri.kmodigipresbe.service.ai.embedding.EmbeddingService;
 import com.kumouri.kmodigipresbe.service.ai.rag.RagRetrievalService;
@@ -61,20 +60,18 @@ public class TechCopilotAutoConfiguration {
     /**
      * Owns the {@code TechDoc} CRUD AND the chunk-and-embed ingest (the §3 crux). Uses the shared
      * {@link EmbeddingService} + {@link VectorIndex} directly (the {@code ListingDisclosureService} shape),
-     * one upsert per chunk, carrying {@code techDocId}/{@code chunkIndex} metadata; the
-     * {@link VectorDocumentRepository} is used only to delete a shrunk doc's stale trailing chunk vectors
-     * (no shared-core change).
+     * one upsert per chunk, carrying {@code techDocId}/{@code chunkIndex} metadata; a shrunk doc's stale
+     * trailing chunk vectors are removed through the {@link VectorIndex#delete} seam.
      */
     @Bean
     public TechDocService techDocService(
             TechDocRepository docs,
             EmbeddingService embeddingService,
             VectorIndex vectorIndex,
-            VectorDocumentRepository vectors,
             DomainEventPublisher events,
             @Value("${kmosf.techcopilot.chunk-size:" + TechDocChunker.DEFAULT_MAX_CHARS + "}") int chunkSize,
             @Value("${kmosf.techcopilot.chunk-overlap:" + TechDocChunker.DEFAULT_OVERLAP + "}") int chunkOverlap) {
-        return new TechDocService(docs, embeddingService, vectorIndex, vectors, events,
+        return new TechDocService(docs, embeddingService, vectorIndex, events,
                 chunkSize, chunkOverlap);
     }
 
