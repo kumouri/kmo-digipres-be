@@ -1390,6 +1390,48 @@ import java.util.UUID;
  *       {@code CorpusChunk} record), a sibling of {@code retrieveForListing} that the RE concierge path does not
  *       touch (its ITs re-run green). Going live needs OpenAI embeddings + budget, an Atlas Vector Search index,
  *       an Anthropic key, + per-tenant module enablement (separate human actions, never the loop).</li>
+ *   <li>{@code 4520-4559} — <em>Home "DispatchIQ" (T14 — the FINAL flagship tool)</em>: an
+ *       <strong>intelligent dispatch optimizer</strong> that proposes the best-fit technician for each open
+ *       home-services {@code WorkOrder} (skill + availability + location/priority) on top of the EXISTING
+ *       manual dispatch board ({@code DispatchBoardService}), then applies the dispatcher-reviewed
+ *       assignments via the <strong>unchanged</strong> {@code WorkOrderService.update} path (reuse — apply
+ *       does not reinvent assignment; the board re-renders the committed {@code technicianUserId}s). The
+ *       ranking is <strong>pure / deterministic / explainable</strong> ({@code DispatchOptimizerService} —
+ *       a weighted composite {@code skillFit 0.45 + availability 0.30 + proximity 0.15 + priority 0.10} per
+ *       (work order, tech) + a greedy <em>priority-first</em> assigner that gives urgent/high-value jobs the
+ *       best free skill-matched tech, load-balances by current same-day load, and routes by
+ *       {@code JobSite.location} haversine), <strong>NOT an LLM</strong> (the T12
+ *       {@code StylerMatchScoringService} precedent). A job whose only candidates have a declared mismatched
+ *       skill is surfaced <strong>unassigned with a reason</strong> — never mis-assigned. <strong>New
+ *       codes:</strong> {@code 4520} work order not found for the tenant (404 — an apply decision references
+ *       an unknown id); {@code 4521} invalid optimize/analytics request — {@code date} missing/invalid (400);
+ *       {@code 4522} invalid apply request — null/empty decisions, or a decision missing a {@code workOrderId}
+ *       (400); {@code 4523} apply decision references a work order not in an assignable state — terminal
+ *       COMPLETED/CANCELLED (409, explicit-boolean — can't reassign a closed job). {@code 4524-4559}
+ *       RESERVED (the widest band — dispatch optimization has many future failure modes: multi-day windows,
+ *       hard time-window constraints, skill-certification gates, a real routing-API travel model). Reused
+ *       (NOT re-allocated): {@code 1130}/{@code 1132} module gate via {@code requireEnabled("dispatch")};
+ *       {@code 1800} RoleGuard STAFF; {@code 1330} the reused {@code WorkOrderService.findById} not-found
+ *       (the dispatch-local {@code 4520} is the apply-decision-validation code); {@code 3100}/{@code 3101}
+ *       the {@code @IdempotentRoute} middleware on {@code apply}. <strong>Module gate</strong>
+ *       {@code @ConditionalOnProperty(kmosf.modules.dispatch)} (default OFF, no {@code matchIfMissing}) +
+ *       {@code @ConditionalOnBean(WorkOrderService.class)} on {@code DispatchAutoConfiguration} (hand-builds
+ *       all services) + the controller (absent from the OpenAPI spec when off; {@code OpenApiEndpointIT} runs
+ *       with it off → no {@code dispatch} paths in {@code openapi.json} → the FE hand-writes all
+ *       {@code dispatch} {@code api/*.ts}, the T1-T13 precedent). <strong>Apply idempotency:</strong> an
+ *       explicit-boolean already-assigned skip (a work order already at its target tech → no save/event →
+ *       a re-apply is a no-op, no double-assign) + {@code @IdempotentRoute} as the request-replay backstop —
+ *       <strong>never {@code switchIfEmpty(assign)}</strong>. <strong>Reactive invariant:</strong>
+ *       {@code switchIfEmpty} only for genuine not-found (4520 / the reused service's 1330); the optimizer
+ *       compute + the apply batch run on {@code Schedulers.boundedElastic()} (off the Netty loop).
+ *       <strong>Reused cores stay empty-diff vs {@code main}</strong> ({@code DispatchBoardService},
+ *       {@code DispatchBoardController}, {@code DispatchBoardResponseDTO}, {@code WorkOrder}, {@code JobSite},
+ *       {@code WorkOrderService}, {@code WorkOrderRepository}, {@code ProjectAssignmentService},
+ *       {@code ServiceAgreementSchedulerService}); the lone additive reused-model edit is {@code User.skills}
+ *       (additive-nullable list — the T12 {@code StaffMember.specialties} precedent; {@code UserService}/
+ *       {@code TeamController} byte-identical). Going live needs a real routing/maps API for true drive-time
+ *       travel (T14 uses the board's straight-line haversine proxy), per-tenant module enablement, + a
+ *       human-curated tech skills roster (separate human actions, never the loop).</li>
  *   <li>{@code 4700-4719} — <em>Security hardening (PR B — BE-08/09/16, BE-10)</em>. A clean band above
  *       the flagship blocks for the cross-cutting security fixes. {@code 4700} outbound request blocked by
  *       the shared {@link com.kumouri.kmodigipresbe.security.OutboundUrlGuard} (400 — the URL is non-https,
