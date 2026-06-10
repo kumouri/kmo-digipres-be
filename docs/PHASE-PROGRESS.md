@@ -42,8 +42,30 @@ OFF → `InboundSmsService.claimService==null` → a YES falls through to the E2
 | T7.1 | Detail plan + this ledger | DONE | 0e821a3 | n/a (docs) |
 | T7.2 | `DomainEventType.APPOINTMENT_CANCELLED` (+ T7 advisory events) + minimal additive `AppointmentService` cancel-event emit | DONE | (T7.2 commit) | compileJava OK |
 | T7.3 | `module/frontdesk/reschedule/` package — `FrontDeskSlotMaterializer`, `RescheduleGapFillSubscriber`, `RescheduleWaitlistIntentHandler`, `RescheduleAnalyticsService`/`RescheduleFillLog`/repo/`RescheduleFillStats`, `RescheduleController`, `RescheduleFlowAutoConfiguration`; `AutoConfiguration.imports` line; `GlobalErrorHandler` 4420-4429 Javadoc; app-props doc | DONE | (this) | compileJava OK |
-| T7.4 | `RescheduleFlowDemoSeeder` (`@Profile("demo-health-reschedule")`) | PENDING | | |
-| T7.5 | ITs + regression + openapi regen + CLAUDE.md T7 entry + ledger finalize | PENDING | | |
+| T7.4 | `RescheduleFlowDemoSeeder` (`@Profile("demo-health-reschedule")`) | DONE | (T7.4 commit) | compileJava OK |
+| T7.5 | ITs (21, all green) + regression + openapi regen (no-diff) + CLAUDE.md T7 entry + ledger finalize | DONE | (this) | 21/21 T7 green; regression green; empty-diff verified |
+
+## Validation results (T7.5)
+
+- **T7 ITs (21/21 GREEN, Docker/Testcontainers):** `RescheduleGapFillIT` (6), `RescheduleWaitlistInboundYesIT`
+  (2), `RescheduleFlowModuleGateIT` (3 nested), `RescheduleFlowPhiFreeIT` (2), `RescheduleControllerIT` (5),
+  `AppointmentCancelEmitIT` (3).
+- **Regression (all GREEN):** `module.waitlist.*` (E4 engine — `WaitlistEngineIT` + `WaitlistRankingServiceTest`),
+  `module.chairfill.GapFillWaitlistIT` + `WaitlistBoardIT` (CF-3 — E4-deploy didn't disturb chairfill),
+  `module.frontdesk.*` + `OpenApiEndpointIT` (90 tests, 0 failures — incl. NoShow/voicemail/switchboard/nurture).
+- **openapi:** `verifyOpenApi` → "already matches the generated spec. OK." (default-OFF endpoints not in the
+  spec; `docs/api/openapi.json` unchanged — the flagship-5b/AR/T1-T6 precedent).
+- **Empty-diff verified vs `main` (0 lines each):** `service/waitlist/*`, `model/waitlist/*`,
+  `repository/waitlist/*`, `controller/waitlist/*`, `module/waitlist/*`, `TwilioSmsService`,
+  `InboundSmsService`, `service/responder/*`, `model/responder/*`, `module/chairfill/gapfill/*`,
+  `Appointment`, `AppointmentRepository`, `AppointmentController`. The ONLY additive frontdesk-core edit is
+  `AppointmentService` (+ `DomainEventType.APPOINTMENT_CANCELLED` + the `FrontDeskAutoConfiguration` bean
+  factory passing the publisher).
+- **Reactive invariants:** no `switchIfEmpty(create/send/claim)` in T7 business logic (the lone `switchIfEmpty`
+  is the demo seeder's idempotent `switchIfEmpty(Mono.defer(seedFresh))` — the `SwitchboardDemoSeeder` idiom);
+  the claim is E4's atomic `findAndModify`; no `.block()` in production paths.
+- **Error codes:** 4421 minted (waitlist-join no contactId, 400); 4420 + 4422-4429 RESERVED;
+  `GlobalErrorHandler` Javadoc `<li>` added after T6's 4410-4419.
 
 ## Reused-cores empty-diff watchlist (verify `git diff main --stat` at the end)
 `service/waitlist/*` (GapFillEngine, WaitlistClaimEngine, WaitlistRankingService, SlotMaterializer,
