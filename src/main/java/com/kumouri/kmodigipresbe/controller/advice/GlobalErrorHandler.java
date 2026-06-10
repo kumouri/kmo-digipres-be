@@ -1350,6 +1350,46 @@ import java.util.UUID;
  *       {@code DomainEventType} T12 block, this Javadoc, the {@code AutoConfiguration.imports} line). Going live needs
  *       per-tenant module enablement (chairfill + salon-spa) + A2P 10DLC for the booking-link SMS + an optional
  *       Cal.com OAuth (separate human actions, never the loop); no AI budget (deterministic match).</li>
+ *   <li>{@code 4490-4519} — <em>Home "Tech Copilot" (T13)</em>: a <strong>RAG-grounded, cited Q&amp;A
+ *       assistant for field technicians</strong> over a per-tenant corpus of equipment manuals / SOPs / spec
+ *       sheets — a tech asks "what's the reset for an X furnace fault E3?" → a grounded answer <strong>with
+ *       citations</strong> to the source docs, and <strong>never an ungrounded answer</strong> (no relevant
+ *       chunk → an honest "I don't have that documented" handoff; the model is never called on empty context).
+ *       Deploys the shipped RAG spine (the closest precedent is the RE-1 concierge): the net-new is the
+ *       <strong>corpus model + a chunking ingest</strong> ({@code TechDoc} + {@code TechDocChunker} — a manual
+ *       is multi-page, so it is split into overlapping windows and embedded <em>per chunk</em> as source type
+ *       {@code "TechDoc"} with {@code techDocId}/{@code chunkIndex} metadata; the {@code ListingDisclosureService}
+ *       direct-upsert shape, one upsert per chunk, deterministic per-chunk vector id so a re-index upserts in
+ *       place + deletes a shrunk doc's stale trailing chunks) and the <strong>tech-Q&amp;A surface</strong>
+ *       ({@code TechCopilotAnswerService} — the strict no-hallucination {@code ConciergeAnswerService} twin;
+ *       {@code TechCopilotService} — the {@code ListingConciergeService} twin: {@code retrieveForCorpus} top-k
+ *       → no-chunks short-circuit → strict Claude → {@code HANDOFF} detection → a cited answer deduped to one
+ *       citation per source doc → a persisted {@code TechQuery} usefulness-log row). <strong>New codes:</strong>
+ *       {@code 4490} tech doc not found for the tenant (404, get/update); {@code 4491} invalid tech doc — title
+ *       or text blank (400); {@code 4492} tech-doc indexing degraded — embedding/upsert failed (advisory log
+ *       only; the doc is saved, {@code indexedAt} left null, a re-index can retry — the RE-1 {@code 4252} posture;
+ *       <strong>never thrown</strong>); {@code 4493} tech query not found for the tenant (404, feedback);
+ *       {@code 4494} invalid ask request — question blank (400); {@code 4495} invalid feedback body — {@code helpful}
+ *       null (400). {@code 4496-4519} RESERVED (the wide band — RAG has more failure modes: ingest, retrieval,
+ *       no-context, embedding-budget). Reused (NOT re-allocated): {@code 1200/1201} AI budget gate, {@code 1202}
+ *       Anthropic upstream non-200, {@code 1203} missing AI key (all via the {@code TechCopilotAnswerService}
+ *       {@code ConciergeAnswerService} pattern); {@code 1130}/{@code 1132} module gate via
+ *       {@code requireEnabled("techcopilot")}; {@code 1800} RoleGuard STAFF. <strong>Module gate</strong>
+ *       {@code @ConditionalOnProperty(kmosf.modules.techcopilot)} (default OFF, no {@code matchIfMissing}) on
+ *       {@code TechCopilotAutoConfiguration} (hand-builds all services) + every controller (absent from the
+ *       OpenAPI spec when off; {@code OpenApiEndpointIT} runs with the module off → none land in the spec → the
+ *       FE hand-writes all {@code tech-copilot} {@code api/*.ts}, the T1-T12 precedent). <strong>No
+ *       {@code @IdempotentRoute}</strong> (no external side-effecting POST — ingest is a save, ask is a
+ *       read-mostly artifact). <strong>Reactive invariant:</strong> {@code switchIfEmpty} only for genuine
+ *       not-found (4490/4493); the no-context + ingest seams are explicit list-empty / boolean branches — never
+ *       {@code switchIfEmpty(create/index/answer)}. <strong>Reused cores stay empty-diff vs {@code main}</strong>
+ *       ({@code AskAiService}, {@code EmbeddingService}/{@code OpenAiEmbeddingService}/{@code EmbeddingPipeline},
+ *       {@code VectorIndex}/{@code MongoAtlasVectorIndex}, {@code AiUsageRecorder}, {@code ConciergeAnswerService},
+ *       {@code ListingConciergeService}, {@code ListingDisclosureService}); the lone additive shared-core seam is
+ *       {@code RagRetrievalService.retrieveForCorpus} (+ the {@code TECH_DOC_SOURCE_TYPE} constant + the additive
+ *       {@code CorpusChunk} record), a sibling of {@code retrieveForListing} that the RE concierge path does not
+ *       touch (its ITs re-run green). Going live needs OpenAI embeddings + budget, an Atlas Vector Search index,
+ *       an Anthropic key, + per-tenant module enablement (separate human actions, never the loop).</li>
  *   <li>{@code 4700-4719} — <em>Security hardening (PR B — BE-08/09/16, BE-10)</em>. A clean band above
  *       the flagship blocks for the cross-cutting security fixes. {@code 4700} outbound request blocked by
  *       the shared {@link com.kumouri.kmodigipresbe.security.OutboundUrlGuard} (400 — the URL is non-https,

@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
 import jakarta.annotation.Nullable;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -115,7 +116,17 @@ public class RagRetrievalService {
     public static final String TECH_DOC_SOURCE_TYPE = "TechDoc";
 
     /**
-     * Corpus-scoped retrieval for the Tech Copilot (T13). Additive overload — a near-verbatim sibling of
+     * A corpus-scoped hit (T13) that additionally carries the chunk's full {@code metadata} map, so the
+     * caller can build <em>doc-level</em> citations (e.g. group N chunks of the same manual under one
+     * {@code techDocId}/{@code techDocTitle}). Additive — distinct from {@link RetrievedChunk} (which the RE
+     * concierge path uses), so that record stays byte-unchanged.
+     */
+    public record CorpusChunk(UUID chunkId, String contentPreview, double score,
+                              Map<String, Object> metadata) {
+    }
+
+    /**
+     * Corpus-scoped retrieval for the Tech Copilot (T13). Additive overload — a sibling of
      * {@link #retrieveForListing} with only the source-type guard (no per-entity filter): a technician's
      * question searches the <em>whole</em> tenant corpus of one embedding source type, and the document
      * identity rides in each hit's metadata (so the cited answer can attribute it). The contact/deal
@@ -132,17 +143,17 @@ public class RagRetrievalService {
      * @param sourceType the embedding source type that bounds the corpus (e.g. {@link #TECH_DOC_SOURCE_TYPE})
      * @param topK       candidates to pull from the index
      */
-    public Flux<RetrievedChunk> retrieveForCorpus(UUID tenantId, String question,
-                                                  String sourceType, int topK) {
+    public Flux<CorpusChunk> retrieveForCorpus(UUID tenantId, String question,
+                                               String sourceType, int topK) {
         return embeddingService.embed(tenantId, question)
                 .flatMapMany(vector -> vectorIndex.search(tenantId, vector, topK, null))
                 .filter(hit -> hit.sourceId() != null)
                 .filter(hit -> sourceType.equals(hit.sourceType()))
-                .map(hit -> new RetrievedChunk(
-                        hit.sourceType(),
+                .map(hit -> new CorpusChunk(
                         hit.sourceId(),
                         previewFrom(hit),
-                        hit.score()))
+                        hit.score(),
+                        hit.metadata() != null ? hit.metadata() : Map.of()))
                 .onErrorResume(err -> {
                     log.warn("Corpus-scoped RAG retrieval failed for tenant {} sourceType {}: {}",
                             tenantId, sourceType, err.toString());
