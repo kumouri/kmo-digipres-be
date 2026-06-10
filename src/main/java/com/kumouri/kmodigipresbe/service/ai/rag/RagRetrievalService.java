@@ -111,6 +111,45 @@ public class RagRetrievalService {
     /** The embedding source type for {@code ListingDisclosure} text (RE-1 §3). */
     public static final String LISTING_DISCLOSURE_SOURCE_TYPE = "ListingDisclosure";
 
+    /** The embedding source type for Tech Copilot manual/SOP/spec-sheet chunks (T13 §3). */
+    public static final String TECH_DOC_SOURCE_TYPE = "TechDoc";
+
+    /**
+     * Corpus-scoped retrieval for the Tech Copilot (T13). Additive overload — a near-verbatim sibling of
+     * {@link #retrieveForListing} with only the source-type guard (no per-entity filter): a technician's
+     * question searches the <em>whole</em> tenant corpus of one embedding source type, and the document
+     * identity rides in each hit's metadata (so the cited answer can attribute it). The contact/deal
+     * {@link #retrieve} and the listing {@link #retrieveForListing} signatures are byte-unchanged, so every
+     * existing caller (NMM / the RE concierge) is unaffected.
+     *
+     * <p>The {@code sourceType} guard ({@code "TechDoc"}) is what keeps grounding "corpus-scoped" — only
+     * manual chunks, never generic CRM activity/quote/email vectors or RE listing-disclosure vectors, can
+     * ground a tech answer. Falls back to an empty flux if the vector index is unavailable — the copilot
+     * then short-circuits to a handoff (never grounds on nothing; T13-D4).
+     *
+     * @param tenantId   the tenant scope — mandatory
+     * @param question   the technician's question to embed as a query vector
+     * @param sourceType the embedding source type that bounds the corpus (e.g. {@link #TECH_DOC_SOURCE_TYPE})
+     * @param topK       candidates to pull from the index
+     */
+    public Flux<RetrievedChunk> retrieveForCorpus(UUID tenantId, String question,
+                                                  String sourceType, int topK) {
+        return embeddingService.embed(tenantId, question)
+                .flatMapMany(vector -> vectorIndex.search(tenantId, vector, topK, null))
+                .filter(hit -> hit.sourceId() != null)
+                .filter(hit -> sourceType.equals(hit.sourceType()))
+                .map(hit -> new RetrievedChunk(
+                        hit.sourceType(),
+                        hit.sourceId(),
+                        previewFrom(hit),
+                        hit.score()))
+                .onErrorResume(err -> {
+                    log.warn("Corpus-scoped RAG retrieval failed for tenant {} sourceType {}: {}",
+                            tenantId, sourceType, err.toString());
+                    return Flux.empty();
+                });
+    }
+
     private static boolean matchesContact(VectorIndex.VectorSearchHit hit, UUID contactId) {
         Object val = hit.metadata() != null ? hit.metadata().get("contactId") : null;
         return contactId.toString().equals(val instanceof String ? val : (val != null ? val.toString() : null));

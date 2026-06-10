@@ -633,6 +633,17 @@ public final class DomainEventType {
     public static final String STYLER_MATCH_REQUESTED = "stylerMatch.requested";
     public static final String STYLER_MATCH_BOOKED    = "stylerMatch.booked";
 
+    // T13 (Home "Tech Copilot", band 4490-4519) — a RAG-grounded, cited Q&A assistant for field
+    // technicians over a per-tenant corpus of equipment manuals / SOPs / spec sheets. Both events are
+    // advisory — they drive no core mutation; the index + the persisted query are synchronous + explicit
+    // inside the techcopilot-gated services. Emitted only when the `techcopilot` module is on.
+    // TECH_DOC_INDEXED: emitted by TechDocService after a doc's text is chunked + embedded + upserted into
+    //   the vector index. Payload: {techDocId, equipmentType, chunkCount}.
+    // TECH_QUERY_ANSWERED: emitted by TechCopilotService after an answer (grounded or handoff) persists.
+    //   Payload: {techQueryId, handoff, citedDocCount}.
+    public static final String TECH_DOC_INDEXED     = "techCopilot.docIndexed";
+    public static final String TECH_QUERY_ANSWERED  = "techCopilot.queryAnswered";
+
     private DomainEventType() {
     }
 }
