@@ -44,6 +44,22 @@ public class StaffMember implements Auditable {
     @Builder.Default
     private List<String> eligibleServiceIds = List.of();
 
+    /**
+     * T12 (Salon "StylerMatch") — free-text specialty/skill keywords the stylist is known for
+     * (e.g. {@code "balayage"}, {@code "curly hair"}, {@code "color correction"}, {@code "bridal"}).
+     * <strong>Additive + nullable</strong> (the {@code Product.unitCost} / {@code Booking.noShowRisk}
+     * additive-nullable precedent): legacy {@code salon_staff} docs deserialize this as an empty list =
+     * no declared specialty (ranked accordingly by {@code StylerMatchScoringService}, never excluded).
+     *
+     * <p>Distinct from {@link #eligibleServiceIds}, which is the <em>hard</em> service-id eligibility
+     * constraint enforced by {@code BookingPolicyService} at booking time; {@code specialties} is the
+     * <em>soft</em> style-fit signal StylerMatch matches a requested style against to rank stylists.
+     * Salon-spa core ({@code StaffMemberService}/{@code BookingPolicyService}/{@code SalonBookingService})
+     * never reads or writes this field — it is purely an additive StylerMatch input.
+     */
+    @Builder.Default
+    private List<String> specialties = List.of();
+
     @Builder.Default
     private List<AvailabilityWindow> availabilityWindows = List.of();
 
