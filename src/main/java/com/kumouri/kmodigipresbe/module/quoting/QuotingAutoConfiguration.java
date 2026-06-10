@@ -1,10 +1,16 @@
 package com.kumouri.kmodigipresbe.module.quoting;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kumouri.kmodigipresbe.extension.ModuleAutoConfigurationSupport;
 import com.kumouri.kmodigipresbe.extension.ModuleDefinition;
 import com.kumouri.kmodigipresbe.module.quoting.repository.PriceBookRepository;
 import com.kumouri.kmodigipresbe.module.quoting.service.PriceBookService;
 import com.kumouri.kmodigipresbe.module.quoting.service.QuoteSynthesisService;
+import com.kumouri.kmodigipresbe.module.quoting.service.QuoteVisionService;
+import com.kumouri.kmodigipresbe.repository.AttachmentRepository;
+import com.kumouri.kmodigipresbe.service.ai.vision.AiVisionService;
+import com.kumouri.kmodigipresbe.service.storage.FileStorageService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -60,5 +66,15 @@ public class QuotingAutoConfiguration {
     @Bean
     public PriceBookService priceBookService(PriceBookRepository priceBooks) {
         return new PriceBookService(priceBooks);
+    }
+
+    @Bean
+    public QuoteVisionService quoteVisionService(
+            FileStorageService storage,
+            AttachmentRepository attachments,
+            AiVisionService visionService,
+            ObjectMapper objectMapper,
+            @Value("${kmosf.quoting.vision-model:claude-sonnet-4-5}") String visionModel) {
+        return new QuoteVisionService(storage, attachments, visionService, objectMapper, visionModel);
     }
 }
