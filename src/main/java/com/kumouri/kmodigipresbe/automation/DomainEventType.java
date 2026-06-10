@@ -619,6 +619,20 @@ public final class DomainEventType {
     public static final String QUOTE_CLOSER_RECOVERED        = "quoteCloser.recovered";
     public static final String QUOTE_CLOSER_REVIEW_REQUESTED = "quoteCloser.reviewRequested";
 
+    // T12 (Salon "StylerMatch", band 4480-4489) — match a requested service/style to the best-fit stylist
+    // (specialty fit + availability + preference) via a pure, deterministic scorer (NOT an LLM call), then
+    // book via the unchanged SalonBookingService. Both events are advisory — they drive no core mutation;
+    // the persist + the booking are synchronous + explicit inside the chairfill-gated StylerMatch services.
+    // Emitted only when the `chairfill` (salon flagship) module is on for a salon tenant.
+    // STYLER_MATCH_REQUESTED: emitted by StylerMatchService after a submission persists a StylerMatch with
+    //   a ranked stylist board. Payload: {stylerMatchId, contactId, styleCategory, serviceMenuItemId,
+    //   rankedCount, topStaffMemberId, topScore}.
+    // STYLER_MATCH_BOOKED: emitted by StylerMatchBookingService after a client accepts a ranked stylist +
+    //   a real salon Booking is created. Payload: {stylerMatchId, contactId, staffMemberId, bookingId,
+    //   selectedRank}.
+    public static final String STYLER_MATCH_REQUESTED = "stylerMatch.requested";
+    public static final String STYLER_MATCH_BOOKED    = "stylerMatch.booked";
+
     private DomainEventType() {
     }
 }

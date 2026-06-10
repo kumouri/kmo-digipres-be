@@ -1,60 +1,54 @@
-# PHASE-PROGRESS — T11 Home "QuoteCloser" (BE leg)
+# PHASE-PROGRESS — T12 Salon "StylerMatch" (BE leg)
 
-Branch: `home-quotecloser` (off `main` @ 5629e34)
-Plan: `~/.claude/plans/home-quotecloser.md`
-Module: `module/quoting/closer/` · gate `kmosf.modules.quoting` **AND** `nurture` · error band 4470-4479 · default OFF
+Branch: `salon-stylermatch` (off `main` @ `ee257d3`)
+Plan: `~/.claude/plans/salon-stylermatch.md`
+Module: **new `module/stylermatch/`** · rides the **`chairfill`** salon-flagship key (the T9 StyleConsult posture) · error band **4480-4489** · default OFF
 
-The **first Wave-4 composition tool** — composes **three shipped pieces**, builds only the triggers/glue:
-**T8 QuoteNow** (the un-accepted `QuoteRequest`/`NEW` signal + `QUOTE_ACCEPTED`) + **E1 Nurture** (the
-cadence + the unique-index enroll + the default-OFF runner + the GATE-2 vertical filter) + **E3 Reviews**
-(the `ReviewRequest` + the default-OFF sender).
+Match a new client's **requested service/style** → the **best-fit stylist** (specialty fit + availability + past-preference) → a **ranked, explained** match (deterministic, NOT an LLM call) → **book** via the UNCHANGED `SalonBookingService.create`. The stylist-side twin of T9 StyleConsult (which ranks services + retail).
 
-## What each reused piece provides vs T11 net-new (thin by design)
+## The one justified model seam — `StaffMember.specialties`
 
-- **T8 quoting** → the source signal: a `NEW` quote that sits un-accepted past a window; `QUOTE_ACCEPTED`
-  on accept. T11 adds the **aging sweep** + the **accept subscriber** (zero quoting edit).
-- **E1 nurture** → the cadence + the `tenant_campaign_contact_idx` explicit-boolean enroll + the `EXITED`
-  terminal stop + the default-OFF `NurtureRunner` that sends the touches. T11 adds the **enroll call** +
-  the **EXITED stop call** (zero nurture-core edit; the campaign is tagged `vertical="home"` ⇒ unfiltered).
-- **E3 reviews** → the `ReviewRequest` record + creation idempotency + the default-OFF `ReviewRequestSenderJob`
-  delivery. T11 adds the **explicit-boolean create** of one `ReviewRequest` on accept (zero E3 edit; the
-  shipped sender delivers).
+`StaffMember.eligibleServiceIds` is a HARD service-id eligibility constraint (empty = any), not a free-text style/skill signal. T12 adds ONE strictly-additive, nullable `List<String> specialties` (`@Builder.Default = List.of()`, the `Product.unitCost`/`Booking.noShowRisk` additive-nullable precedent — legacy docs read empty = no declared specialty, ranked-not-excluded). **`StaffMemberService` stays byte-identical** — it never references the new field (no `specialties` merge added; keeping the service empty-diff is the stronger reuse guarantee; specialties are seeded + read by StylerMatch, staff-edit is an out-of-scope additive follow-up). This is THE one allowed seam on a reused model.
 
 ## Sub-phase ledger
 
-- [x] **P0 — detail plan** (`~/.claude/plans/home-quotecloser.md`) + fresh `docs/PHASE-PROGRESS.md`. Commit `6b096ee`.
-- [x] **P1 — config** `QuoteCloserConfig` + repo + `QuoteCloserConfigDTO` + `QuoteCloserConfigController` (ADMIN, both-module). 4470/4471.
-- [x] **P2 — enrollment job** `QuoteCloserEnrollmentJob` (default-OFF `@Scheduled`): age NEW quotes → explicit-boolean enroll into the campaign; exit enrollments whose quote went non-NEW.
-- [x] **P3 — accept subscriber** `QuoteWonSubscriber` (`@PostConstruct` on `QUOTE_ACCEPTED`): stop the cadence (EXITED) + create exactly one `ReviewRequest` (explicit-boolean).
-- [x] **P4 — analytics** `QuoteCloserAnalytics` + `QuoteCloserAnalyticsService` + `QuoteCloserController` (`GET .../analytics`).
-- [x] **P5 — wiring** `QuoteCloserAutoConfiguration` (both-module gate) + `DomainEventType` T11 block + `GlobalErrorHandler` 4470-4479 Javadoc + app-props doc + `AutoConfiguration.imports`. **`compileJava` PASS.**
-- [x] **P6 — demo seed** `QuoteCloserDemoSeeder` (`@Profile("demo-home-quote-closer")`) — "Comfort Air HVAC (QuoteCloser)" + quoting+nurture, a home-vertical QuoteCloser campaign (reminder→financing-nudge→last-call), a 0-hour-window config, + one NEW quote. `compileJava` PASS.
-- [x] **P7 — T11 ITs** (enroll 5, won 4, unfiltered-copy GATE-2 proof 1, analytics 2, module-gate 3) — all green (see Validation log).
-- [x] **P7b — wiring fix (real bug the regression batch surfaced):** the component-scanned `QuoteCloserController` (`@ConditionalOnProperty(quoting)`) depends on `QuoteCloserAnalyticsService`, but that bean was both-module-gated → context-load failure when quoting ON + nurture OFF. **Fix:** split the read surface into a quoting-only `QuoteCloserReadAutoConfiguration` (wires the analytics service); the both-module `QuoteCloserAutoConfiguration` keeps only the ACTIVE glue (job + subscriber). The both-module requirement is still enforced per-tenant by the controllers' `requireEnabled("quoting")` AND `requireEnabled("nurture")`. `QuoteCloserModuleGateIT.NurtureOff` now asserts the context LOADS (read surface present, active glue absent). All 3 gate contexts green.
-- [x] **P8 — regression** green: `nurture.*` (E1 + GATE-2 `BothVerticalsNurtureCopyFilterIT`); `integration.gbp.*` (E3/ReviewBoost); the T8 quoting ITs; `OpenApiEndpointIT`. `openapi.json` UNCHANGED vs main (QuoteCloser endpoints module-gated OFF → absent; FE hand-writes `api/quote-closer.ts`).
-- [x] **P9 — docs** (CLAUDE.md T11 entry added after T10) + PR (next).
+- [x] **P0 — detail plan** (`~/.claude/plans/salon-stylermatch.md`) + fresh `docs/PHASE-PROGRESS.md` (overwrites the stale T11 ledger on `main`). Commit `cfee721`.
+- [x] **P1 — the `StaffMember.specialties` seam + `StylerMatchScoringService`** (pure/deterministic/explainable; the marquee). Weighted specialty-fit + eligibility + availability (window coverage + read-only slot-conflict) + preference (explicit + prior-COMPLETED-visit); ranked + rationale + confidence; central `STYLIST_CONFIRM_NOTE`. `StaffMemberService` UNCHANGED. `MatchRequest`/`RankedMatch`. **`StylerMatchScoringServiceTest` 11/11 green (pure, no Docker).** Commit `5dcb384`.
+- [x] **P2 — match intake + ranked result.** `StylerMatch` entity + `StylerMatchStatus` + repo + `StylerMatchService` orchestrator (public-token + staff-desk; find-or-create contact explicit-boolean) + `StylerMatchIntakeController` (public JSON, token; strips client `contactId`) + `StylerMatchController` (staff create/inbox) + `StylerMatchTokenController` (ADMIN mint) + `StylerMatchResponse`/`StylerMatchRequestBody`. No multipart/AI.
+- [x] **P3 — match→booking funnel.** `StylerMatchBookingService.accept` (explicit-boolean idempotent `bookingId != null`; UNCHANGED `SalonBookingService.create`; `BookingPolicyService` enforces the hard eligibility/availability at book time; stamps `selectedRank`) + `StylerMatchAcceptController` (public, no `@IdempotentRoute`).
+- [x] **P4 — match analytics.** `StylerMatchAnalyticsService` accept-rate-**by-rank** funnel (which rank got booked) + `StylerMatchAnalytics` DTO + `GET /stylermatch/analytics`.
+- [x] **P5 — wiring.** `StylerMatchAutoConfiguration` (chairfill + `@ConditionalOnBean(SalonBookingService)`) + `DomainEventType` T12 block (STYLER_MATCH_REQUESTED/BOOKED) + `GlobalErrorHandler` 4480-4489 Javadoc + `AutoConfiguration.imports` + app-props doc. **`compileJava` PASS.** Empty-diff + reactive-invariant verified (below).
+- [x] **P6 — demo seed.** `StylerMatchDemoSeeder` (`@Profile("demo-salon-stylermatch")`) — "Shear Brilliance Studio" + salon-spa+chairfill + a service menu + 4 stylists (Maya balayage/curly all-eligible Tue-Sat; Jordan blonde/highlights all-eligible Wed-Sun; Sam cut/keratin NOT-color-eligible Mon-Fri; Riley no-specialty versatile Mon-Sat) + a sandbox bookingLink. `compileJava` PASS.
+- [x] **P7 — T12 ITs (all green, Docker).** `StylerMatchIntakeIT` (5), `StylerMatchAcceptIT` (5), `StylerMatchAnalyticsIT` (4), `StylerMatchModuleGateIT` (2) + the pure `StylerMatchScoringServiceTest` (11). **Regression all green:** `module.chairfill.*` (8 classes / 50 — these exercise the salon-spa `SalonBookingService`/`Booking`/`ServiceMenu`/`StaffMember` cores) + `OpenApiEndpointIT` (2). No standalone `module.salonspa.*` IT package exists (the salon-spa cores are regression-covered via `module.chairfill.*`).
+- [x] **P8 — docs + PR.** CLAUDE.md T12 entry added (after T11, in the Wave-4 section + the band note); PR opened ready.
 
 ## Validation log
+- `./gradlew compileJava` (P1) — PASS (clean; only pre-existing deprecation/unchecked notes).
+- `./gradlew test --tests "…stylermatch.StylerMatchScoringServiceTest"` (P1) — **PASS 11/11** (the ranking proof: specialty-fit ranks right; availability conflict demotes; window coverage outranks; eligibility miss penalized-but-visible; preference bump; explicit-preferred largest; deterministic across runs; empty-specialties ranked-not-excluded; confidence; guardrail on every rationale).
+- `./gradlew compileJava` (P2-P5) — PASS (clean).
+- **Empty-diff (reused cores) — VERIFIED EMPTY** vs `main`: `SalonBookingService`, `BookingPolicyService`, `Booking`, `ServiceMenu`, `ServiceMenuItem`, `SalonMenuService`, `StaffMemberService`, `PublicWidgetTokenService`, all `module/chairfill/*`, all `module/styleconsult/*`. Only reused-model edit = `StaffMember.java` (+16, the additive `specialties` seam).
+- **Reactive-invariant — VERIFIED**: the only `switchIfEmpty` code in `module/stylermatch` is 2× genuine not-found (`Mono.error` 4485) + 1× find-fallback (`byPhone.switchIfEmpty(byEmail)`). Find-or-create create branch is explicit-boolean (`Optional`); accept idempotency is explicit-boolean (`bookingId != null`). **Zero `switchIfEmpty(create/book)`.**
+- `./gradlew test --tests "…stylermatch.StylerMatchModuleGateIT" --tests "…StylerMatchIntakeIT"` — **PASS** (ModuleGate 2/2, Intake 5/5).
+- `./gradlew test --tests "…stylermatch.StylerMatchAcceptIT" --tests "…StylerMatchAnalyticsIT"` — **PASS** (Accept 5/5 incl. the hard-eligibility-reject-at-book-time 2900 proof + idempotent re-accept; Analytics 4/4 incl. the accept-rate-by-rank funnel).
+- `./gradlew test --tests "…chairfill.NoShowRiskScoringIT" "…RiskTieredPreventionIT" "…GapFillWaitlistIT" "…WaitlistBoardIT"` (regression batch 1) — **PASS** (8/5/11/6 = 30).
+- `./gradlew test --tests "…chairfill.OfferExpirySweepIT" "…SalonReviewBoostConfigIT" "…SalonReviewBoostInsightsIT" "…SalonReviewReplyIT" "…openapi.OpenApiEndpointIT"` (regression batch 2) — **PASS** (3/4/5/8 + OpenApi 2/2).
+- **`openapi.json` UNCHANGED vs `main`** (verified empty-diff; T12 endpoints module-gated OFF → absent → the FE hand-writes ALL `stylermatch` `api/*.ts`, the T1-T11 precedent).
+- ITs run in small batches per the shared-Mongo Testcontainers-lifecycle note (single-fork large batches are Mongo-flaky); the authoritative gate is the sharded `full-ci.yml`.
 
-- `./gradlew compileJava compileTestJava` — PASS (clean; only pre-existing deprecation/unchecked notes).
-- `./gradlew test --tests "…closer.QuoteCloserWonIT" --tests "…QuoteCloserAnalyticsIT" --tests "…QuoteCloserModuleGateIT"` — PASS (Won 4/4, Analytics 2/2, ModuleGate 3/3 nested).
-- `./gradlew test --tests "…closer.QuoteCloserEnrollmentIT" --tests "…QuoteCloserUnfilteredCopyIT"` — PASS (Enrollment 5/5, UnfilteredCopy 1/1).
-- `./gradlew test --tests "…closer.QuoteCloserWonIT" --tests "…QuoteCloserModuleGateIT"` (re-run) — PASS.
-- **NOTE — combined `--tests "…closer.*"` in ONE invocation FAILED with `MongoSocketOpenException: Connection refused localhost:13200`** on Won + the NurtureOff gate context — the documented Testcontainers-lifecycle / shared-Mongo isolation artifact (the Mongo container is torn down between Spring contexts; cached contexts then point at a dead port). NOT a logic bug: every class passes in a batch small enough that the shared container stays up. The authoritative gate is the sharded `full-ci.yml`. (See MEMORY: "single-fork `./gradlew test` is Mongo-flaky; cascade timeouts ≠ real failures".)
+## New endpoints (for the FE leg — all default-OFF, absent from openapi.json)
+- `POST /public/integrations/stylermatch/{token}/match` (public widget, JSON `StylerMatchRequestBody`, token `styler-match`) → `StylerMatchResponse` (ranked board).
+- `POST /public/integrations/stylermatch/{token}/matches/{matchId}/accept?staffMemberId=` (public, no `@IdempotentRoute`) → `StylerMatchResponse` (BOOKED).
+- `POST /stylermatch/matches` (staff, 201, `StylerMatchRequestBody`) → `StylerMatchResponse`.
+- `GET /stylermatch/matches` (staff) → `StylerMatchResponse[]` (inbox, newest first).
+- `GET /stylermatch/matches/{id}` (staff) → `StylerMatchResponse` (4485 if absent).
+- `GET /stylermatch/analytics` (staff) → `StylerMatchAnalytics` (accept-rate-by-rank funnel).
+- `POST /stylermatch/tokens` (ADMIN, 201) → `{"token": "..."}` (mints the `styler-match` widget token).
 
 ## Reactive-invariant check
-
-`grep switchIfEmpty module/quoting/closer` MUST show only genuine not-found (config 4470
-`switchIfEmpty(Mono.error)`) + the idempotent demo-seeder `switchIfEmpty(seedFresh)`. **Zero
-`switchIfEmpty(create/enroll/send)`** — the enroll seam and the review-request seam are BOTH
-explicit-boolean (`findBy…().map(true).defaultIfEmpty(false)` + `onErrorResume(DuplicateKeyException)`),
-mirroring `TierRoutingService.enrollIfAbsent` + `ReviewRequestService.createIfAbsent`.
+`grep switchIfEmpty module/stylermatch` MUST show only genuine not-found (`switchIfEmpty(Mono.error(...))`, codes 4480/4485) + the idempotent demo-seeder `switchIfEmpty(seedFresh)`. **Zero `switchIfEmpty(create/book)`** — the accept idempotency seam is explicit-boolean (`bookingId != null`).
 
 ## Empty-diff confirmation (reused cores)
+`git diff main --stat` MUST show ZERO change to: `SalonBookingService.java`, `BookingPolicyService.java`, `Booking.java`, `ServiceMenu.java`, `ServiceMenuItem.java`, `SalonMenuService.java`, `StaffMemberService.java`, `PublicWidgetTokenService.java`, `TwilioSmsService.java`, all `module/chairfill/*`, all `module/styleconsult/*`. The ONLY reused-model edit is the additive `StaffMember.specialties` field (justified above). The `module/stylermatch/` package is strictly additive; the only other shared-file edits are additive (`DomainEventType` +2 constants, `GlobalErrorHandler` +Javadoc, `AutoConfiguration.imports` +1 line, `application.properties` doc).
 
-`git diff main --stat` MUST show ZERO change to: `QuoteBookingService.java`, `QuoteRequest.java`,
-`QuoteRequestRepository.java`, `NurtureRunner.java`, `NurtureMessageComposer.java`,
-`NurtureSegmentationService.java`, `NurtureReplyService.java`, `ReviewRequestService.java`,
-`ReviewRequest.java`, `ReviewRequestRepository.java`, `ReviewRequestSenderJob.java`, `TwilioSmsService.java`.
-The `module/quoting/closer/` package is strictly additive; the only shared-file edits are additive
-(`DomainEventType` +3 constants, `GlobalErrorHandler` +Javadoc, `org.springframework.boot.autoconfigure.AutoConfiguration.imports` +1 line, `application.properties` doc).
+## Error band 4480-4489
+4480 token widgetType mismatch (401) · 4481 invalid match request (400) · 4482 no active stylists (404) · 4483 no rankable stylist to book (404) · 4484 RESERVED · 4485 match not found (404) · 4486 match not acceptable-state (409, RESERVED-advisory) · 4487-4489 RESERVED. Reused: 1600-1603 (token), 2900/2901 (salon Booking eligibility/availability via the unchanged services), 2530-2532 (SMS), 1130/1132 (module gate), 1800 (ADMIN).
