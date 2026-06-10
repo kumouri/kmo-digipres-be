@@ -53,13 +53,20 @@ env:
 
 jobs:
   test:
-    name: gradle test (shard ${{ matrix.shard }}/8)
-    runs-on: ubuntu-latest
+    name: gradle test (shard ${{ matrix.shard }}/4)
+    # CI-08: 4 GitHub-hosted larger runners (kmosf-16gb = 4-core/16GB). The suite
+    # outgrew the 2-core/7GB free runners — the heaviest shard's test JVM (many
+    # @SpringBootTest contexts + Netty off-heap) plus the Testcontainers Mongo
+    # exhausted 7GB and the OOM-killer reaped Mongo (a "Connection refused" cascade).
+    # 16GB gives headroom; 4 shards on 4-core (~2x/min) keeps billed minutes roughly
+    # neutral vs the old 8 x (2-core x 1x). The openapi + ci-gate jobs stay on the
+    # free ubuntu-latest (a single boot / no full suite).
+    runs-on: kmosf-16gb
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v6
 
@@ -79,8 +86,8 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      - name: ./gradlew test (shard ${{ matrix.shard }}/8)
-        run: ./gradlew test -Dtest.shard.index=${{ matrix.shard }} -Dtest.shard.total=8 --build-cache --no-daemon --stacktrace
+      - name: ./gradlew test (shard ${{ matrix.shard }}/4)
+        run: ./gradlew test -Dtest.shard.index=${{ matrix.shard }} -Dtest.shard.total=4 --build-cache --no-daemon --stacktrace
         # Each shard runs in a fresh runner with its own Docker engine => its own
         # singleton Testcontainers Mongo/Kafka. maxParallelForks=1 is preserved within
         # each shard; isolation is across jobs, not JVM forks. Ryuk is disabled (env
