@@ -1,52 +1,55 @@
-# PHASE-PROGRESS — T10 Real Estate "Listing Prep Studio" (BE leg)
+# PHASE-PROGRESS — T11 Home "QuoteCloser" (BE leg)
 
-Branch: `realestate-listing-prep` (off `main` @ 954504a)
-Plan: `~/.claude/plans/realestate-listing-prep.md`
-Module: `module/realestate/listingprep/` · gate `kmosf.modules.realestate` · error band 4460-4469
+Branch: `home-quotecloser` (off `main` @ 5629e34)
+Plan: `~/.claude/plans/home-quotecloser.md`
+Module: `module/quoting/closer/` · gate `kmosf.modules.quoting` **AND** `nurture` · error band 4470-4479 · default OFF
 
-## What RE-4 already covers vs T10 net-new
+The **first Wave-4 composition tool** — composes **three shipped pieces**, builds only the triggers/glue:
+**T8 QuoteNow** (the un-accepted `QuoteRequest`/`NEW` signal + `QUOTE_ACCEPTED`) + **E1 Nurture** (the
+cadence + the unique-index enroll + the default-OFF runner + the GATE-2 vertical filter) + **E3 Reviews**
+(the `ReviewRequest` + the default-OFF sender).
 
-RE-4 Marketing Studio already ships: photo intake, `AiVisionService` feature/condition extraction, MLS
-description + social captions + email blast, `FairHousingLint`, draft→approve. The listing already feeds the
-concierge (RAG). **T10 net-new = (1) a 4-week dated social CALENDAR, (2) the cohesive "Listing Prep Studio"
-prep-pack tying description + calendar + email to a Listing.** Everything else is reused; RE-4 cores stay
-empty-diff.
+## What each reused piece provides vs T11 net-new (thin by design)
 
-## Sub-phase ledger (ALL DONE)
+- **T8 quoting** → the source signal: a `NEW` quote that sits un-accepted past a window; `QUOTE_ACCEPTED`
+  on accept. T11 adds the **aging sweep** + the **accept subscriber** (zero quoting edit).
+- **E1 nurture** → the cadence + the `tenant_campaign_contact_idx` explicit-boolean enroll + the `EXITED`
+  terminal stop + the default-OFF `NurtureRunner` that sends the touches. T11 adds the **enroll call** +
+  the **EXITED stop call** (zero nurture-core edit; the campaign is tagged `vertical="home"` ⇒ unfiltered).
+- **E3 reviews** → the `ReviewRequest` record + creation idempotency + the default-OFF `ReviewRequestSenderJob`
+  delivery. T11 adds the **explicit-boolean create** of one `ReviewRequest` on accept (zero E3 edit; the
+  shipped sender delivers).
 
-- [x] **P0 — detail plan** (`~/.claude/plans/realestate-listing-prep.md`) + fresh `docs/PHASE-PROGRESS.md`. Commit `7ecfee6`.
-- [x] **P1 — model** `ListingPrepPack` + `ListingPrepPackRepository` (+ nested `SocialPost`/`PhotoNote`/`FairHousingFlag`).
-- [x] **P2 — `SocialCalendarGenerationService`** (Anthropic Sonnet, JSON-array of week+dayOffset+channel+copy; best-effort→empty).
-- [x] **P3 — `ListingPrepService`** orchestrator (reuse `AiVisionService.extract` + `MarketingGenerationService` + `FairHousingLint`; calendar date-assign + safe-substitute held posts; DRAFTED; approve/skip). Commit `da53d51`.
-- [x] **P4 — `ListingPrepController`** (6 endpoints, gated + STAFF) + `ListingPrepDemoSeeder` (`@Profile("demo-realestate-listingprep")`).
-- [x] **P5 — wiring** `RealEstateAutoConfiguration` (2 beans + @Value) + `DomainEventType` (`LISTING_PREP_GENERATED`/`_APPROVED`) + `GlobalErrorHandler` 4460-4469 Javadoc.
-- [x] **P6 — T10 ITs** (`RealEstateListingPrepIT` 6 + `RealEstateListingPrepModuleGateIT` 2). Commit `5c60e82` (also fixed the concurrent AI-spend race).
-- [x] **P7 — regression** (`module.realestate.*` incl. RE-4 marketing + FairHousing, `*AiVisionServiceIT`, `OpenApiEndpointIT`) green.
-- [x] **P8 — docs** (CLAUDE.md T10 entry) + PR.
+## Sub-phase ledger
+
+- [ ] **P0 — detail plan** (`~/.claude/plans/home-quotecloser.md`) + fresh `docs/PHASE-PROGRESS.md` (this commit).
+- [ ] **P1 — config** `QuoteCloserConfig` + repo + `QuoteCloserConfigController` (ADMIN, both-module). 4470/4471.
+- [ ] **P2 — enrollment job** `QuoteCloserEnrollmentJob` (default-OFF `@Scheduled`): age NEW quotes → explicit-boolean enroll into the campaign; exit enrollments whose quote went non-NEW.
+- [ ] **P3 — accept subscriber** `QuoteWonSubscriber` (`@PostConstruct` on `QUOTE_ACCEPTED`): stop the cadence (EXITED) + create exactly one `ReviewRequest` (explicit-boolean).
+- [ ] **P4 — analytics** `QuoteCloserAnalyticsService` + `QuoteCloserController` (`GET .../analytics`).
+- [ ] **P5 — wiring** `QuoteCloserAutoConfiguration` (both-module gate) + `DomainEventType` T11 block + `GlobalErrorHandler` 4470-4479 Javadoc + app-props doc + `AutoConfiguration.imports`.
+- [ ] **P6 — demo seed** `QuoteCloserDemoSeeder` (`@Profile("demo-home-quote-closer")`).
+- [ ] **P7 — T11 ITs** (enroll, stop, review, unfiltered-copy GATE-2 proof, analytics, module gate).
+- [ ] **P8 — regression** (`module.quoting.*`, `nurture.*` incl. `BothVerticalsNurtureCopyFilterIT`, `integration.gbp.*`, `OpenApiEndpointIT`) green.
+- [ ] **P9 — docs** (CLAUDE.md T11 entry) + PR.
 
 ## Validation log
 
-- `./gradlew compileJava compileTestJava` — PASS (clean; only pre-existing unrelated unchecked-ops notes).
-- `./gradlew test --tests "…RealEstateListingPrepIT"` — PASS (6/6).
-- `./gradlew test --tests "…RealEstateListingPrepModuleGateIT*"` — PASS (2/2: OFF→beans absent, ON→present).
-- `./gradlew test --tests "module.realestate.*" --tests "*AiVisionServiceIT" --tests "…OpenApiEndpointIT"` —
-  PASS (**76 tests, 0 failures, 0 errors**; RE-1..RE-5 + RE-4 marketing + nurture/FairHousing + responder + T10).
-- `docs/api/openapi.json` — **unchanged vs `main`** (T10 endpoints are module-gated OFF → absent from the spec;
-  the FE hand-writes the `api/*.ts`, the T1-T9 precedent).
+(filled as sub-phases complete)
 
 ## Reactive-invariant check
 
-`grep switchIfEmpty module/realestate/listingprep` → all uses are genuine not-found (4253/4460
-`switchIfEmpty(Mono.error)`), the house-key fallback (RE-4 `resolveKey` precedent), or the idempotent
-demo-seeder `switchIfEmpty(seedFresh)`. **Zero `switchIfEmpty(create)`**; approve/skip use explicit-boolean
-status checks (4461). AI/PDF off the Netty loop (shared `AiVisionService` + WebClient async). The two AI
-generations run **sequentially** (not `Mono.zip`) so the per-tenant `AiUsageRecorder.record` write is serialized.
+`grep switchIfEmpty module/quoting/closer` MUST show only genuine not-found (config 4470
+`switchIfEmpty(Mono.error)`) + the idempotent demo-seeder `switchIfEmpty(seedFresh)`. **Zero
+`switchIfEmpty(create/enroll/send)`** — the enroll seam and the review-request seam are BOTH
+explicit-boolean (`findBy…().map(true).defaultIfEmpty(false)` + `onErrorResume(DuplicateKeyException)`),
+mirroring `TierRoutingService.enrollIfAbsent` + `ReviewRequestService.createIfAbsent`.
 
-## Empty-diff confirmation (RE-4 + AiVision cores) — VERIFIED
+## Empty-diff confirmation (reused cores)
 
-`git diff main --stat` shows ZERO change to `ListingMarketingService.java`, `MarketingGenerationService.java`,
-`FairHousingLint.java`, `AiVisionService.java`, `Listing.java`, `ListingPhoto.java`,
-`ListingMarketingDraft.java`. T10 calls them; never edits them. The `realestate/listingprep/` package is
-strictly additive; the only edits to shared files are additive (`RealEstateAutoConfiguration` +2 beans,
-`DomainEventType` +2 constants, `GlobalErrorHandler` +Javadoc). Full diff: 13 files, +2048/-64 (the -64 is the
-fresh T9→T10 PHASE-PROGRESS rewrite).
+`git diff main --stat` MUST show ZERO change to: `QuoteBookingService.java`, `QuoteRequest.java`,
+`QuoteRequestRepository.java`, `NurtureRunner.java`, `NurtureMessageComposer.java`,
+`NurtureSegmentationService.java`, `NurtureReplyService.java`, `ReviewRequestService.java`,
+`ReviewRequest.java`, `ReviewRequestRepository.java`, `ReviewRequestSenderJob.java`, `TwilioSmsService.java`.
+The `module/quoting/closer/` package is strictly additive; the only shared-file edits are additive
+(`DomainEventType` +3 constants, `GlobalErrorHandler` +Javadoc, `org.springframework.boot.autoconfigure.AutoConfiguration.imports` +1 line, `application.properties` doc).
