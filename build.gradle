@@ -171,7 +171,11 @@ tasks.named('test') {
     // across every @SpringBootTest context — multiple forks would mean multiple
     // singletons => many containers again. Heap bump: ~22 distinct @TestPropertySource
     // variants keep many reactive Spring contexts in the TestContext cache.
-    maxHeapSize = '1600m'
+    // 3072m: full-ci runs 4 shards (~70 classes each) on 16GB larger runners
+    // (kmosf-16gb); the bigger per-shard working set needs more heap to avoid
+    // GC-thrash, and 16GB leaves ample room for it plus the Testcontainers Mongo.
+    // (Local targeted runs + the 2-core fast lane stay well under 3g.)
+    maxHeapSize = '3072m'
 
     // F.12 — deterministic, RUNTIME-BALANCED class-shard filter for CI matrix runs.
     // Each CI job passes -Dtest.shard.total=6 -Dtest.shard.index=<1..6> so each runner runs

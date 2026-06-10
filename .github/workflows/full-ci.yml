@@ -54,7 +54,15 @@ env:
 jobs:
   test:
     name: gradle test (shard ${{ matrix.shard }}/8)
-    runs-on: ubuntu-latest
+    # CI-08: 8 GitHub-hosted larger runners (kmosf-16gb = 4-core/16GB). The suite
+    # (4 engines + 14 tools, ~300 *IT/*Test classes) outgrew the 2-core/7GB free
+    # runners — the heaviest shard's test JVM + Testcontainers Mongo exhausted 7GB
+    # and the OOM-killer reaped Mongo (a "Connection refused" cascade). 16GB fixes
+    # the RAM-OOM; the shard COUNT is kept at 8 (~37 classes/shard — the proven-green
+    # load) because fewer/bigger shards re-trigger Mongo churn-pressure cascades AND
+    # blow the 30-min cap (4 shards @ ~71 classes failed both ways). The openapi +
+    # ci-gate jobs stay on the free ubuntu-latest (single boot / no full suite).
+    runs-on: kmosf-16gb
     timeout-minutes: 30
     strategy:
       fail-fast: false

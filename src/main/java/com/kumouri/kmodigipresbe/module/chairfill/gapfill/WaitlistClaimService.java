@@ -134,36 +134,28 @@ public class WaitlistClaimService {
     }
 
     /**
-     * The atomic slot claim. A {@code findAndModify} on the per-slot claim doc with the
-     * {@code claimedByContactId:null} guard: a returned doc = winner (we wrote it); a
-     * {@code DuplicateKeyException} = loser (someone else already holds the slot).
+     * The atomic slot claim — <strong>first-writer-wins via a plain INSERT</strong> on the per-slot claim
+     * doc's unique {@code _id} (the ledger-insert-first primitive). Exactly ONE concurrent insert succeeds
+     * (→ winner, known from its own insert success); every other gets {@code DuplicateKeyException} (→ loser).
+     *
+     * <p>Replaced a {@code findAndModify(upsert:true)} + {@code claimedByContactId:null} guard: concurrent
+     * upserts on a unique {@code _id} can surface E11000 to BOTH racers (SERVER-14322), and a post-E11000
+     * re-read can miss the just-committed doc — so two simultaneous YES could BOTH lose, leaving the freed
+     * salon slot unfilled (won=0; caught by {@code GapFillWaitlistIT}.concurrentDoubleYes under CI 4-core
+     * parallelism). A plain insert needs no re-read. Safe: a claimed slot is never released to unclaimed.
+     * (Mirrors the E4 {@code WaitlistClaimEngine} fix.)
      */
     private Mono<ClaimOutcome> claim(UUID tenantId, WaitlistOffer offer) {
-        UUID contactId = offer.getContactId();
         String slotKey = tenantId + ":" + offer.getFreedBookingId();
-        Query query = new Query(Criteria.where("_id").is(slotKey)
-                .and("claimedByContactId").is(null));
-        Update update = new Update()
-                .set("claimedByContactId", contactId)
-                .set("claimedOfferId", offer.getId())
-                .set("tenantId", tenantId)
-                .set("freedBookingId", offer.getFreedBookingId())
-                .set("claimedAt", Instant.now());
-        FindAndModifyOptions opts = FindAndModifyOptions.options().returnNew(true).upsert(true);
-
-        return mongo.findAndModify(query, update, opts, Map.class, CLAIMS_COLLECTION)
-                .flatMap(doc -> {
-                    Object claimer = doc.get("claimedByContactId");
-                    // Defensive: with the null-guard query a returned doc is always claimed by us, but
-                    // re-check — if somehow claimed by another, treat as lost (never double-book).
-                    if (claimer != null && claimer.toString().equals(contactId.toString())) {
-                        return onWin(tenantId, offer);
-                    }
-                    return onLose(offer);
-                })
-                // upsert tried to insert a duplicate _id because the null-guard didn't match (slot already
-                // claimed by someone else) OR a concurrent insert lost the unique-_id race → the loser.
-                .onErrorResume(DuplicateKeyException.class, e -> onLose(offer));
+        org.bson.Document claimDoc = new org.bson.Document("_id", slotKey)
+                .append("claimedByContactId", offer.getContactId() == null ? null : offer.getContactId().toString())
+                .append("claimedOfferId", offer.getId() == null ? null : offer.getId().toString())
+                .append("tenantId", tenantId.toString())
+                .append("freedBookingId", offer.getFreedBookingId() == null ? null : String.valueOf(offer.getFreedBookingId()))
+                .append("claimedAt", Instant.now().toString());
+        return mongo.insert(claimDoc, CLAIMS_COLLECTION)
+                .flatMap(saved -> onWin(tenantId, offer))             // my insert won the unique _id
+                .onErrorResume(DuplicateKeyException.class, e -> onLose(offer)); // someone else won
     }
 
     /**
