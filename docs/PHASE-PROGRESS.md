@@ -28,7 +28,7 @@ cadence + the unique-index enroll + the default-OFF runner + the GATE-2 vertical
 - [x] **P3 — accept subscriber** `QuoteWonSubscriber` (`@PostConstruct` on `QUOTE_ACCEPTED`): stop the cadence (EXITED) + create exactly one `ReviewRequest` (explicit-boolean).
 - [x] **P4 — analytics** `QuoteCloserAnalytics` + `QuoteCloserAnalyticsService` + `QuoteCloserController` (`GET .../analytics`).
 - [x] **P5 — wiring** `QuoteCloserAutoConfiguration` (both-module gate) + `DomainEventType` T11 block + `GlobalErrorHandler` 4470-4479 Javadoc + app-props doc + `AutoConfiguration.imports`. **`compileJava` PASS.**
-- [ ] **P6 — demo seed** `QuoteCloserDemoSeeder` (`@Profile("demo-home-quote-closer")`).
+- [x] **P6 — demo seed** `QuoteCloserDemoSeeder` (`@Profile("demo-home-quote-closer")`) — "Comfort Air HVAC (QuoteCloser)" + quoting+nurture, a home-vertical QuoteCloser campaign (reminder→financing-nudge→last-call), a 0-hour-window config, + one NEW quote. `compileJava` PASS.
 - [ ] **P7 — T11 ITs** (enroll, stop, review, unfiltered-copy GATE-2 proof, analytics, module gate).
 - [ ] **P8 — regression** (`module.quoting.*`, `nurture.*` incl. `BothVerticalsNurtureCopyFilterIT`, `integration.gbp.*`, `OpenApiEndpointIT`) green.
 - [ ] **P9 — docs** (CLAUDE.md T11 entry) + PR.
