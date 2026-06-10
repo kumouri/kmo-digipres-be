@@ -29,13 +29,17 @@ cadence + the unique-index enroll + the default-OFF runner + the GATE-2 vertical
 - [x] **P4 — analytics** `QuoteCloserAnalytics` + `QuoteCloserAnalyticsService` + `QuoteCloserController` (`GET .../analytics`).
 - [x] **P5 — wiring** `QuoteCloserAutoConfiguration` (both-module gate) + `DomainEventType` T11 block + `GlobalErrorHandler` 4470-4479 Javadoc + app-props doc + `AutoConfiguration.imports`. **`compileJava` PASS.**
 - [x] **P6 — demo seed** `QuoteCloserDemoSeeder` (`@Profile("demo-home-quote-closer")`) — "Comfort Air HVAC (QuoteCloser)" + quoting+nurture, a home-vertical QuoteCloser campaign (reminder→financing-nudge→last-call), a 0-hour-window config, + one NEW quote. `compileJava` PASS.
-- [ ] **P7 — T11 ITs** (enroll, stop, review, unfiltered-copy GATE-2 proof, analytics, module gate).
+- [x] **P7 — T11 ITs** (enroll 5, won 4, unfiltered-copy GATE-2 proof 1, analytics 2, module-gate 3) — all green in batched runs (see Validation log).
 - [ ] **P8 — regression** (`module.quoting.*`, `nurture.*` incl. `BothVerticalsNurtureCopyFilterIT`, `integration.gbp.*`, `OpenApiEndpointIT`) green.
 - [ ] **P9 — docs** (CLAUDE.md T11 entry) + PR.
 
 ## Validation log
 
-(filled as sub-phases complete)
+- `./gradlew compileJava compileTestJava` — PASS (clean; only pre-existing deprecation/unchecked notes).
+- `./gradlew test --tests "…closer.QuoteCloserWonIT" --tests "…QuoteCloserAnalyticsIT" --tests "…QuoteCloserModuleGateIT"` — PASS (Won 4/4, Analytics 2/2, ModuleGate 3/3 nested).
+- `./gradlew test --tests "…closer.QuoteCloserEnrollmentIT" --tests "…QuoteCloserUnfilteredCopyIT"` — PASS (Enrollment 5/5, UnfilteredCopy 1/1).
+- `./gradlew test --tests "…closer.QuoteCloserWonIT" --tests "…QuoteCloserModuleGateIT"` (re-run) — PASS.
+- **NOTE — combined `--tests "…closer.*"` in ONE invocation FAILED with `MongoSocketOpenException: Connection refused localhost:13200`** on Won + the NurtureOff gate context — the documented Testcontainers-lifecycle / shared-Mongo isolation artifact (the Mongo container is torn down between Spring contexts; cached contexts then point at a dead port). NOT a logic bug: every class passes in a batch small enough that the shared container stays up. The authoritative gate is the sharded `full-ci.yml`. (See MEMORY: "single-fork `./gradlew test` is Mongo-flaky; cascade timeouts ≠ real failures".)
 
 ## Reactive-invariant check
 
