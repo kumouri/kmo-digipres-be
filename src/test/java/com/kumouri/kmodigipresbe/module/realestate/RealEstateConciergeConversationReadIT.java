@@ -249,7 +249,9 @@ class RealEstateConciergeConversationReadIT {
     // ── 6. non-staff role → 1800 forbidden ────────────────────────────────────────
 
     @Test
-    void nonStaff_list_isForbidden_1800() {
+    void nonStaff_list_isForbidden() {
+        // BE-02 StaffAuthorizationWebFilter rejects a non-STAFF principal at the central
+        // baseline (1803) before the controller RoleGuard (1800) is reached; still 403.
         User noRole = User.builder().id(UUID.randomUUID()).tenantId(tenantId).email("norole@re5a.test")
                 .roles(Set.of()).status(User.UserStatus.ACTIVE).build();
         users.save(noRole).block();
@@ -259,7 +261,7 @@ class RealEstateConciergeConversationReadIT {
                 .header("Authorization", noRoleToken)
                 .exchange()
                 .expectStatus().isForbidden()
-                .expectBody().jsonPath("$.errorCode").isEqualTo(1800);
+                .expectBody().jsonPath("$.errorCode").isEqualTo(1803);
     }
 
     // ── 7. tenant isolation — another tenant's conversation never leaks ───────────

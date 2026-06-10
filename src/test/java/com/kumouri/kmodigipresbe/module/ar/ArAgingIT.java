@@ -208,10 +208,13 @@ class ArAgingIT {
                 .expectBody().jsonPath("$.errorCode").isEqualTo(1132);
     }
 
-    // ── 3. Non-STAFF role → 1800 ─────────────────────────────────────────────────────────────
+    // ── 3. Non-STAFF role → 403 ──────────────────────────────────────────────────────────────
+    // Since the security-fix BE-02 StaffAuthorizationWebFilter, a non-STAFF principal is rejected
+    // at the central STAFF baseline (errorCode 1803) BEFORE the controller's own RoleGuard (1800)
+    // is reached. The intent — a non-STAFF role cannot read AR aging — is unchanged.
 
     @Test
-    void aging_nonStaff_is1800() {
+    void aging_nonStaff_is403() {
         User client = User.builder().id(UUID.randomUUID()).tenantId(tenantId)
                 .email("client@ar-aging.test")
                 .roles(Set.of("CLIENT")).status(User.UserStatus.ACTIVE).build();
@@ -222,7 +225,7 @@ class ArAgingIT {
                 .header("Authorization", clientToken)
                 .exchange()
                 .expectStatus().isForbidden()
-                .expectBody().jsonPath("$.errorCode").isEqualTo(1800);
+                .expectBody().jsonPath("$.errorCode").isEqualTo(1803);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────────────────────

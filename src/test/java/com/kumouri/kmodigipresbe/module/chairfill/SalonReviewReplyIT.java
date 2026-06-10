@@ -396,8 +396,10 @@ class SalonReviewReplyIT {
     }
 
     @Test
-    void pasteIn_nonStaff_isForbidden_1800() {
+    void pasteIn_nonStaff_isForbidden() {
         // A token with neither STAFF nor ADMIN (PUBLIC-ish): mint a user with an empty role set.
+        // Since the BE-02 StaffAuthorizationWebFilter, the central STAFF baseline rejects this
+        // (errorCode 1803) before the controller's own RoleGuard (1800) is reached; still 403.
         User noRole = User.builder().id(UUID.randomUUID()).tenantId(tenantId).email("norole@cf4.test")
                 .roles(Set.of()).status(User.UserStatus.ACTIVE).build();
         users.save(noRole).block();
@@ -409,7 +411,7 @@ class SalonReviewReplyIT {
                 .bodyValue(Map.of("rating", 5, "comment", "Great!", "reviewerName", "Lee"))
                 .exchange()
                 .expectStatus().isForbidden()
-                .expectBody().jsonPath("$.errorCode").isEqualTo(1800);
+                .expectBody().jsonPath("$.errorCode").isEqualTo(1803);
     }
 
     // -------------------------------------------------------------------------

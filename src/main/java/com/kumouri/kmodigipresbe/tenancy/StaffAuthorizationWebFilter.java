@@ -146,8 +146,13 @@ public class StaffAuthorizationWebFilter implements WebFilter {
                                 1802, 403));
                     }
                     // BE-02: STAFF baseline + ADMIN for admin-gated paths, from TenantContext.
+                    // ADMIN satisfies the STAFF baseline (role hierarchy: ADMIN ⊇ STAFF) —
+                    // in production TeamService.sanitizeRoles already keeps STAFF present on
+                    // ADMIN/CONTRACTOR users, but treating ADMIN as a-fortiori-STAFF is the
+                    // correct, hierarchy-honoring rule and is robust to an ADMIN-only token.
                     return TenantContextHolder.required().handle((ctx, sink) -> {
-                        if (!ctx.hasRole(ROLE_STAFF)) {
+                        boolean staffBaseline = ctx.hasRole(ROLE_STAFF) || ctx.hasRole(ROLE_ADMIN);
+                        if (!staffBaseline) {
                             sink.next(new DigiPresBeException(
                                     "Role '" + ROLE_STAFF + "' required", 1803, 403));
                         } else if (adminRequired && !ctx.hasRole(ROLE_ADMIN)) {

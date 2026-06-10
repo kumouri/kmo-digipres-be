@@ -231,7 +231,9 @@ class FrontDeskBoardReadIT {
     // ── 4. non-staff role → 1800 forbidden (both reads) ────────────────────────────
 
     @Test
-    void nonStaff_isForbidden_1800() {
+    void nonStaff_isForbidden() {
+        // BE-02 StaffAuthorizationWebFilter rejects a non-STAFF principal at the central
+        // baseline (1803) before the controller RoleGuard (1800) is reached; still 403.
         User noRole = User.builder().id(UUID.randomUUID()).tenantId(tenantId).email("norole@frontdesk.test")
                 .roles(Set.of()).status(User.UserStatus.ACTIVE).build();
         users.save(noRole).block();
@@ -240,12 +242,12 @@ class FrontDeskBoardReadIT {
         web.get().uri("/frontdesk/recall")
                 .header("Authorization", noRoleToken)
                 .exchange().expectStatus().isForbidden()
-                .expectBody().jsonPath("$.errorCode").isEqualTo(1800);
+                .expectBody().jsonPath("$.errorCode").isEqualTo(1803);
 
         web.get().uri("/frontdesk/callbacks")
                 .header("Authorization", noRoleToken)
                 .exchange().expectStatus().isForbidden()
-                .expectBody().jsonPath("$.errorCode").isEqualTo(1800);
+                .expectBody().jsonPath("$.errorCode").isEqualTo(1803);
     }
 
     // ── helpers ────────────────────────────────────────────────────────────────────
