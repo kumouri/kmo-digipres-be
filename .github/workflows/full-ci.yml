@@ -26,12 +26,24 @@ name: full-ci
 on:
   push:
     branches: [main]
+    # CI-02: doc-only merges (CLAUDE.md, .claude/**, docs/**) change neither compiled code
+    # nor the OpenAPI surface, so they skip the ~50-billable-min full suite. Mirrors ci.yml's
+    # fast-lane filter; any code change lives outside these paths => still gated every merge.
+    paths-ignore:
+      - '**/*.md'
+      - '.claude/**'
+      - 'docs/**'
+      - 'LICENSE'
   workflow_dispatch: {}
   workflow_call: {}
 
 concurrency:
+  # CI-03: in a merge train only the newest main tree needs the full suite — cancel
+  # superseded in-flight runs instead of validating every intermediate SHA. A red batch then
+  # blames N merges at once; re-run full-ci via workflow_dispatch on a suspect SHA to bisect.
+  # (money-ci reuses this workflow per-PR-ref, where cancel-on-new-push is also correct.)
   group: full-ci-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 # Ephemeral CI runners are torn down after each job, so Testcontainers' Ryuk resource
 # reaper is redundant here — and under heavy GC it can drop its heartbeat and kill the
@@ -56,22 +68,29 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-          cache: gradle
 
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v6
 
+      # CI-05: setup-gradle caches the Gradle user home (dependencies + the local build
+      # cache), restoring main's warm cache on branches. Replaces setup-java's `cache: gradle`.
+      # With --build-cache below, unchanged sources => compile/resource cache hits, cutting
+      # the ~2-4 min/shard recompile across all 8 shards and subsequent runs.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
       - name: ./gradlew test (shard ${{ matrix.shard }}/8)
-        run: ./gradlew test -Dtest.shard.index=${{ matrix.shard }} -Dtest.shard.total=8 --no-daemon --stacktrace
+        run: ./gradlew test -Dtest.shard.index=${{ matrix.shard }} -Dtest.shard.total=8 --build-cache --no-daemon --stacktrace
         # Each shard runs in a fresh runner with its own Docker engine => its own
         # singleton Testcontainers Mongo/Kafka. maxParallelForks=1 is preserved within
         # each shard; isolation is across jobs, not JVM forks. Ryuk is disabled (env
         # above); the ephemeral runner teardown reaps containers instead.
 
       - name: Upload test reports (shard ${{ matrix.shard }})
-        # always() so a *cancelled* job still uploads reports (cancellation skips
-        # failure()-gated steps, which hides stack traces needed to diagnose CI failures).
-        if: always()
+        # CI-07: only on failure/cancellation — a green shard's reports go unused, and this
+        # step otherwise runs 8x every run. cancelled() is kept so a reaped shard still uploads
+        # the diagnostics needed to tell a real failure from a Mongo-timeout cascade.
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v7
         with:
           name: test-reports-shard-${{ matrix.shard }}
@@ -93,13 +112,16 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-          cache: gradle
 
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v6
 
+      # CI-05: see the test job — cache the Gradle user home + build cache for compile reuse.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
       - name: Export spec via OpenApiEndpointIT then refresh docs/api/openapi.json
-        run: ./gradlew test --tests "*OpenApiEndpointIT" verifyOpenApi --no-daemon --stacktrace
+        run: ./gradlew test --tests "*OpenApiEndpointIT" verifyOpenApi --build-cache --no-daemon --stacktrace
         # OpenApiEndpointIT exports build/openapi/openapi.json during the Testcontainers
         # phase; verifyOpenApi (mustRunAfter 'test') then copies it to docs/api/openapi.json.
 
