@@ -99,6 +99,7 @@ public class GbpApiClient {
     private final GbpProperties properties;
     private final CircuitBreakerRegistry breakers;
     private final GbpTokenService tokenService;
+    private final com.kumouri.kmodigipresbe.security.OutboundUrlGuard outboundUrlGuard;
 
     // -------------------------------------------------------------------------
     // Public API
@@ -120,9 +121,11 @@ public class GbpApiClient {
                     }
                     String baseUrl = resolveBaseUrl(conn);
                     String locationPath = resolveLocationPath(conn);
-                    // On 401, refresh the token (persisting it) and retry this call once.
-                    return refreshAndRetryOn401(conn,
-                            token -> callFetch(baseUrl, token, locationPath), accessToken);
+                    // Security fix BE-16: validate the (possibly per-tenant-overridden) base
+                    // URL before sending the tenant's access token to it (SSRF egress + token
+                    // leak). On 401, refresh the token (persisting it) and retry this call once.
+                    return outboundUrlGuard.validate(baseUrl).then(refreshAndRetryOn401(conn,
+                            token -> callFetch(baseUrl, token, locationPath), accessToken));
                 }));
     }
 
@@ -142,9 +145,10 @@ public class GbpApiClient {
                         return Mono.<Void>error(notConnected());
                     }
                     String baseUrl = resolveBaseUrl(conn);
-                    // On 401, refresh the token (persisting it) and retry this call once.
-                    return refreshAndRetryOn401(conn,
-                            token -> callPostReply(baseUrl, token, reviewId, replyText), accessToken);
+                    // Security fix BE-16: validate the base URL before sending the token (see
+                    // fetchReviews). On 401, refresh the token (persisting it) and retry once.
+                    return outboundUrlGuard.validate(baseUrl).then(refreshAndRetryOn401(conn,
+                            token -> callPostReply(baseUrl, token, reviewId, replyText), accessToken));
                 }));
     }
 
