@@ -129,51 +129,30 @@ public class WaitlistClaimEngine {
     }
 
     /**
-     * The atomic slot claim. A {@code findAndModify} on the per-slot claim doc with the
-     * {@code claimedByContactId:null} guard: a returned doc = winner (we wrote it); a
-     * {@code DuplicateKeyException} = loser (someone else already holds the slot).
+     * The atomic slot claim — <strong>first-writer-wins via a plain INSERT</strong> on the per-slot claim
+     * doc's unique {@code _id} (the ledger-insert-first primitive). Exactly ONE concurrent insert succeeds
+     * (→ winner, known from its own insert success); every other gets {@code DuplicateKeyException} (→ loser).
+     *
+     * <p>This replaced a {@code findAndModify(upsert:true)} + {@code claimedByContactId:null} guard:
+     * concurrent upserts on a unique {@code _id} can surface E11000 to BOTH racers (SERVER-14322), and a
+     * post-DuplicateKey re-read can miss the just-committed doc (read-your-writes lag) — so two simultaneous
+     * YES could BOTH lose, leaving the freed slot unfilled (won=0; caught by {@code WaitlistEngineIT} and
+     * {@code RescheduleGapFillIT}.concurrentDoubleYes under CI 4-core parallelism). A plain insert has no
+     * query+insert window and needs no re-read: the inserter KNOWS it won. Safe because a claimed slot is
+     * never released back to unclaimed (there is no {@code claimedByContactId→null} path). Fields are stored
+     * as strings — the doc is an internal first-writer ledger, never read back for the claim decision.
      */
-    @SuppressWarnings("rawtypes")
     private Mono<ClaimOutcome> claimSlot(UUID tenantId, WaitlistOffer offer) {
-        UUID contactId = offer.getContactId();
         String slotKey = tenantId + ":" + offer.getSlotKey();
-        Query query = new Query(Criteria.where("_id").is(slotKey)
-                .and("claimedByContactId").is(null));
-        Update update = new Update()
-                .set("claimedByContactId", contactId)
-                .set("claimedOfferId", offer.getId())
-                .set("tenantId", tenantId)
-                .set("slotKey", offer.getSlotKey())
-                .set("claimedAt", Instant.now());
-        FindAndModifyOptions opts = FindAndModifyOptions.options().returnNew(true).upsert(true);
-
-        return mongo.findAndModify(query, update, opts, Map.class, CLAIMS_COLLECTION)
-                .flatMap(doc -> resolveClaimer(doc, tenantId, contactId, offer))
-                // A DuplicateKey is NOT automatically a loss. MongoDB's findAndModify+upsert on a unique
-                // _id can surface E11000 to BOTH concurrent racers under tight timing (SERVER-14322) — so
-                // treating it as an unconditional loss let two simultaneous YES BOTH lose, leaving the
-                // freed slot unfilled (won=0; caught by WaitlistEngineIT.concurrentDoubleYes in CI). The
-                // claim doc now exists and its claimedByContactId is the single source of truth: re-read
-                // it and let whoever's id actually landed win — everyone else loses deterministically.
-                .onErrorResume(DuplicateKeyException.class, e ->
-                        mongo.findById(slotKey, Map.class, CLAIMS_COLLECTION)
-                                .flatMap(doc -> resolveClaimer(doc, tenantId, contactId, offer))
-                                .switchIfEmpty(Mono.defer(() -> onLose(tenantId, offer))));
-    }
-
-    /**
-     * Decide the single outcome from the authoritative claim doc: WON iff its {@code claimedByContactId}
-     * is this claimer's id, else LOST. Shared by the findAndModify success path and the DuplicateKey
-     * re-read path so both converge on the doc's one true winner (never a double-win, never a double-lose).
-     */
-    @SuppressWarnings("rawtypes")
-    private Mono<ClaimOutcome> resolveClaimer(Map doc, UUID tenantId, UUID contactId, WaitlistOffer offer) {
-        Object claimer = doc.get("claimedByContactId");
-        if (claimer != null && contactId != null
-                && claimer.toString().equals(contactId.toString())) {
-            return onWin(tenantId, offer);
-        }
-        return onLose(tenantId, offer);
+        org.bson.Document claimDoc = new org.bson.Document("_id", slotKey)
+                .append("claimedByContactId", offer.getContactId() == null ? null : offer.getContactId().toString())
+                .append("claimedOfferId", offer.getId() == null ? null : offer.getId().toString())
+                .append("tenantId", tenantId.toString())
+                .append("slotKey", offer.getSlotKey())
+                .append("claimedAt", Instant.now().toString());
+        return mongo.insert(claimDoc, CLAIMS_COLLECTION)
+                .flatMap(saved -> onWin(tenantId, offer))             // my insert won the unique _id
+                .onErrorResume(DuplicateKeyException.class, e -> onLose(tenantId, offer)); // someone else won
     }
 
     /**
