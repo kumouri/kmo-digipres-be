@@ -213,9 +213,16 @@ public class QuoteIntakeService {
                 ? Mono.empty()
                 : contacts.findByTenantAndEmailAddress(tenantId, email).next();
 
+        // Find-fallback phone -> email (switchIfEmpty for a FIND is fine), then explicit-boolean
+        // create — NEVER switchIfEmpty(create) (the §9 invariant + the ServiceRequestWidget precedent;
+        // matches this method's own Javadoc).
         return byPhone
                 .switchIfEmpty(byEmail)
-                .switchIfEmpty(Mono.defer(() -> contacts.save(buildContact(tenantId, in))));
+                .map(java.util.Optional::of)
+                .defaultIfEmpty(java.util.Optional.empty())
+                .flatMap(existing -> existing.isPresent()
+                        ? Mono.just(existing.get())
+                        : contacts.save(buildContact(tenantId, in)));
     }
 
     private Contact buildContact(UUID tenantId, ManualInput in) {
