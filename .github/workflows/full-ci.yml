@@ -1,10 +1,11 @@
 name: full-ci
 
-# The full Testcontainers suite (every *IT + *Test class), sharded. Triggers:
-#   * push to main      — post-merge gate (merge commits are new, untested SHAs); also
-#                         the only place docs/api/openapi.json is refreshed.
-#   * workflow_dispatch — run the full suite on demand (e.g. before merging a risky branch).
-#   * workflow_call     — reused by money-ci.yml for PRs touching money-critical paths.
+# The full Testcontainers suite (every *IT + *Test class), sharded. Triggers (Git Flow, 2026-06-10):
+#   * pull_request to main — release-gate: every PR develop→main must pass the full suite before
+#                            merge. Also the only place docs/api/openapi.json is refreshed.
+#   * workflow_dispatch   — run the full suite on demand (e.g. pre-validate a risky feature branch
+#                           before merging to develop: gh workflow run full-ci.yml --ref <branch>).
+#   * workflow_call       — reused by money-ci.yml for PRs touching money-critical paths.
 # Sharded across 8 jobs (2026-06-10). The suite grew to ~284 *IT/*Test classes, each
 # spinning up cached @SpringBootTest contexts in a SINGLE-fork JVM (maxParallelForks=1
 # is REQUIRED so the static singleton Testcontainers are shared — see build.gradle).
@@ -24,16 +25,8 @@ name: full-ci
 #     full-ci run's test-results XMLs (sum each suite's `time`, fold nested into top-level;
 #     see build.gradle), else new classes name-hash onto arbitrary shards and re-break this.
 on:
-  push:
+  pull_request:
     branches: [main]
-    # CI-02: doc-only merges (CLAUDE.md, .claude/**, docs/**) change neither compiled code
-    # nor the OpenAPI surface, so they skip the ~50-billable-min full suite. Mirrors ci.yml's
-    # fast-lane filter; any code change lives outside these paths => still gated every merge.
-    paths-ignore:
-      - '**/*.md'
-      - '.claude/**'
-      - 'docs/**'
-      - 'LICENSE'
   workflow_dispatch: {}
   workflow_call: {}
 

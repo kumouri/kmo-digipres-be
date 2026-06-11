@@ -278,6 +278,11 @@ Layered Spring WebFlux structure under `com.kumouri.kmodigipresbe`. All tenant-o
 - **JWT secret** (`KMOSF_JWT_SECRET`) must be >= 32 bytes for production. If unset, a random ephemeral key is generated and a WARN is logged — tokens invalidate on every restart; not suitable for production.
 - **Blocking I/O must use `Schedulers.boundedElastic()`** — never call blocking code on a Netty event-loop thread.
 
-## Branching
+## Branching & CI (Git Flow, adopted 2026-06-10)
+- Two long-lived branches: `develop` (default; integration) and `main` (release/production).
+- Feature/fix/plan branches: branch off `develop`, PR back into `develop`. PRs run the fast lane (`ci.yml` unit/arch tests) — plus `money-ci.yml` (full suite) if money-critical paths are touched. The full Testcontainers suite does NOT run on develop merges; to pre-validate a risky branch, dispatch `full-ci.yml` on it (`gh workflow run full-ci.yml --ref <branch>`) and verify the run's headSha matches your HEAD.
+- Release: open a PR `develop` → `main`. `full-ci` (8 shards on `kmosf-16gb`) runs on that PR and gates the merge — never merge red. Merging triggers `cd.yml`: builds the boot jar artifact; the prod-deploy leg is gated OFF behind repo variable `PROD_DEPLOY_ENABLED` + SSH secrets (owner-enabled; mirrors kmosf-hq `ops/z2-crm/README.md`).
+- Hotfix: branch off `main`, PR into `main` (full-ci + CD), then back-merge `main` → `develop` via PR.
+- Merge commits only; never push directly to `develop` or `main` (org ruleset enforces both).
 
-This repo follows the workspace branching conventions (see `../../CLAUDE.md`): `<plan-slug>` for single-phase plans, `<plan-slug>-phase-N-<desc>` only when one plan is split, `fix/<desc>` and `feat/<desc>` for unplanned work. Default branch is `main`; don't work directly on it.
+This repo follows the workspace branching name conventions (see `../../CLAUDE.md`): `<plan-slug>` for single-phase plans, `<plan-slug>-phase-N-<desc>` only when one plan is split, `fix/<desc>` and `feat/<desc>` for unplanned work.
