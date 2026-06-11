@@ -138,6 +138,75 @@ class DispatchApplyIT {
     }
 
     @Test
+    void apply_unknownTechUserId_is4524() {
+        // AI-07: a techUserId that is not a user of this tenant at all → rejected (no write).
+        UUID woId = saveWo("Furnace", "HVAC", WorkOrderStatus.SCHEDULED, null);
+        UUID bogusTech = UUID.randomUUID();
+        web.post().uri("/dispatch/apply")
+                .header("Authorization", staffToken)
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .bodyValue(Map.of("date", DAY.toString(),
+                        "assignments", List.of(Map.of(
+                                "workOrderId", woId.toString(),
+                                "techUserId", bogusTech.toString()))))
+                .exchange()
+                .expectStatus().isEqualTo(422)
+                .expectBody().jsonPath("$.errorCode").isEqualTo(4524);
+
+        // The work order was NOT assigned (the validation runs before the technicianUserId write).
+        WorkOrder after = mongo.findById(woId, WorkOrder.class).block();
+        assertThat(after).isNotNull();
+        assertThat(after.getTechnicianUserId()).isNull();
+    }
+
+    @Test
+    void apply_foreignTenantTechUserId_is4524() {
+        // AI-07: a real ACTIVE STAFF user, but belonging to a DIFFERENT tenant → rejected (tenant isolation).
+        UUID otherTenant = UUID.randomUUID();
+        User foreign = User.builder().id(UUID.randomUUID()).tenantId(otherTenant)
+                .email("foreign@other-tenant.test").displayName("Foreign")
+                .roles(Set.of("STAFF")).status(User.UserStatus.ACTIVE).build();
+        users.save(foreign).block();
+
+        UUID woId = saveWo("Furnace", "HVAC", WorkOrderStatus.SCHEDULED, null);
+        web.post().uri("/dispatch/apply")
+                .header("Authorization", staffToken)
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .bodyValue(Map.of("date", DAY.toString(),
+                        "assignments", List.of(Map.of(
+                                "workOrderId", woId.toString(),
+                                "techUserId", foreign.getId().toString()))))
+                .exchange()
+                .expectStatus().isEqualTo(422)
+                .expectBody().jsonPath("$.errorCode").isEqualTo(4524);
+
+        WorkOrder after = mongo.findById(woId, WorkOrder.class).block();
+        assertThat(after).isNotNull();
+        assertThat(after.getTechnicianUserId()).isNull();
+    }
+
+    @Test
+    void apply_disabledTechUserId_is4524() {
+        // AI-07: an in-tenant STAFF user that is DISABLED (not ACTIVE) → rejected.
+        User disabled = User.builder().id(UUID.randomUUID()).tenantId(tenantId)
+                .email("disabled@dispatch-apply.test").displayName("Disabled")
+                .roles(Set.of("STAFF")).status(User.UserStatus.DISABLED).build();
+        users.save(disabled).block();
+
+        UUID woId = saveWo("Furnace", "HVAC", WorkOrderStatus.SCHEDULED, null);
+        web.post().uri("/dispatch/apply")
+                .header("Authorization", staffToken)
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .bodyValue(Map.of("date", DAY.toString(),
+                        "assignments", List.of(Map.of(
+                                "workOrderId", woId.toString(),
+                                "techUserId", disabled.getId().toString()))))
+                .exchange()
+                .expectStatus().isEqualTo(422)
+                .expectBody().jsonPath("$.errorCode").isEqualTo(4524);
+    }
+
+    @Test
     void apply_emptyDecisions_is4522() {
         web.post().uri("/dispatch/apply")
                 .header("Authorization", staffToken)
