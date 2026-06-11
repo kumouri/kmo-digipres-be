@@ -39,7 +39,10 @@ import java.util.Comparator;
  *       {@code noShowRisk}, sorted highest-risk first (for the CF-5 day-view risk column).</li>
  * </ul>
  */
-@RestController
+// Explicit bean name: frontdesk has its own NoShowRiskController; Spring's default
+// (decapitalized simple class name) collides fatally when both modules are enabled
+// in one process (first done by the demo program's all-modules-on deployment).
+@RestController("chairfillNoShowRiskController")
 @RequestMapping("/chairfill/risk")
 @ConditionalOnProperty(prefix = "kmosf.modules.chairfill", name = "enabled")
 @RequiredArgsConstructor

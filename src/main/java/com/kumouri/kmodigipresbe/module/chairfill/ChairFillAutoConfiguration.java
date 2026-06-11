@@ -34,6 +34,7 @@ import com.kumouri.kmodigipresbe.repository.ContactRepository;
 import com.kumouri.kmodigipresbe.repository.NoShowScoringJobRepository;
 import com.kumouri.kmodigipresbe.repository.TenantRepository;
 import com.kumouri.kmodigipresbe.service.ai.AiUsageRecorder;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -336,7 +337,7 @@ public class ChairFillAutoConfiguration {
     @ConditionalOnBean(SalonBookingService.class)
     public SalonReviewReplyService chairFillSalonReviewReplyService(
             GbpReplyDraftService gbpReplyDraftService,
-            ReplyExemplarSource replyExemplarSource,
+            @Qualifier("chairFillReplyExemplarSource") ReplyExemplarSource replyExemplarSource,
             GbpReviewReplyRepository reviewReplies,
             DomainEventPublisher eventPublisher,
             @Value("${kmosf.chairfill.review-system-prompt:}") String brandTonePrompt,
