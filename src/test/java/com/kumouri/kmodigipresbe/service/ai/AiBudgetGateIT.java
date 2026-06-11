@@ -15,6 +15,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.mongodb.core.ReactiveMongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
+import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 
 import java.math.BigDecimal;
@@ -122,5 +124,50 @@ class AiBudgetGateIT {
         assertThat(row.getTotalTokensOut()).isEqualTo(1500L);
         assertThat(row.getCallCount()).isEqualTo(2L);
         assertThat(row.getTotalUsd()).isEqualByComparingTo(new BigDecimal("1.10"));
+    }
+
+    /**
+     * AI-06 lost-write robustness: many concurrent record() calls all race the SAME (tenant, yearMonth)
+     * @Version row. Pre-fix, the optimistic-lock losers threw OptimisticLockingFailureException — and since
+     * callers swallow record() failures, that spend silently vanished (cap erosion). With the bounded
+     * retryWhen, EVERY call's spend must land: the persisted totals equal the exact sum of all calls, and
+     * the call count equals N. This is the regression that proves no spend is dropped under contention.
+     */
+    @Test
+    void concurrentRecords_noLostWrites_allSpendCounted() {
+        tenants.save(Tenant.builder()
+                        .id(tenantId).slug("concurrent-" + tenantId).displayName("Concurrent")
+                        .status(Tenant.TenantStatus.ACTIVE)
+                        .aiBudgetUsd(new BigDecimal("100.00"))
+                        .build())
+                .block();
+
+        // 8-way contention: enough to exercise BOTH races for real (the first-of-month insert stampede on
+        // the unique tenant_month_idx, then the @Version update race as the row fills) while staying within
+        // the bounded retry budget — mirroring a realistic concurrent AI burst for one tenant.
+        int n = 8;
+        BigDecimal perCall = new BigDecimal("0.10");
+
+        // Fan out N record() calls in parallel on the elastic scheduler so they genuinely contend on the
+        // single ai_usage row (each is its own subscription with the tenant context written in).
+        Long completed = Flux.range(0, n)
+                .flatMap(i -> recorder.record(10L, 5L, perCall)
+                                .contextWrite(TenantContextHolder.write(ctx))
+                                .subscribeOn(Schedulers.boundedElastic()),
+                        /* concurrency */ n)
+                .count()
+                .block();
+        assertThat(completed).isEqualTo((long) n);
+
+        String ym = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM"));
+        AiUsage row = aiUsage.findByTenantIdAndYearMonth(tenantId, ym)
+                .contextWrite(TenantContextHolder.write(ctx))
+                .block();
+        assertThat(row).isNotNull();
+        // No lost writes: every one of the N increments composed onto the row.
+        assertThat(row.getCallCount()).isEqualTo((long) n);
+        assertThat(row.getTotalTokensIn()).isEqualTo(10L * n);
+        assertThat(row.getTotalTokensOut()).isEqualTo(5L * n);
+        assertThat(row.getTotalUsd()).isEqualByComparingTo(perCall.multiply(BigDecimal.valueOf(n)));
     }
 }
