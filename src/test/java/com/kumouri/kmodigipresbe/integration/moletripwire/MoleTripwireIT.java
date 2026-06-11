@@ -462,4 +462,24 @@ class MoleTripwireIT {
         assertThat(mongo.findAll(Attachment.class).collectList().block()).isEmpty();
         assertThat(mongo.findAll(Milestone.class).collectList().block()).isEmpty();
     }
+
+    // -------------------------------------------------------------------------
+    // Security fix AI-02 — oversized image → 413 (bounded join, not OOM), zero effect
+    // -------------------------------------------------------------------------
+
+    @Test
+    void oversizedImage_413_4014_zeroEffect() {
+        String token = issueTripwireToken();
+        // One byte over the controller's MAX_IMAGE_BYTES cap (15 MB) — see
+        // MoleTripwireController.MAX_IMAGE_BYTES (package-private).
+        byte[] tooBig = new byte[15 * 1024 * 1024 + 1];
+
+        postReport(token, tooBig, "image/jpeg", "huge.jpg", Map.of("note", "x"))
+                .expectStatus().isEqualTo(413)
+                .expectBody().jsonPath("$.errorCode").isEqualTo(4014);
+
+        assertThat(mongo.findAll(Attachment.class).collectList().block()).isEmpty();
+        assertThat(mongo.findAll(Milestone.class).collectList().block()).isEmpty();
+        assertThat(wireMock.getAllServeEvents()).isEmpty();
+    }
 }

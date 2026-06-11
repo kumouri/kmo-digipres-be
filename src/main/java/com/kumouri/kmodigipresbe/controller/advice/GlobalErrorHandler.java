@@ -1446,7 +1446,15 @@ import java.util.UUID;
  *       share it) + a 429 from {@code LoginRateLimitFilter} (a raw status, not a DigiPresBeException);
  *       BE-11 oversized upload reuses {@code 4011} at 413; BE-07 sync mass-assignment is a silent
  *       allowlist drop (no error code); BE-12 forces a HANDOFF (no error); BE-13/14/15/17/18 change
- *       behavior without new HTTP error codes.</li>
+ *       behavior without new HTTP error codes. <strong>AI-01/02/03 (2026-06-10 AI re-scan)</strong>
+ *       likewise mint no new codes: AI-01 extends {@code PublicContactRateLimitFilter} to the five
+ *       public AI-vision/intake routes (a raw {@code 429}, not a {@code DigiPresBeException}); AI-02
+ *       adds the BE-11 bounded-{@code join} 413 to the four photo-intake controllers, each
+ *       <em>reusing</em> its own in-band image-rejection code at 413 — StyleConsult {@code 4454},
+ *       EquipmentPhoto {@code 4213}, QuoteNow {@code 4434}, MoleTripwire {@code 4014}; AI-03 redacts
+ *       the salon wholesale {@code cost} + per-product {@code marginAmount} from the <em>public</em>
+ *       StyleConsult response (a wire-shape change to {@code StyleConsultResponse} + a margin-bearing
+ *       staff-only {@code StyleConsultStaffResponse}) — no error code.</li>
  * </ul>
  */
 @Slf4j

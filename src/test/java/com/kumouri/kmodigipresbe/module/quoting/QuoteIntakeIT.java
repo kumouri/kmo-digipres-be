@@ -286,6 +286,19 @@ class QuoteIntakeIT {
     }
 
     @Test
+    void oversizedImage_413_4434_zeroEffect() {
+        // Security fix AI-02 — one byte over the controller's MAX_IMAGE_BYTES cap (15 MB) aborts the
+        // bounded DataBufferUtils.join early → 413, not an OOM. See QuoteIntakeController.MAX_IMAGE_BYTES.
+        byte[] tooBig = new byte[15 * 1024 * 1024 + 1];
+        postQuote(token(), tooBig, "image/jpeg", "huge.jpg", Map.of("phone", "+13145559999"))
+                .expectStatus().isEqualTo(413)
+                .expectBody().jsonPath("$.errorCode").isEqualTo(4434);
+        assertThat(mongo.findAll(QuoteRequest.class).collectList().block()).isEmpty();
+        assertThat(mongo.findAll(Attachment.class).collectList().block()).isEmpty();
+        assertThat(wireMock.getAllServeEvents()).isEmpty();
+    }
+
+    @Test
     void wrongWidgetTypeToken_401_4430_zeroEffect() {
         // A correctly-signed token but a non-"quote-intake" widgetType (a service-request token).
         String wrongType = widgetTokens.issue(tenantId, "service-request", Duration.ofHours(1));

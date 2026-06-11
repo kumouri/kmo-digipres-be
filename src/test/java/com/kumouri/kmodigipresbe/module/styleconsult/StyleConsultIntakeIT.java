@@ -225,16 +225,18 @@ class StyleConsultIntakeIT {
         assertThat(resp.serviceRecommendations()).isNotEmpty();
         assertThat(resp.serviceRecommendations()).extracting("name").contains("Balayage");
 
-        // Retail is margin-ranked: Bond Builder (23) > Purple Shampoo (17) > Leave-In (14).
+        // Retail is still margin-ranked (server-side): Bond Builder (23) > Purple Shampoo (17) >
+        // Leave-In (14) — the ORDER proves the ranking. The prospect-safe view no longer exposes the
+        // marginAmount/cost itself (security fix AI-03 — see noCostOrMarginLeakedToProspect_AI03).
         assertThat(resp.retailRecommendations()).extracting("name")
                 .containsExactly("Bond Builder", "Purple Shampoo", "Leave-In Conditioner");
-        assertThat(resp.retailRecommendations().get(0).getMarginAmount()).isEqualByComparingTo("23");
+        assertThat(resp.retailRecommendations().get(0).price()).isEqualByComparingTo("38");
 
         // The never-auto-charge guardrail is on EVERY recommendation.
         assertThat(resp.serviceRecommendations()).allSatisfy(s ->
                 assertThat(s.getRationale()).contains(StyleRecommendationService.STYLIST_CONFIRM_NOTE));
         assertThat(resp.retailRecommendations()).allSatisfy(r ->
-                assertThat(r.getRationale()).contains(StyleRecommendationService.STYLIST_CONFIRM_NOTE));
+                assertThat(r.rationale()).contains(StyleRecommendationService.STYLIST_CONFIRM_NOTE));
 
         // Persisted StyleConsult + a found-or-created lead Contact + the photo Attachment.
         List<StyleConsult> saved = mongo.findAll(StyleConsult.class).collectList().block();
@@ -247,6 +249,35 @@ class StyleConsultIntakeIT {
         // The vision call hit WireMock WITH an image content block.
         wireMock.verify(1, postRequestedFor(urlPathEqualTo("/"))
                 .withRequestBody(matchingJsonPath("$.messages[0].content[0].type", equalTo("image"))));
+    }
+
+    @Test
+    void noCostOrMarginLeakedToProspect_AI03() {
+        // Security fix AI-03: the PUBLIC consult response must not serialize the salon's wholesale
+        // unit cost or per-product margin. Assert the prospect-safe fields remain (name/sku/price/
+        // rationale) AND that cost/marginAmount are absent from every retail rec.
+        stubRead("balayage", "long", "wavy", "blonde");
+
+        byte[] raw = postConsult(token(), FAKE_IMAGE, "image/jpeg", "inspo.jpg",
+                Map.of("phone", "+13125559999"))
+                .expectStatus().isOk()
+                .expectBody()
+                // The margin-ranked retail line is present (the feature still works) …
+                .jsonPath("$.retailRecommendations[0].name").isEqualTo("Bond Builder")
+                .jsonPath("$.retailRecommendations[0].price").exists()
+                .jsonPath("$.retailRecommendations[0].sku").isEqualTo("RET-BOND")
+                .jsonPath("$.retailRecommendations[0].rationale").exists()
+                // … but the salon-confidential cost + margin are GONE from the retail recs.
+                .jsonPath("$.retailRecommendations[0].cost").doesNotExist()
+                .jsonPath("$.retailRecommendations[0].marginAmount").doesNotExist()
+                .jsonPath("$.retailRecommendations[1].cost").doesNotExist()
+                .jsonPath("$.retailRecommendations[1].marginAmount").doesNotExist()
+                .returnResult().getResponseBody();
+
+        // Belt-and-suspenders: the literal field names appear nowhere in the serialized body.
+        String body = raw == null ? "" : new String(raw);
+        assertThat(body).doesNotContain("marginAmount");
+        assertThat(body).doesNotContain("\"cost\"");
     }
 
     @Test
@@ -294,6 +325,19 @@ class StyleConsultIntakeIT {
                 .expectStatus().isEqualTo(415)
                 .expectBody().jsonPath("$.errorCode").isEqualTo(4454);
         assertThat(mongo.findAll(StyleConsult.class).collectList().block()).isEmpty();
+        assertThat(wireMock.getAllServeEvents()).isEmpty();
+    }
+
+    @Test
+    void oversizedImage_413_4454_zeroEffect() {
+        // Security fix AI-02 — one byte over the controller's MAX_IMAGE_BYTES cap (15 MB) aborts the
+        // bounded DataBufferUtils.join early → 413, not an OOM. See StyleConsultIntakeController.MAX_IMAGE_BYTES.
+        byte[] tooBig = new byte[15 * 1024 * 1024 + 1];
+        postConsult(token(), tooBig, "image/jpeg", "huge.jpg", Map.of("phone", "+13125557777"))
+                .expectStatus().isEqualTo(413)
+                .expectBody().jsonPath("$.errorCode").isEqualTo(4454);
+        assertThat(mongo.findAll(StyleConsult.class).collectList().block()).isEmpty();
+        assertThat(mongo.findAll(Attachment.class).collectList().block()).isEmpty();
         assertThat(wireMock.getAllServeEvents()).isEmpty();
     }
 
