@@ -39,7 +39,10 @@ import java.util.Comparator;
  *       only logistics metadata — none of it touched the clinical system.</li>
  * </ul>
  */
-@RestController
+// Explicit bean name: chairfill has its own NoShowRiskController; Spring's default
+// (decapitalized simple class name) collides fatally when both modules are enabled
+// in one process (first done by the demo program's all-modules-on deployment).
+@RestController("frontdeskNoShowRiskController")
 @RequestMapping("/frontdesk/risk")
 @ConditionalOnProperty(prefix = "kmosf.modules.frontdesk", name = "enabled")
 @RequiredArgsConstructor

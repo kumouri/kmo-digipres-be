@@ -28,6 +28,7 @@ import com.kumouri.kmodigipresbe.repository.TenantRepository;
 import com.kumouri.kmodigipresbe.repository.gbp.GbpReviewReplyRepository;
 import com.kumouri.kmodigipresbe.service.ai.AiUsageRecorder;
 import com.kumouri.kmodigipresbe.service.sequence.SequenceCrudService;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -246,7 +247,7 @@ public class FrontDeskAutoConfiguration {
     @Bean
     public FrontDeskReviewReplyService frontDeskReviewReplyService(
             GbpReplyDraftService gbpReplyDraftService,
-            ReplyExemplarSource frontDeskReplyExemplarSource,
+            @Qualifier("frontDeskReplyExemplarSource") ReplyExemplarSource frontDeskReplyExemplarSource,
             GbpReviewReplyRepository reviewReplies,
             DomainEventPublisher eventPublisher,
             @Value("${kmosf.frontdesk.review-system-prompt:}") String brandTonePrompt,
