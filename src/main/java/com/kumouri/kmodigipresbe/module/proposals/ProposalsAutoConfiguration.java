@@ -5,6 +5,9 @@ import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
 import com.kumouri.kmodigipresbe.extension.ModuleAutoConfigurationSupport;
 import com.kumouri.kmodigipresbe.extension.ModuleDefinition;
 import com.kumouri.kmodigipresbe.integration.IntegrationConnectionRepository;
+import com.kumouri.kmodigipresbe.repository.CompanyRepository;
+import com.kumouri.kmodigipresbe.repository.ContactRepository;
+import com.kumouri.kmodigipresbe.repository.DealRepository;
 import com.kumouri.kmodigipresbe.service.ai.AiUsageRecorder;
 import com.kumouri.kmodigipresbe.service.quote.QuoteService;
 import org.springframework.beans.factory.annotation.Value;
@@ -78,6 +81,9 @@ public class ProposalsAutoConfiguration {
             AiUsageRecorder usageRecorder,
             QuoteService quoteService,
             SowDraftRepository sowDrafts,
+            ContactRepository contacts,
+            CompanyRepository companies,
+            DealRepository deals,
             DomainEventPublisher events,
             @Value("${kmosf.ai.anthropic.base-url:https://api.anthropic.com/v1/messages}") String baseUrl,
             @Value("${kmosf.ai.anthropic.house-key:}") String houseKey,
@@ -85,7 +91,7 @@ public class ProposalsAutoConfiguration {
             @Value("${kmosf.modules.proposals.max-notes-chars:8000}") int maxNotesChars,
             @Value("${kmosf.modules.proposals.draft-system-prompt:}") String systemPromptOverride) {
         return new ProposalDraftService(webClientBuilder, objectMapper, connections, usageRecorder,
-                quoteService, sowDrafts, events, baseUrl, houseKey, draftModel, maxNotesChars,
-                systemPromptOverride);
+                quoteService, sowDrafts, contacts, companies, deals, events, baseUrl, houseKey, draftModel,
+                maxNotesChars, systemPromptOverride);
     }
 }
