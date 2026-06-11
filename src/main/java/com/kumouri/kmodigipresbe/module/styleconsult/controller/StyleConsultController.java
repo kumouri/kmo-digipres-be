@@ -5,7 +5,7 @@ import com.kumouri.kmodigipresbe.extension.TenantModuleRegistry;
 import com.kumouri.kmodigipresbe.module.chairfill.ChairFillAutoConfiguration;
 import com.kumouri.kmodigipresbe.module.styleconsult.controller.dto.StyleConsultAnalytics;
 import com.kumouri.kmodigipresbe.module.styleconsult.controller.dto.StyleConsultInboxCard;
-import com.kumouri.kmodigipresbe.module.styleconsult.controller.dto.StyleConsultResponse;
+import com.kumouri.kmodigipresbe.module.styleconsult.controller.dto.StyleConsultStaffResponse;
 import com.kumouri.kmodigipresbe.module.styleconsult.repository.StyleConsultRepository;
 import com.kumouri.kmodigipresbe.module.styleconsult.service.StyleConsultAnalyticsService;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
@@ -28,8 +28,9 @@ import java.util.UUID;
  * <h2>Endpoints (under {@code spring.webflux.base-path=/api/v1})</h2>
  * <ul>
  *   <li>{@code GET /styleconsult/consults} → the inbox list ({@link StyleConsultInboxCard}, newest first).</li>
- *   <li>{@code GET /styleconsult/consults/{id}} → the full {@link StyleConsultResponse} detail
- *       (4455 if absent).</li>
+ *   <li>{@code GET /styleconsult/consults/{id}} → the full {@link StyleConsultStaffResponse} detail —
+ *       margin-bearing (staff-only; the prospect endpoints return the cost/margin-redacted
+ *       {@code StyleConsultResponse}, security fix AI-03) (4455 if absent).</li>
  *   <li>{@code GET /styleconsult/analytics} → the {@link StyleConsultAnalytics} retail-attach funnel.</li>
  * </ul>
  *
@@ -66,12 +67,12 @@ public class StyleConsultController {
     }
 
     @GetMapping("/consults/{id}")
-    public Mono<StyleConsultResponse> detail(@PathVariable UUID id) {
+    public Mono<StyleConsultStaffResponse> detail(@PathVariable UUID id) {
         return guard().then(TenantContextHolder.required())
                 .flatMap(ctx -> consults.findByTenantIdAndId(ctx.tenantId(), id)
                         .switchIfEmpty(Mono.error(() -> new DigiPresBeException(
                                 "Style consult not found", 4455, 404))))
-                .map(StyleConsultResponse::from);
+                .map(StyleConsultStaffResponse::from);
     }
 
     @GetMapping("/analytics")

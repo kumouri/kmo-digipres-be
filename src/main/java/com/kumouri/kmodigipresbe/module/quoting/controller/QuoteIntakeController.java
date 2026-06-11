@@ -54,6 +54,16 @@ public class QuoteIntakeController {
     /** The multipart part name for the (optional) photo. */
     public static final String IMAGE_PART = "image";
 
+    /**
+     * Security fix AI-02 — hard cap on the joined image bytes (15 MB; ample for a phone photo).
+     * {@link DataBufferUtils#join(org.reactivestreams.Publisher, int)} aborts with a
+     * {@link org.springframework.core.io.buffer.DataBufferLimitException} once the accumulated size
+     * would exceed this, BEFORE the whole body is materialized in heap — so an oversized / chunked
+     * upload is a bounded 413, not an OOM. Mirrors {@code MoleTriageController.MAX_IMAGE_BYTES};
+     * backstops the global {@code spring.codec.max-in-memory-size} ceiling.
+     */
+    static final int MAX_IMAGE_BYTES = 15 * 1024 * 1024;
+
     private final QuoteIntakeService intakeService;
 
     public QuoteIntakeController(QuoteIntakeService intakeService) {
@@ -100,9 +110,21 @@ public class QuoteIntakeController {
                 formValue(parts, "name"));
     }
 
+    /**
+     * Joins a {@link FilePart}'s content into a single {@code byte[]} (releases the buffer), capped at
+     * {@link #MAX_IMAGE_BYTES} (security fix AI-02). The bounded
+     * {@link DataBufferUtils#join(org.reactivestreams.Publisher, int)} aborts early on oversize; we map
+     * its {@link org.springframework.core.io.buffer.DataBufferLimitException} to a {@code 413}
+     * ({@code 4434} reused — the same image-rejection code family as the unsupported-media-type guard).
+     */
     private static Mono<byte[]> readBytes(FilePart filePart) {
-        return DataBufferUtils.join(filePart.content())
-                .map(QuoteIntakeController::toByteArray);
+        return DataBufferUtils.join(filePart.content(), MAX_IMAGE_BYTES)
+                .map(QuoteIntakeController::toByteArray)
+                .onErrorMap(
+                        org.springframework.core.io.buffer.DataBufferLimitException.class,
+                        ex -> new DigiPresBeException(
+                                "Uploaded image exceeds the " + (MAX_IMAGE_BYTES / (1024 * 1024))
+                                        + " MB limit", 4434, 413));
     }
 
     private static byte[] toByteArray(DataBuffer buffer) {

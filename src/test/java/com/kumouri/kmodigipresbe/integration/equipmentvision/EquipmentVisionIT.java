@@ -433,6 +433,27 @@ class EquipmentVisionIT {
     }
 
     // -------------------------------------------------------------------------
+    // Security fix AI-02 — oversized image → 413 (bounded join, not OOM), zero effect
+    // -------------------------------------------------------------------------
+
+    @Test
+    void oversizedImage_413_4213_zeroEffect() {
+        String token = issuePhotoToken();
+        // One byte over the controller's MAX_IMAGE_BYTES cap (15 MB) — see
+        // EquipmentPhotoController.MAX_IMAGE_BYTES (package-private).
+        byte[] tooBig = new byte[15 * 1024 * 1024 + 1];
+
+        postUpload(token, tooBig, "image/jpeg", "huge.jpg", Map.of("note", "x"))
+                .expectStatus().isEqualTo(413)
+                .expectBody().jsonPath("$.errorCode").isEqualTo(4213);
+
+        assertThat(mongo.findAll(Attachment.class).collectList().block()).isEmpty();
+        WorkOrder wo = mongo.findById(workOrderId, WorkOrder.class).block();
+        assertThat(wo.getCustomFields()).doesNotContainKey("equipmentMake");
+        assertThat(wireMock.getAllServeEvents()).isEmpty();
+    }
+
+    // -------------------------------------------------------------------------
     // Wrong widgetType token → 401/4210, zero effect
     // -------------------------------------------------------------------------
 

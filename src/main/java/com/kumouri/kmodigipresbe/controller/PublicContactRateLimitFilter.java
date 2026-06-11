@@ -34,6 +34,13 @@ import java.util.regex.Pattern;
  * {@code /public/widget/**}) are deliberately not affected — the path matcher only
  * triggers on lead-capture routes.
  *
+ * <p>Also throttled (security fix BE-11 + AI-01) are the unauthenticated public AI-vision /
+ * intake endpoints, each keyed by IP + the widget {@code {token}} segment rather than a tenant
+ * slug (the token <em>is</em> the per-widget discriminator): the mole-triage classify route
+ * ({@link #MOLE_TRIAGE_PATTERN}) and the five later analogues
+ * ({@link #PUBLIC_AI_INTAKE_PATTERN} — styleconsult/consult, stylermatch/match,
+ * home-services equipment-photo/upload, quoting/quote, mole-tripwire/report).
+ *
  * <p>Bucket storage is an in-process {@link ConcurrentHashMap}, which is fine for
  * a single-instance dev/prod-of-one deployment. TODO: replace with a Redis-backed
  * token bucket (or Bucket4j-with-redis) once we run multiple instances; the in-memory
@@ -63,6 +70,31 @@ public class PublicContactRateLimitFilter implements WebFilter {
      */
     private static final Pattern MOLE_TRIAGE_PATTERN =
             Pattern.compile("^/public/integrations/mole-triage/([^/]+)/classify/?$");
+
+    /**
+     * Security fix AI-01 — rate-limit the five later public AI-vision / intake analogues that never
+     * adopted the BE-11 throttle (the mole-<em>triage</em> control above was the only one). Each is an
+     * unauthenticated {@code /public/integrations/**} POST whose {@code {token}} widget token is
+     * embedded in public site HTML, so every one is an abuse surface (AI/vision monthly-budget burn,
+     * junk-lead flooding, photo-upload DoS alongside the AI-02 size cap). Covers, with the
+     * {@code {token}} segment captured as <strong>group 1</strong> (the prefix and the trailing action
+     * differ per route — verified against each controller's {@code @RequestMapping}+{@code @PostMapping}):
+     * <ul>
+     *   <li>{@code POST /public/integrations/styleconsult/{token}/consult}</li>
+     *   <li>{@code POST /public/integrations/stylermatch/{token}/match}</li>
+     *   <li>{@code POST /public/integrations/home-services/equipment-photo/{token}/upload}</li>
+     *   <li>{@code POST /public/integrations/quoting/{token}/quote}</li>
+     *   <li>{@code POST /public/integrations/mole-tripwire/{token}/report}</li>
+     * </ul>
+     * Keyed by IP + the {@code {token}} path segment (group 1) — exactly the {@link #MOLE_TRIAGE_PATTERN}
+     * approach — so each public widget throttles independently. A route-discriminator is folded into the
+     * bucket key so an attacker can't double an effective quota by alternating two of these routes under
+     * one token.
+     */
+    private static final Pattern PUBLIC_AI_INTAKE_PATTERN =
+            Pattern.compile("^/public/integrations/"
+                    + "(?:styleconsult|stylermatch|home-services/equipment-photo|quoting|mole-tripwire)"
+                    + "/([^/]+)/(?:consult|match|upload|quote|report)/?$");
 
     static final int MAX_REQUESTS = 10;
     static final int WINDOW_SECONDS = 60;
@@ -99,6 +131,13 @@ public class PublicContactRateLimitFilter implements WebFilter {
         var triage = MOLE_TRIAGE_PATTERN.matcher(path);
         if (triage.matches()) {
             return clientIp(request) + "|mole-triage|" + triage.group(1);
+        }
+        var aiIntake = PUBLIC_AI_INTAKE_PATTERN.matcher(path);
+        if (aiIntake.matches()) {
+            // Security fix AI-01 — bucket by IP + the widget token (group 1). All five AI-intake
+            // routes share one per-(IP, token) bucket on purpose: same abuse profile, and alternating
+            // routes must not multiply the effective quota.
+            return clientIp(request) + "|public-ai-intake|" + aiIntake.group(1);
         }
         return null;
     }
