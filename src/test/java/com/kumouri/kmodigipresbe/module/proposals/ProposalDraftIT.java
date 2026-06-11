@@ -6,6 +6,7 @@ import com.kumouri.kmodigipresbe.automation.DomainEvent;
 import com.kumouri.kmodigipresbe.automation.DomainEventPublisher;
 import com.kumouri.kmodigipresbe.automation.DomainEventType;
 import com.kumouri.kmodigipresbe.integration.IntegrationConnection;
+import com.kumouri.kmodigipresbe.model.contact.Contact;
 import com.kumouri.kmodigipresbe.model.quote.Quote;
 import com.kumouri.kmodigipresbe.model.tenant.Tenant;
 import com.kumouri.kmodigipresbe.model.user.User;
@@ -128,6 +129,7 @@ class ProposalDraftIT {
         mongo.remove(new Query(), Quote.class).block();
         mongo.remove(new Query(), SowDraft.class).block();
         mongo.remove(new Query(), IntegrationConnection.class).block();
+        mongo.remove(new Query(), Contact.class).block();
         mongo.remove(new Query(), User.class).block();
         mongo.remove(new Query(), Tenant.class).block();
 
@@ -158,7 +160,9 @@ class ProposalDraftIT {
                 + "\"assumptions\":\"Client provides timely feedback.\","
                 + "\"timeline\":\"Roughly eight weeks across two phases.\"}");
 
-        UUID contactId = UUID.randomUUID();
+        // AI-10: the contactId must be a real contact OF THIS TENANT (cross-tenant/unknown refs are now
+        // rejected before the Quote is created), so seed one and reference it.
+        UUID contactId = seedContact(tenantId);
         web.post().uri("/proposals/draft")
                 .header("Authorization", staffToken)
                 .header("Idempotency-Key", UUID.randomUUID().toString())
@@ -312,7 +316,41 @@ class ProposalDraftIT {
                 .expectBody().jsonPath("$.errorCode").isEqualTo(4620);
     }
 
+    // ── AI-10: a cross-tenant contactId is rejected (4622), and nothing is materialized ──
+
+    @Test
+    void draft_crossTenantContactId_4622_andNoQuoteCreated() {
+        // A contact that belongs to a DIFFERENT tenant — must not be attachable to this tenant's draft.
+        UUID otherTenant = UUID.randomUUID();
+        UUID foreignContact = seedContact(otherTenant);
+        stubReply("(should never be called — validation fails before the AI leg)");
+
+        web.post().uri("/proposals/draft")
+                .header("Authorization", staffToken)
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"notes\":\"Custom CRM build.\",\"contactId\":\"" + foreignContact + "\"}")
+                .exchange()
+                .expectStatus().isNotFound()
+                .expectBody().jsonPath("$.errorCode").isEqualTo(4622);
+
+        // Nothing was materialized for the caller's tenant — the FK validation runs before Quote create.
+        Quote quote = mongo.findOne(new Query(Criteria.where("tenantId").is(tenantId)), Quote.class).block();
+        assertThat(quote).isNull();
+        SowDraft sow = mongo.findOne(new Query(Criteria.where("tenantId").is(tenantId)), SowDraft.class).block();
+        assertThat(sow).isNull();
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    private UUID seedContact(UUID tid) {
+        UUID id = UUID.randomUUID();
+        mongo.save(Contact.builder()
+                .id(id).tenantId(tid)
+                .firstName("Pat").lastName("Client").displayName("Pat Client")
+                .build()).block();
+        return id;
+    }
 
     private void stubReply(String replyText) {
         wireMock.stubFor(post(urlPathEqualTo("/"))

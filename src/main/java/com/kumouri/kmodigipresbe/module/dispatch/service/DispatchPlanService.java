@@ -142,11 +142,45 @@ public class DispatchPlanService {
                     if (Objects.equals(wo.getTechnicianUserId(), d.techUserId())) {
                         return Mono.just(Boolean.FALSE);
                     }
-                    WorkOrder patch = new WorkOrder();
-                    patch.setTechnicianUserId(d.techUserId());
-                    return workOrders.update(d.workOrderId(), patch).thenReturn(Boolean.TRUE);
+                    // AI-07: validate the assignee before writing it. A non-null techUserId must be a real,
+                    // ACTIVE, STAFF user OF THE CALLER'S TENANT — the exact set hydrate() draws candidates
+                    // from for optimize (findAllByTenantIdAndPortal(STAFF) filtered to ACTIVE; contractors
+                    // are STAFF-portal users). A null techUserId is a legitimate "clear assignment" and is
+                    // left to fall through. Reject a foreign-tenant / inactive / unknown id with 4524 so a
+                    // crafted apply can't pin a work order to a garbage or cross-tenant user.
+                    return validateAssignee(d.techUserId())
+                            .then(Mono.defer(() -> {
+                                WorkOrder patch = new WorkOrder();
+                                patch.setTechnicianUserId(d.techUserId());
+                                return workOrders.update(d.workOrderId(), patch).thenReturn(Boolean.TRUE);
+                            }));
                 })
                 .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /**
+     * AI-07 assignee validation. {@code techUserId == null} (clear the assignment) passes through. Otherwise
+     * the id must resolve via the tenant-scoped {@link UserRepository#findById} (a foreign-tenant id returns
+     * empty under {@code TenantScopedSimpleReactiveMongoRepository}) to an {@code ACTIVE} {@code STAFF}-portal
+     * user — the same membership the optimizer's candidate set requires. Anything else → {@code 4524}/422.
+     */
+    private Mono<Void> validateAssignee(UUID techUserId) {
+        if (techUserId == null) {
+            return Mono.empty();
+        }
+        return users.findById(techUserId)
+                .switchIfEmpty(Mono.error(() -> new DigiPresBeException(
+                        "Assignee " + techUserId + " is not a user of this tenant", 4524, 422)))
+                .flatMap(user -> {
+                    boolean active = user.getStatus() == User.UserStatus.ACTIVE;
+                    boolean staff = user.getPortal() == User.Portal.STAFF;
+                    if (!active || !staff) {
+                        return Mono.error(new DigiPresBeException(
+                                "Assignee " + techUserId + " is not an active staff/contractor of this "
+                                        + "tenant — cannot assign", 4524, 422));
+                    }
+                    return Mono.empty();
+                });
     }
 
     // ── data loading (the board's read shape, reused) ───────────────────────────────

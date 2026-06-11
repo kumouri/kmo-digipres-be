@@ -838,7 +838,12 @@ import java.util.UUID;
  *       {@code @ConditionalOnProperty} gate also makes the routes absent (404) when the deployment flag is
  *       off — defense in depth);
  *       {@code 4621} invalid draft request — blank {@code notes} or {@code notes} longer than
- *       {@code kmosf.modules.proposals.max-notes-chars} (default 8000) (400). The band {@code 4622-4639}
+ *       {@code kmosf.modules.proposals.max-notes-chars} (default 8000) (400);
+ *       {@code 4622}/{@code 4623}/{@code 4624} a cross-tenant / unknown {@code contactId} / {@code companyId} /
+ *       {@code dealId} on the draft request (404 each — AI-10: a non-null client/deal ref is resolved against
+ *       the caller's tenant via {@code findByTenantIdAndId} BEFORE it is attached to the DRAFT {@code Quote},
+ *       so a DRAFT quote never carries a foreign-tenant FK; the validation runs before any Quote is created,
+ *       so a bad ref materializes nothing). The band {@code 4625-4639}
  *       is RESERVED for proposals growth (SOW-3 send-to-sign reuses the existing {@code ContractService} /
  *       Documenso {@code 37xx} codes; SOW PDF reuses the existing {@code QuotePdfService} — no new codes).
  *       Reused (NOT re-allocated): {@code 1200}-{@code 1203} (AI budget / Anthropic upstream / missing-key
@@ -1407,7 +1412,11 @@ import java.util.UUID;
  *       an unknown id); {@code 4521} invalid optimize/analytics request — {@code date} missing/invalid (400);
  *       {@code 4522} invalid apply request — null/empty decisions, or a decision missing a {@code workOrderId}
  *       (400); {@code 4523} apply decision references a work order not in an assignable state — terminal
- *       COMPLETED/CANCELLED (409, explicit-boolean — can't reassign a closed job). {@code 4524-4559}
+ *       COMPLETED/CANCELLED (409, explicit-boolean — can't reassign a closed job); {@code 4524} apply decision
+ *       references an invalid assignee (422 — AI-07: a non-null {@code techUserId} that is not an ACTIVE
+ *       STAFF/contractor user of the caller's tenant; a foreign-tenant / inactive / unknown id is rejected
+ *       before the {@code technicianUserId} write, so a crafted apply can't pin a work order to a garbage or
+ *       cross-tenant user; a null {@code techUserId} = clear the assignment, allowed). {@code 4525-4559}
  *       RESERVED (the widest band — dispatch optimization has many future failure modes: multi-day windows,
  *       hard time-window constraints, skill-certification gates, a real routing-API travel model). Reused
  *       (NOT re-allocated): {@code 1130}/{@code 1132} module gate via {@code requireEnabled("dispatch")};

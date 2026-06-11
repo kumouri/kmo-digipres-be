@@ -10,6 +10,9 @@ import com.kumouri.kmodigipresbe.integration.IntegrationConnection;
 import com.kumouri.kmodigipresbe.integration.IntegrationConnectionRepository;
 import com.kumouri.kmodigipresbe.model.quote.LineItem;
 import com.kumouri.kmodigipresbe.model.quote.Quote;
+import com.kumouri.kmodigipresbe.repository.CompanyRepository;
+import com.kumouri.kmodigipresbe.repository.ContactRepository;
+import com.kumouri.kmodigipresbe.repository.DealRepository;
 import com.kumouri.kmodigipresbe.service.ai.AiUsageRecorder;
 import com.kumouri.kmodigipresbe.service.quote.QuoteService;
 import com.kumouri.kmodigipresbe.tenancy.TenantContextHolder;
@@ -104,6 +107,9 @@ public class ProposalDraftService {
     private final AiUsageRecorder usageRecorder;
     private final QuoteService quoteService;
     private final SowDraftRepository sowDrafts;
+    private final ContactRepository contacts;
+    private final CompanyRepository companies;
+    private final DealRepository deals;
     private final DomainEventPublisher events;
     private final String houseKey;
     private final String draftModel;
@@ -117,6 +123,9 @@ public class ProposalDraftService {
             AiUsageRecorder usageRecorder,
             QuoteService quoteService,
             SowDraftRepository sowDrafts,
+            ContactRepository contacts,
+            CompanyRepository companies,
+            DealRepository deals,
             DomainEventPublisher events,
             String baseUrl,
             String houseKey,
@@ -129,6 +138,9 @@ public class ProposalDraftService {
         this.usageRecorder = usageRecorder;
         this.quoteService = quoteService;
         this.sowDrafts = sowDrafts;
+        this.contacts = contacts;
+        this.companies = companies;
+        this.deals = deals;
         this.events = events;
         this.houseKey = houseKey == null ? "" : houseKey;
         this.draftModel = draftModel;
@@ -358,35 +370,69 @@ public class ProposalDraftService {
 
     private Mono<DraftResult> materialize(ParsedSow parsed, UUID contactId, UUID companyId,
                                           UUID dealId, String currency) {
-        return TenantContextHolder.required().flatMap(ctx -> {
-            Quote toCreate = Quote.builder()
-                    .contactId(contactId)
-                    .companyId(companyId)
-                    .dealId(dealId)
-                    .lineItems(parsed.lineItems())
-                    .build();
-            if (currency != null && !currency.isBlank()) {
-                toCreate.setCurrency(currency.trim());
-            }
-            // QuoteService.create is UNCHANGED — it nulls the id, stamps statusChangedAt, runs
-            // computeTotals (prices the line items), and saves a DRAFT. Never finalized.
-            return quoteService.create(toCreate)
-                    .flatMap(quote -> {
-                        SowDraft sow = SowDraft.builder()
-                                .id(UUID.randomUUID())
-                                .tenantId(ctx.tenantId())
-                                .quoteId(quote.getId())
-                                .scope(parsed.scope())
-                                .deliverables(parsed.deliverables())
-                                .assumptions(parsed.assumptions())
-                                .timeline(parsed.timeline())
-                                .aiApplied(parsed.aiApplied())
-                                .build();
-                        return sowDrafts.save(sow)
-                                .doOnSuccess(saved -> publishDrafted(ctx.tenantId(), quote, contactId, parsed))
-                                .map(saved -> new DraftResult(quote, saved));
-                    });
-        });
+        return TenantContextHolder.required().flatMap(ctx ->
+                validateRefs(ctx.tenantId(), contactId, companyId, dealId)
+                        .then(Mono.defer(() -> doMaterialize(
+                                ctx.tenantId(), parsed, contactId, companyId, dealId, currency))));
+    }
+
+    /**
+     * AI-10: resolve any non-null {@code contactId} / {@code companyId} / {@code dealId} against the caller's
+     * tenant before attaching it to the DRAFT {@link Quote}. A ref that isn't the caller tenant's (or doesn't
+     * exist) is rejected — a DRAFT quote must never carry a cross-tenant FK. The codebase's tenant-owned-ref
+     * convention is a tenant-scoped {@code findByTenantIdAndId} + {@code switchIfEmpty(not-found)} (the
+     * {@code ContactCrudService} / {@code DealCrudService} posture); here the not-found surfaces in the
+     * proposals band ({@code 4622}/{@code 4623}/{@code 4624}, all 404). A null ref is skipped (the fields are
+     * optional). Runs before any Quote is created so a bad ref creates nothing.
+     */
+    private Mono<Void> validateRefs(UUID tenantId, UUID contactId, UUID companyId, UUID dealId) {
+        Mono<Void> checkContact = contactId == null ? Mono.empty()
+                : contacts.findByTenantIdAndId(tenantId, contactId)
+                        .switchIfEmpty(Mono.error(() -> new DigiPresBeException(
+                                "Contact " + contactId + " not found for this tenant", 4622, 404)))
+                        .then();
+        Mono<Void> checkCompany = companyId == null ? Mono.empty()
+                : companies.findByTenantIdAndId(tenantId, companyId)
+                        .switchIfEmpty(Mono.error(() -> new DigiPresBeException(
+                                "Company " + companyId + " not found for this tenant", 4623, 404)))
+                        .then();
+        Mono<Void> checkDeal = dealId == null ? Mono.empty()
+                : deals.findByTenantIdAndId(tenantId, dealId)
+                        .switchIfEmpty(Mono.error(() -> new DigiPresBeException(
+                                "Deal " + dealId + " not found for this tenant", 4624, 404)))
+                        .then();
+        return checkContact.then(checkCompany).then(checkDeal);
+    }
+
+    private Mono<DraftResult> doMaterialize(UUID tenantId, ParsedSow parsed, UUID contactId, UUID companyId,
+                                            UUID dealId, String currency) {
+        Quote toCreate = Quote.builder()
+                .contactId(contactId)
+                .companyId(companyId)
+                .dealId(dealId)
+                .lineItems(parsed.lineItems())
+                .build();
+        if (currency != null && !currency.isBlank()) {
+            toCreate.setCurrency(currency.trim());
+        }
+        // QuoteService.create is UNCHANGED — it nulls the id, stamps statusChangedAt, runs
+        // computeTotals (prices the line items), and saves a DRAFT. Never finalized.
+        return quoteService.create(toCreate)
+                .flatMap(quote -> {
+                    SowDraft sow = SowDraft.builder()
+                            .id(UUID.randomUUID())
+                            .tenantId(tenantId)
+                            .quoteId(quote.getId())
+                            .scope(parsed.scope())
+                            .deliverables(parsed.deliverables())
+                            .assumptions(parsed.assumptions())
+                            .timeline(parsed.timeline())
+                            .aiApplied(parsed.aiApplied())
+                            .build();
+                    return sowDrafts.save(sow)
+                            .doOnSuccess(saved -> publishDrafted(tenantId, quote, contactId, parsed))
+                            .map(saved -> new DraftResult(quote, saved));
+                });
     }
 
     private void publishDrafted(UUID tenantId, Quote quote, UUID contactId, ParsedSow parsed) {
