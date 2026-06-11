@@ -105,10 +105,14 @@ public class TechCopilotAutoConfiguration {
             TechQueryRepository queries,
             DomainEventPublisher events,
             @Value("${kmosf.techcopilot.retrieval-top-k:8}") int retrievalTopK,
+            // AI-08: minimum similarity score a retrieved chunk must clear to ground an answer. Default 0.0
+            // = OFF (opt-in) so existing grounding behavior is byte-unchanged; raise it (e.g. on a normalized
+            // cosine index) to drop low-relevance hits → the no-chunks handoff rather than a mis-cited answer.
+            @Value("${kmosf.techcopilot.min-score:0.0}") double minScore,
             @Value("${kmosf.techcopilot.handoff-message:I don't have that documented in the manuals on "
                     + "file. Check the OEM manual for this unit, or escalate to a senior tech.}")
             String handoffMessage) {
         return new TechCopilotService(retrieval, answerService, queries, events,
-                retrievalTopK, handoffMessage);
+                retrievalTopK, minScore, handoffMessage);
     }
 }

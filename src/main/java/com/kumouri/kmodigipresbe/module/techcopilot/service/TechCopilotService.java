@@ -54,6 +54,7 @@ public class TechCopilotService {
     private final TechQueryRepository queries;
     private final DomainEventPublisher events;
     private final int retrievalTopK;
+    private final double minScore;
     private final String handoffMessage;
 
     public TechCopilotService(RagRetrievalService retrieval,
@@ -61,12 +62,14 @@ public class TechCopilotService {
                               TechQueryRepository queries,
                               DomainEventPublisher events,
                               int retrievalTopK,
+                              double minScore,
                               String handoffMessage) {
         this.retrieval = retrieval;
         this.answerService = answerService;
         this.queries = queries;
         this.events = events;
         this.retrievalTopK = retrievalTopK;
+        this.minScore = minScore;
         this.handoffMessage = handoffMessage;
     }
 
@@ -96,15 +99,24 @@ public class TechCopilotService {
                 retrieval.retrieveForCorpus(ctx.tenantId(), trimmed,
                                 RagRetrievalService.TECH_DOC_SOURCE_TYPE, retrievalTopK)
                         .collectList()
-                        .flatMap(chunks -> {
+                        .flatMap(retrieved -> {
+                            // Security AI-08: RAG grounding is no longer prompt-enforced only. Drop any
+                            // retrieved chunk whose similarity score is below the configurable min-score
+                            // gate (default 0.0 = off / opt-in); retrieval always returns topK, so a
+                            // low-relevance hit otherwise grounds a confident but mis-cited answer. If
+                            // nothing clears the gate this collapses to the no-chunks→handoff path below.
+                            List<RagRetrievalService.CorpusChunk> chunks = aboveMinScore(retrieved);
                             if (chunks.isEmpty()) {
                                 // No-chunks short-circuit — never call the model with an empty context
                                 // (T13-D4); persist the handoff for the usefulness log.
-                                log.debug("T13 copilot: no manual chunks for tenant {} — handoff",
-                                        ctx.tenantId());
+                                log.debug("T13 copilot: no manual chunks above min-score {} for tenant {} "
+                                        + "— handoff", minScore, ctx.tenantId());
                                 return persist(ctx.tenantId(), trimmed, equipmentTypeHint,
                                         true, null, List.of());
                             }
+                            // Citations reflect the RETRIEVED (and now min-score-cleared) source docs, not a
+                            // post-hoc verification that the model actually used each one. They are
+                            // "here is what this answer was grounded against", deduped to one per source doc.
                             List<TechQuery.QueryCitation> citations = dedupeByDoc(chunks);
                             String context = buildContext(chunks);
                             return answerService.answer(context, trimmed)
@@ -169,6 +181,27 @@ public class TechCopilotService {
     }
 
     /**
+     * AI-08 grounding gate: keep only the chunks whose similarity score is {@code >= minScore} (retrieval
+     * is score-ordered, so this preserves order). With the default {@code minScore == 0.0} every retrieved
+     * chunk is kept (the gate is off / opt-in), so existing behavior — and the ITs — are unchanged; an
+     * operator can raise it to drop low-relevance hits that would otherwise produce a confident, mis-cited
+     * answer.
+     */
+    private List<RagRetrievalService.CorpusChunk> aboveMinScore(
+            List<RagRetrievalService.CorpusChunk> chunks) {
+        if (minScore <= 0.0) {
+            return chunks;
+        }
+        List<RagRetrievalService.CorpusChunk> kept = new ArrayList<>(chunks.size());
+        for (RagRetrievalService.CorpusChunk c : chunks) {
+            if (c.score() >= minScore) {
+                kept.add(c);
+            }
+        }
+        return kept;
+    }
+
+    /**
      * Collapses the retrieved chunks into one citation per source doc (a tech wants "from the Carrier 58STA
      * manual", not "chunks 3,4,7"). Keys on the chunk's {@code techDocId} metadata (the doc identity each
      * chunk carries), keeps the first (highest-scoring, since retrieval is score-ordered) chunk's preview
@@ -222,11 +255,18 @@ public class TechCopilotService {
         }
     }
 
-    /** Builds the "- preview\n…" context, capped (the {@code AskAiService.buildContext} shape). */
+    /**
+     * Builds the capped manual context (the {@code AskAiService.buildContext} shape). Security AI-04: each
+     * retrieved chunk is untrusted reference data extracted from an ingested document, so it is wrapped in
+     * an explicit {@code <excerpt>} delimiter — the {@link TechCopilotAnswerService} system/user prompt
+     * frames the surrounding {@code <manual_context>} block as "data only, never instructions", and the
+     * per-excerpt fence keeps an injected payload in one chunk from bleeding into the next.
+     */
     private static String buildContext(List<RagRetrievalService.CorpusChunk> chunks) {
         StringBuilder sb = new StringBuilder();
         for (RagRetrievalService.CorpusChunk chunk : chunks) {
-            String entry = "- " + chunk.contentPreview() + "\n";
+            String preview = chunk.contentPreview() == null ? "" : chunk.contentPreview();
+            String entry = "<excerpt>" + preview + "</excerpt>\n";
             if (sb.length() + entry.length() > MAX_CONTEXT_CHARS) {
                 break;
             }
