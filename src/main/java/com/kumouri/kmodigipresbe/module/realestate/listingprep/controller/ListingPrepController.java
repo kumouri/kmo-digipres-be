@@ -1,6 +1,7 @@
 package com.kumouri.kmodigipresbe.module.realestate.listingprep.controller;
 
 import com.kumouri.kmodigipresbe.extension.TenantModuleRegistry;
+import com.kumouri.kmodigipresbe.model.idempotency.IdempotentRoute;
 import com.kumouri.kmodigipresbe.module.realestate.RealEstateAutoConfiguration;
 import com.kumouri.kmodigipresbe.module.realestate.listingprep.ListingPrepService;
 import com.kumouri.kmodigipresbe.module.realestate.listingprep.model.ListingPrepPack;
@@ -54,8 +55,16 @@ public class ListingPrepController {
      * + safe-substituted), and persists a DRAFTED {@link ListingPrepPack} (never auto-published). Best-effort:
      * a Claude/vision failure yields a partial/degraded DRAFTED pack, never an error. A missing/not-owned
      * listing → {@code 4253}/404. The body is optional ({@code startDate} / {@code postsPerWeek} both nullable).
+     *
+     * <p><strong>{@link IdempotentRoute} (AI-09).</strong> Generation fires a real external effect — an
+     * Anthropic vision + copy spend and a persisted pack — so a retry / double-click would otherwise charge a
+     * second full AI spend and duplicate the pack. The {@code Idempotency-Key} header makes a retried call
+     * replay the stored response instead of re-firing the AI chain (the {@code POST /proposals/draft}
+     * precedent — a draft is re-invocable at the domain level, so request-level exactly-once is the
+     * {@code @IdempotentRoute} header, not a find-or-create ledger). A missing key → {@code 3100}/400.
      */
     @PostMapping("/realestate/listings/{listingId}/prep/generate")
+    @IdempotentRoute
     public Mono<ListingPrepPack> generate(@PathVariable UUID listingId,
                                           @RequestBody(required = false) ListingPrepGenerateRequest body) {
         ListingPrepGenerateRequest req = body != null ? body : new ListingPrepGenerateRequest(null, null);
