@@ -133,4 +133,4 @@ Both recommendations **honor the locked decisions** rather than amend them:
 - `src/main/java/com/kumouri/kmodigipresbe/config/MongoConfig.java`
 - `src/main/java/com/kumouri/kmodigipresbe/controller/TenantBootstrapController.java` · `service/TenantBootstrapService.java`
 - `src/main/resources/application.properties` · `compose.yaml` · `build.gradle`
-- Strategy: `C:\Users\willa\.claude\plans\ultraplan-research-back-office-iridescent-wilkes.md` (§2, §6 Phase I, §8 D2)
+- Strategy: `<home>\.claude\plans\ultraplan-research-back-office-iridescent-wilkes.md` (§2, §6 Phase I, §8 D2)
